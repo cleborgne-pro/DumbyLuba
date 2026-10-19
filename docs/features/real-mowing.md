@@ -126,6 +126,9 @@ leave, the safe corridor:
 1. STOP, blades stopped, physical stop confirmed by two positions.
 2. **Straight-line back-off** along the trail the robot just covered, heading unchanged, blades stopped, to the first
    point (10 cm to 1 m) where the chassis is entirely back inside the zone. No back-off if the chassis stayed inside.
+   If no point of the trail behind the robot brings the chassis back inside (typically after a pivot: the trail is
+   then ahead of the robot), the robot first moves **straight ahead**, blades stopped, provided this only moves its
+   chassis away from the border (1.1.5).
 3. **Link with blades stopped** back to the route, level with the interrupted spot; if that would bring the robot
    right up against the border (15 cm tracking tolerance, next metre included), it rejoins the route up to 4 m
    further on.
@@ -133,8 +136,8 @@ leave, the safe corridor:
 
 A new exit less than 1 m from the previous one rejoins the route 1 m further each time. The stop is kept on the 4th
 consecutive exit at the same place (passage too narrow: widen the zone or mark it as a no-go), after 30 resumes in
-the mission, if the chassis cannot get back in by reversing along its trail, or for a drift into the base safety
-zone.
+the mission, if the chassis can get back in neither by reversing along its trail nor by moving straight ahead, or
+for a drift into the base safety zone.
 
 Robot inside the reserve of an obstacle already being bypassed (pivot or skid near an obstacle, for example in front
 of the base): same resume. The link starts with a **straight-line clearance** checked against the physical radius of
@@ -151,7 +154,10 @@ mowing:
 1. the mission **waits** for the robot to clear its protection by itself (ready or manual state, self-check 0 or 10)
    and checks that it is **stable for 3 s**;
 2. it resumes via the same link as after leaving the trajectory, **without skipping any cutting**
-   (`route_protection_pause` then `route_protection_cleared` events).
+   (`route_protection_pause` then `route_protection_cleared` events). On Oct 19 at 14:50, a collision lock (25)
+   without a contact code appeared during a 150° pivot that had slid the robot 24 cm towards the border; once it
+   cleared, the resume was refused ("Back-off impossible: chassis outside the zone along the whole trail") because
+   the trail was ahead of the robot. Since 1.1.5 the resume leaves straight ahead in that case.
 
 The stop is kept if the protection lasts more than **30 s**, if it is the lock after STOP (self-check 11, to be
 unlocked) or the Mammotion app's working hours (self-check 23), for any other robot state, or after **5 pauses** in

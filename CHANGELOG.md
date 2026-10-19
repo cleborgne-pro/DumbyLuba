@@ -344,3 +344,13 @@ heading: beyond 8° of error, the robot pivots in place back towards its line, t
 still exceeds 12 cm no longer stops the mowing: the robot is brought back like after a trajectory exit. A robot
 whose chassis overlaps a border can leave straight ahead when this only moves it away from the border (start,
 resume, Fold and gateway tracking).
+
+Version 1.1.5 (166): **automatic resume next to a border after a pivot**. On Oct 19 at 14:50 in Fosse, the robot
+published the collision lock (state 20, protection 25) on a single report during a 150° pivot at the end of a pass,
+which had slid it 24 cm towards the border; no contact code followed and the protection cleared after 3 s. The
+automatic resume then stopped the mowing with "Back-off impossible: chassis outside the zone along the whole trail
+within 100 cm behind the robot": after the pivot, the travelled trail was ahead of the robot, and the straight escape
+ahead added in 1.1.4 was only used by the manual "Resume" (which did leave from the same pose with a 30 cm escape).
+The automatic resume after a trajectory exit or a protection (`DriftRecovery`, Fold, and the obstacle simulation)
+now falls back on that straight escape ahead when no back-off along the trail brings the chassis back inside; the
+link must start with the escape, which is only accepted if it moves the chassis away from the border.

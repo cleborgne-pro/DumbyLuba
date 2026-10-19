@@ -192,6 +192,10 @@ the margin (0.5 + 0.43 > 0.87 m): refused, whatever the heading. Physically, the
   other than what the start footprint already covers (20 cm² tolerance), the rest of the translation being free;
   tracking (Fold and gateway) applies the same rule on escape edges. Oct 19, Fosse: robot stopped 15 cm from the
   border, "Resume" refused twice ("Link unreachable: Fosse → Fosse"); test `StuckNearBorderResumeTest`.
+  Automatic resume after a trajectory exit or a protection (1.1.5, `DriftRecovery.plan`): when no back-off along the
+  trail brings the chassis back inside, the current pose is tried last, and only a link starting with this escape is
+  accepted. Oct 19 at 14:50, Fosse: protection 25 during a 150° pivot, trail ahead of the robot, mowing stopped with
+  "Back-off impossible"; test `ProtectionAfterPivotResumeTest`.
 - Obstacles suggested on contact: placed with the fused heading when it is confirmed by
   movement (the published heading could be wrong by 80–90°).
 - Test `RouteDepartureEscapeTest`: reference map + real obstacles from the Fold; refusal reproduced

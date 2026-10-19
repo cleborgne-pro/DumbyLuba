@@ -16,7 +16,7 @@ class RouteDrift(val index: Int, message: String) : IllegalStateException(messag
 
 /** Prepared resume: optional back-off (heading unchanged), then the remaining route starting with a blades-OFF link. */
 data class DriftPlan(
-    /** Point to reach in reverse first, or null (robot already inside the safe surface). */
+    /** Point to reach in reverse first, or null (robot already inside the safe surface, or straight escape ahead first). */
     val backOff: Point?,
     /** Blades-OFF link up to the route, then the rest of the route; [origins]: original edge (-1: link). */
     val edges: List<SimEdge>, val origins: List<Int>,
@@ -122,7 +122,8 @@ object DriftRecovery {
     }
 
     /**
-     * Resume after an exit at edge [index] of [path]: optional back-off ([starts]) then a blades-OFF link
+     * Resume after an exit at edge [index] of [path]: optional back-off ([starts]), or as a last resort for a chassis
+     * overlapping an edge a straight escape ahead, then a blades-OFF link
      * ([RobotRoute.departure], optional escape included) up to the projection of the start on the interrupted edge,
      * advanced by [skipM] then by the [ENTRY_OFFSETS_M] as long as the link fails; the rest of the route is unchanged.
      * First a link keeping the tracking tolerance up to the entry pivot and over [LOOKAHEAD_M] after it, so as not to
@@ -133,12 +134,16 @@ object DriftRecovery {
         require(index in path.indices) { tr("Interrupted edge outside the route", "Arête interrompue hors trajet") }
         require(origins == null || origins.size == path.size)
         require(position.x.isFinite() && position.y.isFinite() && headingDegrees.isFinite()) { tr("Invalid robot pose", "Pose du robot invalide") }
-        val starts = starts(physical, position, headingDegrees, trail)
-        require(starts.isNotEmpty()) {
-            if (trail.isEmpty()) tr("Back-off impossible: robot trail missing", "Recul impossible : trace du robot absente")
+        val inside = bodyInside(physical, position, headingDegrees)
+        // Chassis overlapping an edge: last resort, the straight escape ahead from the current pose ([RobotRoute.escapePoint],
+        // only if it moves the chassis away from the edge). 2026-10-19 at 14:50, Fosse: self-check 25 during a 150° pivot
+        // with a slide towards the border; after the pivot the trail was ahead of the robot, no back-off was possible and
+        // the mowing stopped, while the manual resume from the same pose left with a 30 cm escape ahead.
+        val starts = starts(physical, position, headingDegrees, trail).let { if (inside) it else it + null }
+        fun noStart() = (if (trail.isEmpty()) tr("Back-off impossible: robot trail missing", "Recul impossible : trace du robot absente")
             else tr("Back-off impossible: chassis outside the zone along the whole trail within %.0f cm behind the robot",
-                "Recul impossible : châssis hors de la zone sur toute la trace à moins de %.0f cm derrière le robot").format(MAX_BACK_OFF_M * 100)
-        }
+                "Recul impossible : châssis hors de la zone sur toute la trace à moins de %.0f cm derrière le robot").format(MAX_BACK_OFF_M * 100)) +
+            tr(", no straight escape ahead", ", pas d'échappement droit devant")
         val current = path[index]
         val dx = current.b.x - current.a.x; val dy = current.b.y - current.a.y
         val l2 = dx * dx + dy * dy
@@ -163,6 +168,8 @@ object DriftRecovery {
                 val entry = Point(e.a.x + (e.b.x - e.a.x) * t, e.a.y + (e.b.y - e.a.y) * t)
                 val link = try { RobotRoute.departure(routes, physical, start, headingDegrees, entry, headingOf(e)) }
                     catch (error: IllegalArgumentException) { failure = error; continue }
+                // Chassis overlapping an edge: never a pivot or a link that does not start with the escape.
+                if (backOff == null && !inside && link.firstOrNull()?.escape != true) continue
                 if (strict && !(ObstacleBypass.followTolerant(routes, link, start, headingDegrees, headingOf(e)) &&
                         ahead(routes, path, entryIndex, entry))) continue
                 val rest = listOf(e.copy(a = entry)) + path.drop(entryIndex + 1)
@@ -174,6 +181,7 @@ object DriftRecovery {
                 return DriftPlan(backOff, edges, link.map { -1 } + restOrigins, link.sumOf { it.meters }, skipped.coerceAtLeast(0.0))
             }
         }
+        if (!inside && starts.size == 1) throw IllegalArgumentException(noStart() + (failure?.message?.let { " ($it)" } ?: ""))
         throw IllegalArgumentException(tr("No safe link to rejoin the route", "Aucun raccord sûr pour rejoindre le trajet") + (failure?.message?.let { " ($it)" } ?: ""))
     }
 }
