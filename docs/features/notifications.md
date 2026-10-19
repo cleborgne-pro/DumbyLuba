@@ -32,6 +32,7 @@ Mammotion cloud.
 | **Automatic resume failed** | interruption during recharging or resume (critical); resume impossible after a gateway update or a gateway loss during recharging (warning) | critical or warning |
 | **Error reported by the robot** | code classified as warning or stop ([error codes](safety.md#robot-error-codes)); critical when a stop code interrupts a moving activity without another alert | warning or critical |
 | **Low gateway battery** | control through the gateway, health report less than 60 s old, gateway phone not plugged in: ≤ 24 %, then ≤ 14 % (hysteresis up to 27 % / 17 %); cleared once plugged in | warning then critical |
+| **Gateway fell off the robot** | autonomous tracking by the gateway: its Bluetooth signal to the robot drops 15 dB below its usual level while the robot drives away from where it was last normal ([gateway](gateway.md#autonomous-tracking-android-gateway)); the robot is stopped, the alert gives the phone's position and a marker shows it on the map | critical |
 | **Gateway disconnected** | Wi-Fi tunnel to the gateway silent for 2 s or cut; one alert until telemetry comes back | critical if the robot was moving, otherwise warning |
 | **Rain during mowing** | during a mowing or route, with weather monitoring on and a garden location set: rain observed, imminent or recent, or forecast within 30 min ([weather](rain-and-weather.md)); no command is sent to the robot | warning |
 | **Link restored** | telemetry received again after a loss | info |

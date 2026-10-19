@@ -364,3 +364,14 @@ and holes of more than 15 s in the received positions (Wi-Fi or link lost). A mo
 be compared with the same zone tracked from the Fold. Simulated reference mowing: median 1 cm, 95 % 12 cm, max 29 cm.
 See [mowing history](docs/features/mowing-history.md#route-tracking-quality-since-120) and
 [autonomous gateway](docs/AUTONOMOUS_GATEWAY.md#to-validate-on-the-robot).
+
+Version 1.3.0 (168): **gateway fallen off the robot detected, robot stopped, alert with the phone's position**. During
+autonomous tracking, the gateway reads its Bluetooth signal to the robot every second. Lying on the robot it is strong
+and steady (−24 dBm); fallen on the lawn it fades as the robot drives away. Three readings 15 dB below the learned
+level with the robot at least 1.5 m from where the signal was last normal stop the robot (blades OFF, zero speed),
+before it comes back over the phone with its blades. The pilot raises a critical **Gateway fell off the robot** alert
+with the position where the phone most likely lies and shows a **Gateway** marker on the map. A Bluetooth loss
+while the signal was already falling gives the same alert marked "probably". The usual level is only learned while
+the robot drives 3 m with a steady signal of −50 dBm or better, so a phone left on the ground on purpose is never
+taken for a fall. See [gateway](docs/features/gateway.md#autonomous-tracking-android-gateway) and
+[technical detail](docs/AUTONOMOUS_GATEWAY.md#gateway-fallen-off-the-robot-130).

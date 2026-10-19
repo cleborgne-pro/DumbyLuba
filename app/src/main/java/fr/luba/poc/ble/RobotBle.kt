@@ -152,11 +152,20 @@ fun RobotUi.withMammotionMap(raw: RobotMap, corrections: List<MapCorrection> = m
     val taskDetail: String? = null,
     /** Difficulties encountered (contacts, blockages, wheel slip, lifts…), presumed obstacles and settings. */
     val difficulties: fr.luba.poc.difficulty.DifficultyUi = fr.luba.poc.difficulty.DifficultyUi(),
+    /** Gateway phone fallen off the robot, detected by the gateway from its Bluetooth signal: where to pick it up. */
+    val gatewayDrop: GatewayDrop? = null,
 ) {
     /** Obstacles taken into account by route preparation: saved ones, plus presumed obstacles when the option is on. */
     val planningObstacles: List<LocalObstacle> get() =
         if (difficulties.avoidPresumed && difficulties.presumed.isNotEmpty()) obstacles + difficulties.presumed else obstacles
 }
+
+/**
+ * Gateway phone fallen off the robot ([fr.luba.poc.autonomy.GatewayDetachment]): [x], [y] where it most likely lies (map
+ * frame, robot position at the last normal Bluetooth reading), [at] wall-clock time of the detection, [probable] when
+ * concluded from a Bluetooth loss, [text] the gateway's reason.
+ */
+data class GatewayDrop(val x: Double, val y: Double, val at: Long, val probable: Boolean, val text: String)
 
 /** Recoveries by recomputing the path, per move to a point. */
 private const val MAX_NAV_RECOVERIES = 3
@@ -262,6 +271,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             override fun sample(sample: SignalSample) = recordSurveySample(sample)
             override fun gatewayEvent(kind: String, text: String, fields: Map<String, Any?>) {
                 this@RobotBle.event("gateway_leg_$kind", text, fields)
+                if (kind == fr.luba.poc.autonomy.GatewayDetachment.EVENT) handler.post { gatewayDetached(text, fields) }
                 // Slide measured by the gateway during a pivot: same learning as with local tracking.
                 if (kind == fr.luba.poc.autonomy.LegRunner.PIVOT_SLIDE_EVENT) {
                     fun num(key: String) = (fields[key] as? Number)?.toDouble()
@@ -290,6 +300,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             // Task history: one more tracking handed to the gateway (compared with tracking from the pilot).
             if (shown) update { s -> s.mowingRecord?.let { r -> s.copy(mowingRecord = r.copy(gatewayLegs = r.gatewayLegs + 1,
                 links = r.links + fr.luba.poc.history.TrackingLink.GATEWAY)) } ?: s }
+            // New tracking accepted by the gateway: the phone is back on the robot, the drop marker goes away.
+            if (state.value.gatewayDrop != null) update { it.copy(gatewayDrop = null) }
             event("gateway_leg_start", tr("Tracking handed to the gateway", "Suivi confié à la passerelle"), mapOf("leg" to spec.legId, "from" to spec.from, "edges" to path.size, "shown" to shown,
                 "cutting" to spec.cutting, "sampling" to spec.sampling, "obstacles" to spec.obstacles.size))
             var sentObstacles = spec.obstacles
@@ -629,6 +641,18 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             alert(kind, severity, tr("Gateway at ${health.batteryPercent} % on battery", "Passerelle à ${health.batteryPercent} % sur batterie") +
                 if (severity == Severity.CRITICAL) tr(": shutdown imminent, robot link at risk", " : extinction proche, liaison robot menacée") else "")
         }
+    }
+    /**
+     * Gateway phone fallen off the robot (event from the gateway, which has already stopped the robot): drop point on the
+     * map, status and critical alert with where to pick it up.
+     */
+    private fun gatewayDetached(text: String, fields: Map<String, Any?>) {
+        // Text rebuilt in this phone's language from the fields; the gateway's own text otherwise.
+        val verdict = fr.luba.poc.autonomy.GatewayDetachment.Verdict.fromFields(fields, System.currentTimeMillis())
+        val shown = verdict?.text ?: fr.luba.poc.gateway.GatewayWireText.display(text)
+        verdict?.let { v -> update { it.copy(gatewayDrop = GatewayDrop(v.point.x, v.point.y, System.currentTimeMillis(), v.probable, shown)) } }
+        status(tr("$shown · robot stopped: pick up the phone before restarting", "$shown · robot arrêté : récupérer le téléphone avant de relancer"))
+        alert(AlertKind.GATEWAY_DETACHED, Severity.CRITICAL, shown + if (verdict != null) tr(" · marker on the map", " · repère sur la carte") else "")
     }
     /** The gateway phone no longer responds (Wi-Fi off, switched off, app closed): one alert until telemetry returns. */
     private fun alertGatewayLost(detail: String) {

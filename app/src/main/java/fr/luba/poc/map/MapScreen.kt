@@ -855,6 +855,11 @@ fun MapScreen(
                     drawCircle(Color.White, 5 * screenUnit, screen(v.stop), style = screenStroke(1.5f))
                     drawRouteStart(screen(v.target), camera.zoom.toFloat(), camera.rotation.toFloat(), label = tr("Resume", "Reprise"))
                 }
+                // Gateway fallen off the robot: where to pick up the phone.
+                state.gatewayDrop?.takeIf { !demo }?.let { drop ->
+                    drawRouteStart(screen(Point(drop.x, drop.y)), camera.zoom.toFloat(), camera.rotation.toFloat(),
+                        label = tr("Gateway", "Passerelle"), purple = colors.Danger)
+                }
                 if (pointMode) {
                     val points = if (state.navTest.running) state.navTest.planned else pointPlan?.points.orEmpty()
                     if (points.size > 1) drawTransitPath(path(points,false), screenUnit, colors, 3f)

@@ -157,4 +157,6 @@ connection maintained, **not** a complete loss of Bluetooth; repeat it after a f
 
 When controlling through a [gateway](gateway.md), the gateway stops the robot (blades then zero speed) if the pilot
 phone goes silent for more than 2 s, except during autonomous tracking, where it continues the route on its own with
-its own guards.
+its own guards. Among them, a gateway phone that has fallen off the robot is detected from its Bluetooth signal and
+stops the robot before it comes back over the phone with its blades
+([gateway fallen off the robot](gateway.md#autonomous-tracking-android-gateway)).

@@ -115,9 +115,10 @@ class GatewayAutonomyTest {
     private class Recorder : RemoteLegs.Callbacks {
         val progress = Collections.synchronizedList(mutableListOf<LegProgress>())
         val samples = Collections.synchronizedList(mutableListOf<SignalSample>())
+        val events = CopyOnWriteArrayList<Triple<String, String, Map<String, Any?>>>()
         override fun progress(progress: LegProgress) { this.progress += progress }
         override fun sample(sample: SignalSample) { samples += sample }
-        override fun gatewayEvent(kind: String, text: String, fields: Map<String, Any?>) { }
+        override fun gatewayEvent(kind: String, text: String, fields: Map<String, Any?>) { events += Triple(kind, text, fields) }
     }
 
     private fun wideSurface() = GeometryFactory().createPolygon(arrayOf(Coordinate(-5.0, -5.0), Coordinate(10.0, -5.0), Coordinate(10.0, 5.0), Coordinate(-5.0, 5.0), Coordinate(-5.0, -5.0)))
@@ -181,6 +182,51 @@ class GatewayAutonomyTest {
         assertEquals("stop", link.trace.last { it == "stop" || it == "move" })
         assertFalse("no blade turned", link.trace.contains("blades-on"))
         assertEquals("tracking ends on the Redmi", false, robot!!.autonomy.running)
+    }
+
+    @Test(timeout = 120_000) fun gatewayFallingOffTheRobotStopsItAndReportsWhereThePhoneLies() = runBlocking {
+        serve(); val pilot = Pilot(); val link = links.take()
+        // Phone on the robot (−24 dBm, ±2 dB) until the robot passes x = 4 m; then it lies there and the signal fades with distance.
+        var dropped: Point? = null
+        val noise = java.util.Random(3)
+        link.rssi = { robot ->
+            val here = Point(robot.x, robot.y)
+            val drop = dropped ?: here.takeIf { it.x >= 4.0 }?.also { dropped = it }
+            val distance = drop?.distance(here)?.coerceAtLeast(0.1) ?: 0.1
+            (-24 - 20 * kotlin.math.log10(distance / 0.1) + noise.nextGaussian() * 2).toInt()
+        }
+        val route = pilot.client.ensureRoute(listOf(SimEdge(Point(0.0, 0.0), Point(9.0, 0.0), cutting = true)))
+        val guard = pilot.client.ensureGuard(wideSurface())
+        val recorder = Recorder()
+        val leg = pilot.client.start(spec(pilot, route, guard, cutting = true), recorder)
+        val result = withTimeout(90_000) { leg.result.await() }
+        assertEquals(result.text, LegOutcome.FAILED, result.outcome)
+        assertTrue(result.text, result.text.contains("tombée du robot"))
+        assertTrue("stop confirmed", result.stopConfirmed)
+        val drop = requireNotNull(dropped) { "the phone never fell: ${link.x}" }
+        // Stopped soon after the fall, well before the end of the route (9 m), blades OFF.
+        assertTrue("robot at ${link.x}, phone fell at ${drop.x}", link.x - drop.x in 1.4..4.0)
+        assertEquals("stop", link.trace.last { it == "stop" || it == "move" })
+        assertEquals("blades-off", link.trace.last { it.startsWith("blades") })
+        // The pilot learns where the phone lies, within one reading of the real drop point.
+        val event = recorder.events.single { it.first == fr.luba.poc.autonomy.GatewayDetachment.EVENT }
+        val x = (event.third["x"] as Number).toDouble(); val y = (event.third["y"] as Number).toDouble()
+        assertTrue("reported ($x, $y), fell at $drop", Point(x, y).distance(drop) < 0.8)
+        assertEquals(false, event.third["probable"])
+        assertEquals(false, robot!!.autonomy.running)
+    }
+
+    @Test(timeout = 120_000) fun aSteadySignalNeverStopsTheRobot() = runBlocking {
+        serve(); val pilot = Pilot(); val link = links.take()
+        val noise = java.util.Random(5)
+        link.rssi = { (-26 + noise.nextGaussian() * 3).toInt() }
+        val route = pilot.client.ensureRoute(listOf(SimEdge(Point(0.0, 0.0), Point(7.0, 0.0), cutting = true)))
+        val guard = pilot.client.ensureGuard(wideSurface())
+        val recorder = Recorder()
+        val result = withTimeout(90_000) { pilot.client.start(spec(pilot, route, guard), recorder).result.await() }
+        assertEquals(result.text, LegOutcome.DONE, result.outcome)
+        assertTrue("signal read during the route: ${link.rssiReads}", link.rssiReads >= 5)
+        assertTrue(recorder.events.none { it.first == fr.luba.poc.autonomy.GatewayDetachment.EVENT })
     }
 
     @Test(timeout = 120_000) fun aRobotModelInReadOnlyModeNeverGetsAnAutonomousLeg() = runBlocking {

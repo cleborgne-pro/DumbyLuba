@@ -100,6 +100,47 @@ returning the outcome: a robot standing still out of Wi-Fi range never has its b
 - While recovering an outage, the Fold logs a status line every 30 s and gives up after 25 min ("gateway unreachable
   for 25 min · …", `GatewayLink.OUTAGE_LIMIT_MS`).
 
+### Gateway fallen off the robot (1.3.0)
+
+The Redmi lies on the robot's back. If it falls on the lawn during a route, the robot drives on until the Bluetooth
+link drops, then mowing goes on over the phone at the next passes. The gateway now notices it from its own Bluetooth
+signal to the robot (`autonomy/GatewayDetachment.kt`, wired in `GatewayRobot`):
+
+- During every tracking, the gateway reads the RSSI of its robot link once a second (`Op.Rssi` without owner, one at
+  a time in the GATT queue; local Bluetooth, answered in a few ms). The pilot's own RSSI reads through the Wi-Fi are
+  unchanged (every 30 s, never in motion).
+- **Mounted level**: median of the readings within 6 dB of it. It is only **confirmed** after 5 readings while the robot
+  drove 3 m from where the learning started, all within ±6 dB of the median, at −50 dBm or better (−24 dBm measured on
+  2026-10-11). A signal that changes with the robot's position before that (phone on the ground on purpose, used as a
+  fixed relay) restarts the learning: it is never confirmed, nothing is concluded. The level is kept from one tracking
+  to the next and relearned when the gateway changes robot.
+- **Drop point**: robot position (fresh, ≤ 2 s) at the last reading at the mounted level, so within one reading of
+  where the phone fell (0.4 m at 0.4 m/s).
+- **Verdict**: 3 consecutive readings at least 15 dB below the mounted level (about 20 dB at 2 m in free field) with the
+  robot at least 1.5 m from the drop point. Weak readings with the robot still next to the drop point (stopped,
+  pivoting) are not enough. On a verdict the gateway stops the robot at once (blades OFF if they may spin, zero speed,
+  as for a lift), the tracking ends `FAILED` with "Gateway fell off the robot near x=…, y=… (Bluetooth −52 dBm instead
+  of −24 dBm, robot 1.6 m away)", and a `gateway_detached` tracking event carries the fields `x`, `y`, `rssiDbm`,
+  `mountedDbm`, `robotX`, `robotY`, `distanceM`, `probable`.
+- **Bluetooth lost first** (robot link closed during a tracking): if the last reading was already 10 dB below the
+  mounted level and the robot 0.75 m or more from the drop point, the same verdict with `probable` set ("probably
+  fell"); otherwise a plain Bluetooth loss.
+- **Pilot**: the event rebuilds the text in the pilot's language, sets `RobotUi.gatewayDrop` (red **Gateway** marker on
+  the map, cleared at the next tracking handed to the gateway), shows the status and raises the critical
+  `GATEWAY_DETACHED` alert with the position. The mission stops on the tracking outcome (no automatic resume: the
+  text is not a link loss for `DockResume`); the task history labels the interruption "Gateway fell off the robot".
+  Tracking events are not replayed after a Wi-Fi outage: if the event is lost, the outcome text still carries the
+  position (in the unexpected-stop alert and the history), without the map marker.
+- Not covered: tracking driven frame by frame from the pilot (switch off, ESP32 gateway), and moves made by the pilot
+  between trackings (bypass, back-off, recharge); the detection resumes at the next tracking.
+
+Checks: `GatewayDetachmentTest` (9: fall detected within one reading of the drop point a few seconds later, noisy
+steady signal over 300 readings, robot stopped next to the drop point, fixed relay never confirmed including a pass
+close to it, no confirmation without driving, link lost while falling or with a steady signal, rearm, fields
+round trip), `GatewayAutonomyTest` (real TCP session and simulated robot behind the Bluetooth link: phone falling at
+x = 4 m on a 9 m cutting route → robot stopped 1.4 to 4 m further, blades OFF, outcome `FAILED`, event within 0.8 m
+of the drop point; steady −26 ± 3 dBm over 7 m → `DONE`, no event). Not yet tried on the robot.
+
 ### Known limitations
 
 - The route speed set on the Fold is the one at the **start of tracking**; changing it along the way only takes effect at the next tracking.

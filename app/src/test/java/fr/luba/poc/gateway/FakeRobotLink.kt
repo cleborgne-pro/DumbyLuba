@@ -92,7 +92,10 @@ class FakeRobotLink(private val listener: RobotLink.Listener, startX: Double, st
         }
     }
 
-    override fun readRssi(): Boolean { Thread { listener.onRssi(this, -50, 0) }.start(); return true }
+    /** Signal measured by the gateway (default: steady, phone on the robot); read on each RSSI request. */
+    @Volatile var rssi: (FakeRobotLink) -> Int = { -50 }
+    @Volatile var rssiReads = 0
+    override fun readRssi(): Boolean { val value = rssi(this); rssiReads++; Thread { Thread.sleep(5); if (!closed) listener.onRssi(this, value, 0) }.start(); return true }
     override fun close() { closed = true; ticker.interrupt() }
 
     private fun step() {

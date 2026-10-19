@@ -26,6 +26,7 @@ object InterruptionSummary {
                 tr("Obstacle contact", "Contact avec un obstacle")
             has("Soulèvement", "soulevé", "sans progression", "Plage trop longue", "bloquée depuis", "Lift", "lifted",
                 "without progress", "Range too long", "blocked for") -> tr("Robot stuck: the wheels turn without moving forward", "Robot bloqué : les roues tournent sans avancer")
+            has("tombée du robot", "fell off the robot") -> tr("Gateway fell off the robot", "Passerelle tombée du robot")
             has("Perte passerelle", "Passerelle injoignable", "Suivi perdu", "Wi-Fi", "passerelle", "Gateway lost",
                 "Gateway unreachable", "Tracking lost", "gateway") -> tr("Link lost with the gateway", "Liaison perdue avec la passerelle")
             has("Perte BLE", "BLE interrompu", "timeout GATT", "GATT", "télémétrie", "périmé", "BLE lost", "BLE interrupted",

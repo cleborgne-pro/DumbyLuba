@@ -17,6 +17,9 @@ class InterruptionSummaryTest {
             "détecté : Roues commandées sans progression : 7 cm parcourus pour 38 cm attendus en 3,0 s").label)
         assertEquals("Robot bloqué : les roues tournent sans avancer", InterruptionSummary.of("Trajet interrompu : Plage trop longue : 0 m non parcourus en 128 s").label)
         assertEquals("Liaison perdue avec la passerelle", InterruptionSummary.of("Trajet interrompu : Suivi perdu : la passerelle n'a plus trace du suivi 3").label)
+        assertEquals("Passerelle tombée du robot", InterruptionSummary.of("Trajet interrompu : Passerelle tombée du robot vers x=4.0 m, " +
+            "y=0.0 m (Bluetooth -52 dBm au lieu de -24 dBm, robot à 1.6 m)").label)
+        assertEquals("Passerelle tombée du robot", InterruptionSummary.of("Gateway probably fell off the robot near x=4.0 m, y=0.0 m").label)
         assertEquals("Arrêtée avec le bouton STOP", InterruptionSummary.of("STOP manuel").label)
         assertEquals("Liaison perdue avec le robot", InterruptionSummary.of("FAILED — timeout GATT, STOP potentiellement indisponible").label)
         assertEquals("Liaison perdue avec le robot", InterruptionSummary.of("FAILED — timeout GATT (sync(2) sans confirmation en 5,0 s), STOP potentiellement indisponible").label)

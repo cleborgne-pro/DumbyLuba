@@ -133,6 +133,10 @@ class GatewayRobot(
     private fun monotonicMs() = System.nanoTime() / 1_000_000
     private fun newObserver() = RobotObserver(::monotonicMs, clock, ::urgentStop)
     @Volatile private var observer: RobotObserver = newObserver()
+    /** Gateway fallen off the robot, from its own Bluetooth signal to the robot (read during route trackings). Under lock. */
+    private val detachment = fr.luba.poc.autonomy.GatewayDetachment()
+    /** Last own RSSI read requested ([monotonicMs]). */
+    private var ownRssiAt = 0L
 
     /** Autonomous tracking: route prepared by the pilot, run here, without depending on Wi-Fi during tracking. */
     val autonomy = GatewayAutonomy(LegHostImpl(), report, orphanLimitMs = orphanLimitMs, wall = clock)
@@ -148,7 +152,7 @@ class GatewayRobot(
     /** Keeps [address] and connects to it; the link is then maintained. */
     fun connect(address: String, name: String? = null) {
         synchronized(lock) {
-            if (this.address != null && this.address != address) { closeLink("autre robot choisi"); this.name = null }
+            if (this.address != null && this.address != address) { closeLink("autre robot choisi"); this.name = null; detachment.reset() }
             val changed = this.address != address || (name != null && name != this.name)
             this.address = address; if (name != null) this.name = name
             if (changed) runCatching { onRemember(address, this.name) }
@@ -371,6 +375,7 @@ class GatewayRobot(
     private inner class LegHostImpl : LegHost {
         override fun env(hooks: LegHooks): LegEnv {
             observer.clearFailure(); observer.active = true; ownWriteFailedCode = null
+            synchronized(lock) { detachment.rearm() }
             return GatewayLegEnv(hooks)
         }
         override fun emergencyStop(): String = ownEmergencyStop()
@@ -400,10 +405,25 @@ class GatewayRobot(
         override fun wall() = clock()
         override fun view(): RobotView = observer.view
         override fun linkHealthy(): Boolean = linkProblem() == null
-        override fun linkProblem(): String? = synchronized(lock) {
-            linkProblem(ready && link != null, ownWriteFailedCode, queue.size, inFlight?.let { System.currentTimeMillis() - inFlightSince }, ackTimeoutMs * 2)
+        override fun linkProblem(): String? {
+            val problem = synchronized(lock) {
+                linkProblem(ready && link != null, ownWriteFailedCode, queue.size, inFlight?.let { System.currentTimeMillis() - inFlightSince }, ackTimeoutMs * 2)
+            } ?: return null
+            // Link lost because the gateway fell off: the reason says so (with where to find it).
+            return detached() ?: problem
         }
-        override fun hostFailure(): String? = observer.failure()
+        override fun hostFailure(): String? = detached() ?: observer.failure()
+
+        private var announced = false
+        /** Gateway fallen off the robot: stop reason, announced once to the pilot with the position (outside the robot lock). */
+        private fun detached(): String? {
+            val verdict = synchronized(lock) { detachment.verdict } ?: return null
+            if (!announced) {
+                announced = true
+                runCatching { event(fr.luba.poc.autonomy.GatewayDetachment.EVENT, verdict.text, verdict.fields()) }
+            }
+            return verdict.text
+        }
         override fun contact(): LegContact? = observer.contact()
         override fun armBypass(armed: Boolean) { observer.bypassArmed = armed }
         override fun send(payload: ByteArray, label: String) = submitOwn(payload, label)
@@ -475,8 +495,25 @@ class GatewayRobot(
                     else if (op.last) ownWritten?.invoke(op.label, monotonicMs())
                 }
             }
-            is Op.Rssi -> op.owner?.rssi(rssi, code)
+            is Op.Rssi -> if (op.owner != null) op.owner.rssi(rssi, code) else ownRssi(rssi, code)
         }
+    }
+
+    /** Robot position less than 2 s old, or null. */
+    private fun freshPosition(): fr.luba.poc.map.Point? {
+        val v = observer.view
+        if (v.positionPrevious == 0L || monotonicMs() - v.positionPrevious !in 0..2000) return null
+        val x = v.telemetry.x?.takeIf { it.isFinite() } ?: return null
+        val y = v.telemetry.y?.takeIf { it.isFinite() } ?: return null
+        return fr.luba.poc.map.Point(x, y)
+    }
+
+    /** Own RSSI reading during a route tracking (under lock): a gateway fallen off the robot stops it at once. */
+    private fun ownRssi(rssi: Int, code: Int) {
+        if (code != RobotLink.GATT_SUCCESS || !observer.active || detachment.verdict != null) return
+        val verdict = detachment.reading(monotonicMs(), rssi, freshPosition()) ?: return
+        // The robot would come back over the phone with its blades: stopped now, the route tracking ends on it at the next tick.
+        urgentStop(verdict.text, null)
     }
 
     private fun tick() = synchronized(lock) {
@@ -485,6 +522,13 @@ class GatewayRobot(
         if (inFlight != null && now - inFlightSince > ackTimeoutMs * 2) { drop("opération GATT sans réponse", now); return@synchronized }
         if (link != null && !ready && now - connectingSince > connectTimeoutMs) { drop("connexion sans réponse", now); return@synchronized }
         if (link == null && address != null && now - connectingSince > retryMs) open()
+        // Route tracking: own Bluetooth signal read every second, to notice a gateway fallen off the robot.
+        val mono = monotonicMs()
+        if (ready && link != null && observer.active && mono - ownRssiAt >= fr.luba.poc.autonomy.GatewayDetachment.READ_PERIOD_MS &&
+            (listOfNotNull(inFlight) + queue).none { it is Op.Rssi && it.owner == null }) {
+            ownRssiAt = mono
+            queue.addLast(Op.Rssi(null)); pump()
+        }
         if (ready && pilot == null && queue.isEmpty() && inFlight == null && now - lastKeepalive >= keepaliveMs) {
             lastKeepalive = now
             blufi.fragment(commands.sync(), mtu).forEach { queue.addLast(Op.Write(it, null)) }
@@ -514,6 +558,8 @@ class GatewayRobot(
             publish(); pump()
         }
         override fun onLost(link: RobotLink, code: Int, reason: String) = live {
+            // Link lost during a route while the signal was already falling and the robot moving away: gateway fallen off.
+            if (observer.active) detachment.linkLost(freshPosition())?.let { report(tr("Gateway lost: ${it.text}", "Passerelle perdue : ${it.text}")) }
             report(tr("Robot Bluetooth link lost ($code): new attempt in ${retryMs / 1000} s", "Liaison Bluetooth robot perdue ($code) : nouvel essai dans ${retryMs / 1000} s"))
             val p = pilot
             closeLink(reason)

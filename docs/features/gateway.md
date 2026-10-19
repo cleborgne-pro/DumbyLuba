@@ -135,6 +135,16 @@ with the same tracking loop and its own guards (telemetry, errors, lift).
   back ([resume](mowing-resume.md#automatic-resume-after-losing-the-gateway-during-recharging)).
 - **Failing Bluetooth link** during tracking: the gateway stops the robot and names the cause, "BLE interrupted:"
   connection closed, write rejected (code), write unconfirmed for N s, or queue full.
+- **Gateway fallen off the robot** (1.3.0): during tracking, the gateway reads its Bluetooth signal to the robot every
+  second. Lying on the robot it is strong and steady; fallen on the lawn, it fades as the robot drives away. When the
+  signal drops 15 dB below its usual level for 3 readings in a row while the robot is at least 1.5 m from where the
+  signal was last normal, the gateway stops the robot (blades OFF, zero speed: it would otherwise come back over the
+  phone with its blades) and the pilot raises a critical **Gateway fell off the robot** alert with the position where
+  the phone most likely lies (robot position at the last normal reading). A **Gateway** marker shows it on the map
+  until the next tracking handed to the gateway. If the Bluetooth link drops first while the signal was already
+  falling, the alert says "probably". The usual level is only learned while the robot drives 3 m with a steady signal
+  of −50 dBm or better: a phone left on the ground on purpose is never taken for a fall. See
+  [technical detail](../AUTONOMOUS_GATEWAY.md#gateway-fallen-off-the-robot-130).
 
 ## Gateway health
 
