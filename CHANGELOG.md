@@ -295,3 +295,9 @@ Version 1.0.0: **first public release** on GitHub, published as a single commit.
 (`io.github.cleborgne_pro.dumbyluba`) installs next to the builds made from source, and the release also provides
 the ESP32 gateway firmware for Wi-Fi updates, a full image for the first USB install, `release.json` and `SHA256SUMS`.
 The project is still tested on a single LUBA 2 AWD: see the project status in the README.
+
+Version 1.0.1: **real robot photos back** in the published app and the public repository. The Mammotion product
+photos of the five named models (LUBA AWD, LUBA 2 AWD, LUBA 3 AWD, LUBA mini AWD, LUBA mini 2 AWD) are shown again on
+the home screen and at the top of the Service tab of the GitHub APK, instead of the project illustration, and the
+documentation screenshots show them. They remain Mammotion's property (THIRD_PARTY.md) and stay until a removal
+request; the illustration is still used for unknown models and would replace the photos if they were removed.

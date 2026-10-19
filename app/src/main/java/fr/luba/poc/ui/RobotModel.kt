@@ -33,8 +33,8 @@ enum class RobotModel(val label: String, private val photoName: String? = null) 
 
     /**
      * Product photo of the model if provided, otherwise the project illustration. Mammotion photos
-     * (`robot_photo_*.webp`) are not redistributed in the public repository (see THIRD_PARTY.md): they are therefore
-     * looked up by name, and their absence falls back to the illustration instead of breaking the build.
+     * (`robot_photo_*.webp`, Mammotion property, see THIRD_PARTY.md) are looked up by name, so that removing them on
+     * request falls back to the illustration instead of breaking the build.
      */
     @SuppressLint("DiscouragedApi")
     @DrawableRes

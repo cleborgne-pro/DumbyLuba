@@ -10,7 +10,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Product photos looked up by name: present in this repository, absent from the public repository (illustration). */
+/** Product photos looked up by name; kept in the app and the publication until a removal request (RULES.md). */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class RobotModelImageTest {
@@ -24,10 +24,9 @@ class RobotModelImageTest {
     @Test fun providedPhotoIsFoundByName() {
         val photos = RobotModel.entries.filter { it.named }
             .map { it.image(context) }.filter { it != R.drawable.robot_illustration }
-        // Each provided photo is distinct; without photos (public repository), all fall back to the illustration.
+        // Every named model has its own photo: the real images stay until a removal request.
+        assertEquals(RobotModel.entries.count { it.named }, photos.size)
         assertEquals(photos.size, photos.toSet().size)
-        val available = context.resources.getIdentifier("robot_photo_luba2", "drawable", context.packageName)
-        if (available != 0) assertNotEquals(R.drawable.robot_illustration, RobotModel.LUBA_2.image(context))
-        else assertEquals(R.drawable.robot_illustration, RobotModel.LUBA_2.image(context))
+        assertNotEquals(R.drawable.robot_illustration, RobotModel.LUBA_2.image(context))
     }
 }

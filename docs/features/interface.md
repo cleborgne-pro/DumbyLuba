@@ -40,9 +40,9 @@ another language is chosen in Me → Language ([language](#language)).
   → mini 2, any other `Luba…` name → LUBA 1) or, failing that, from the product key of the Mammotion account; the
   same photo appears at the top of the Service tab with the model name. Newer Luba models with no established trade
   name (`Luba-HM`, `MH`, `ME`, `TR`, `SP`) and the absence of a robot keep the generic illustration. Table:
-  `ui/RobotModel.kt`, based on PyMammotion's `DeviceType`. Mammotion product photos are not part of the public
-  repository ([THIRD_PARTY.md](../../THIRD_PARTY.md#robot-image)): without them, the illustration replaces the
-  photo and the model name is still shown.
+  `ui/RobotModel.kt`, based on PyMammotion's `DeviceType`. Mammotion product photos remain Mammotion's property
+  ([THIRD_PARTY.md](../../THIRD_PARTY.md#robot-image)): if they are removed, the illustration replaces the photo and
+  the model name is still shown.
 - **MY MAP**: map thumbnail, number of zones ("No map" without one), then "<area> m² · tap to open", "<N> % mowed ·
   tap to open" during a local route, or "Read the map from the robot or the account". The card opens the
   [map](map.md). The **Start mowing** button (or **Follow mowing** during a mission) opens the map in zone selection
