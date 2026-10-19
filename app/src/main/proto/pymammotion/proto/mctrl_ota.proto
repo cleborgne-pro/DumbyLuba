@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+// Java options added by DumbyLuba; schema unchanged.
+option java_package = "fr.luba.poc.proto";
+option java_outer_classname = "MctrlOtaProto";
+
+enum infoType {
+  IT_BASE = 0;
+  IT_OTA = 1;
+}
+
+message uplink_t {
+  int32 pkg_seq = 1;
+  int32 status = 2;
+}
+
+message downlink_t {
+  int32 fw_id = 1;
+  int32 pkg_seq = 2;
+  repeated int32 data = 3;
+}
+
+message fwDownloadCtrl {
+  oneof SubFwDownloadCtrl {
+    uplink_t uplink = 2;
+    downlink_t downlink = 3;
+  }
+  int32 cmd = 1;
+}
+
+message baseInfo {
+  string dev_version = 1;
+  int32 dev_status = 2;
+  int32 batt_val = 3;
+  int32 init_status = 4;
+  int32 is_tilt = 5;
+}
+
+message otaInfo {
+  string otaid = 1;
+  string version = 2;
+  int32 progress = 3;
+  int32 result = 4;
+  string message = 5;
+}
+
+message getInfoReq {
+  infoType type = 1;
+}
+
+message getInfoRsp {
+  oneof info {
+    baseInfo base = 3;
+    otaInfo ota = 4;
+  }
+  int32 result = 1;
+  infoType type = 2;
+}
+
+message FotaInfo_t {
+  int32 need_ota_num = 1;
+  int32 need_ota_img_size = 2;
+  int32 ota_otype = 3;
+  string ota_oid = 4;
+  string ota_version = 5;
+}
+
+message FotaSubInfo_t {
+  int32 sub_mod_ota_flag = 1;
+  int32 sub_mod_id = 2;
+  int32 sub_img_size = 3;
+  string sub_mod_version = 4;
+  string sub_img_url = 5;
+}
+
+message MctlOta {
+  oneof SubOtaMsg {
+    getInfoReq todev_get_info_req = 1;
+    getInfoRsp toapp_get_info_rsp = 2;
+    fwDownloadCtrl fw_download_ctrl = 3;
+    FotaInfo_t fota_info = 4;
+    FotaSubInfo_t fota_sub_info = 5;
+  }
+}

@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+// Java options added by DumbyLuba; schema unchanged.
+option java_package = "fr.luba.poc.proto";
+option java_outer_classname = "MctrlPeptProto";
+
+message perception_obstacles_t {
+  int32 label = 1;
+  int32 num = 2;
+  repeated sint32 points_x = 3;
+  repeated sint32 points_y = 4;
+}
+
+message perception_obstacles_visualization_t {
+  int32 status = 1;
+  int32 num = 2;
+  repeated perception_obstacles_t obstacles = 3;
+  double timestamp = 4;
+  float scale = 5;
+}
+
+message perception_universal_buff_t {
+  int32 perception_type = 1;
+  int32 perception_len = 2;
+  repeated int64 universal_buff = 3;
+}
+
+message perception_local_map_visualization_t {
+  bytes map = 1;
+}
+
+message MctlPept {
+  oneof SubPeptMsg {
+    perception_obstacles_visualization_t perception_obstacles_visualization = 1;
+    perception_universal_buff_t perception_universal_buff = 2;
+    perception_local_map_visualization_t perception_local_map_visualization = 3;
+  }
+}

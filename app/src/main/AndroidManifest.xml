@@ -1,0 +1,39 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- Approximate garden position for the rain radar, requested only on demand. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Gateway: turn wireless debugging back on after Android switches it off. Granted only through ADB (pm grant). -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <!-- Gateway: "Do not disturb" kept on (silent phone mounted on the robot). -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <application android:usesCleartextTraffic="true" android:name=".relay.RelayApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="false" android:supportsRtl="true" android:theme="@style/Theme.DumbyLuba.Starting">
+        <service android:name=".relay.RobotLinkService" android:exported="false" android:foregroundServiceType="connectedDevice" android:stopWithTask="false" />
+        <service android:name=".relay.RelayService" android:exported="false" android:foregroundServiceType="connectedDevice" android:stopWithTask="false" />
+        <service android:name=".gateway.GatewayService" android:exported="false" android:foregroundServiceType="connectedDevice" android:stopWithTask="false" />
+        <receiver android:name=".gateway.GatewayBootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <!-- Single instance: service notifications and `am start` reopen the existing activity (onNewIntent)
+             instead of stacking a second one, which duplicated the cloud and fought over the video player (camera stuck). -->
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity>
+    </application>
+</manifest>

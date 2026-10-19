@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+<group android:name="mascot" android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
+    <group android:name="grass" android:pivotX="54" android:pivotY="38">
+        <path android:fillColor="#68D991" android:pathData="M53,39 C45,36 41,29 42,23 C49,26 53,30 54,36 C54,28 57,21 64,19 C64,28 60,34 56,39 Z" />
+    </group>
+    <path android:fillColor="#37634C" android:pathData="M29,51 Q26,51 26,55 L26,73 Q26,77 30,77 L36,77 L36,51 Z M72,51 L78,51 Q82,51 82,55 L82,73 Q82,77 78,77 L72,77 Z" />
+    <path android:fillColor="#A7F3B9" android:pathData="M34,46 Q34,37 44,37 L64,37 Q74,37 74,46 L77,68 Q78,77 68,79 L40,79 Q30,77 31,68 Z" />
+    <path android:fillColor="#D4FFDE" android:pathData="M44,40 L64,40 Q70,40 71,45 L72,49 L36,49 L37,45 Q38,40 44,40 Z" />
+    <path android:fillColor="#10291F" android:pathData="M40,51 L68,51 Q72,51 72,56 L72,65 Q72,70 67,70 L41,70 Q36,70 36,65 L36,56 Q36,51 40,51 Z" />
+    <group android:name="eyes" android:pivotX="54" android:pivotY="60">
+        <path android:fillColor="#E8FFEE" android:pathData="M46,56 A3,3 0,1 1,46,62 A3,3 0,1 1,46,56 M62,56 A3,3 0,1 1,62,62 A3,3 0,1 1,62,56" />
+    </group>
+    <path android:fillColor="#68D991" android:pathData="M51,65 Q54,68 57,65 Q54,70 51,65 Z" />
+</group>
+</vector>

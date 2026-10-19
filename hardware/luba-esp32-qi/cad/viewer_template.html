@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#eef1f4">
+<meta name="mobile-web-app-capable" content="yes">
+<title>LUBA 2 — ESP32 enclosure + Qi charging</title>
+<style>
+  :root {
+    --bg: #eef1f4; --ink: #1d2329; --muted: #5b6670; --line: #d5dce2; --panel: #fff;
+    --accent: #e07a1f; --accent-ink: #fff; --chip: #f4f6f8; --tap: 38px; --radius: 10px;
+  }
+  @media (pointer: coarse) { :root { --tap: 46px; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+  button, input, select { font: inherit; color: inherit; }
+
+  /* Layout (Galaxy Z Fold): inner screen in landscape → panel on the right; portrait (cover
+     screen, or inner screen held upright) → collapsible panel at the bottom; Flex mode (horizontal
+     fold) → model in the top half, controls in the bottom half. */
+  #layout { position: fixed; inset: 0; display: flex; flex-direction: row;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  #stage { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+  #app, #app canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #overlay { position: absolute; inset: 0; pointer-events: none; }
+  #panel { flex: 0 0 clamp(300px, 32vw, 390px); min-height: 0; display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--line); }
+  #grip { display: none; border: 0; background: none; height: 24px; flex: none; cursor: grab; touch-action: none; padding: 0; }
+  #grip::before { content: ""; display: block; width: 44px; height: 5px; border-radius: 3px; background: #c3cbd2; margin: 0 auto; }
+  @media (orientation: portrait) {
+    #layout { flex-direction: column; }
+    #panel { flex: 0 0 auto; height: var(--sheet-h, 40%); border-left: 0; border-top: 1px solid var(--line);
+      border-radius: 16px 16px 0 0; box-shadow: 0 -6px 22px rgba(0,0,0,.08); }
+    #panel.collapsed { height: auto; }
+    #panel.collapsed .tab { display: none !important; }
+    #grip { display: block; }
+  }
+  @media (vertical-viewport-segments: 2) {
+    #layout { flex-direction: column; padding: 0; }
+    #stage { flex: 0 0 env(viewport-segment-height 0 0); }
+    #panel { flex: 1 1 auto; height: auto !important; border-radius: 0; border-left: 0;
+      margin-top: calc(env(viewport-segment-top 0 1) - env(viewport-segment-bottom 0 0)); }
+    #panel.collapsed .tab.on { display: block !important; }
+    #grip { display: none; }
+  }
+  @media (horizontal-viewport-segments: 2) {
+    #layout { flex-direction: row; padding: 0; }
+    #stage { flex: 0 0 env(viewport-segment-width 0 0); }
+    #panel { flex: 1 1 auto; height: auto !important; border-radius: 0; border-top: 0;
+      margin-left: calc(env(viewport-segment-left 1 0) - env(viewport-segment-right 0 0)); }
+    #panel.collapsed .tab.on { display: block !important; }
+    #grip { display: none; }
+  }
+
+  /* Top bar (over the model) */
+  #topbar { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; gap: 6px; align-items: flex-start; }
+  #topbar > *, #note, #card { pointer-events: auto; }
+  .seg { display: inline-flex; flex-wrap: wrap; background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 22px;
+    padding: 3px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+  .seg button { border: 0; background: none; border-radius: 999px; min-height: calc(var(--tap) - 8px); padding: 0 12px;
+    font-size: 14px; white-space: nowrap; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  #tools { margin-left: auto; display: flex; flex-direction: column; gap: 6px; }
+  .round { width: var(--tap); height: var(--tap); border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,.92);
+    box-shadow: 0 2px 10px rgba(0,0,0,.08); display: grid; place-items: center; cursor: pointer; font-size: 17px; padding: 0; }
+  .round.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  /* Detail note and part card */
+  #note { position: absolute; left: 8px; right: calc(var(--tap) + 16px); top: calc(var(--tap) + 14px); max-width: 520px;
+    background: rgba(255,255,255,.95); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 4px 16px rgba(0,0,0,.1);
+    padding: 5px 5px 8px 8px; }
+  #note[hidden], #card[hidden] { display: none; }
+  #note .head { display: flex; align-items: center; gap: 4px; }
+  #note h3 { margin: 0; font-size: 15px; flex: 1; text-align: center; }
+  #note p { margin: 4px 2px 0; font-size: 13px; color: #333c44; }
+  #note.min p { display: none; }
+  .mini { border: 0; background: var(--chip); border-radius: 8px; min-width: calc(var(--tap) - 6px); height: calc(var(--tap) - 6px);
+    cursor: pointer; font-size: 16px; padding: 0 8px; flex: none; }
+  #card { position: absolute; left: 8px; right: 8px; bottom: 8px; max-width: 460px; background: rgba(255,255,255,.97);
+    border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: var(--radius);
+    box-shadow: 0 4px 18px rgba(0,0,0,.14); padding: 8px 10px; }
+  #card h3 { margin: 0 0 2px; font-size: 15px; }
+  #card .size { font-size: 13px; font-weight: 600; color: var(--accent); }
+  #card p { margin: 3px 0; font-size: 13px; }
+  #card .print { color: var(--muted); font-size: 12px; }
+  #card .actions { display: flex; gap: 6px; margin-top: 6px; }
+
+  /* Annotation labels */
+  #leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  .label { position: absolute; transform: translate(-50%, -50%); background: #1d2329; color: #fff; font-size: 12px; font-weight: 600;
+    padding: 3px 7px; border-radius: 6px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+
+  /* Panel */
+  #tabs { display: flex; gap: 2px; padding: 2px 6px 0; border-bottom: 1px solid var(--line); flex: none; overflow-x: auto; scrollbar-width: none; }
+  #tabs button { flex: 1 0 auto; border: 0; background: none; min-height: var(--tap); padding: 0 8px; cursor: pointer;
+    font-size: 14px; color: var(--muted); border-bottom: 3px solid transparent; }
+  #tabs button.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+  .tab { display: none; overflow: auto; padding: 10px 12px 16px; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
+  .tab.on { display: block; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 6px; }
+  h2:first-child { margin-top: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .btn { border: 1px solid var(--line); background: #fff; border-radius: 8px; min-height: var(--tap); padding: 0 12px; cursor: pointer; font-size: 14px; }
+  .btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .slider { display: flex; align-items: center; gap: 10px; min-height: var(--tap); }
+  .slider input { flex: 1; accent-color: var(--accent); height: 30px; }
+  .slider output { min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
+  .check { display: flex; align-items: center; gap: 10px; min-height: var(--tap); font-size: 14px; cursor: pointer; }
+  .check input { width: 20px; height: 20px; accent-color: var(--accent); }
+  .detail { display: block; width: 100%; text-align: left; border: 1px solid var(--line); background: #fff; border-radius: var(--radius);
+    padding: 9px 11px; margin: 0 0 8px; cursor: pointer; }
+  .detail b { display: block; font-size: 14px; }
+  .detail span { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .detail.on { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+  .part { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #eef1f3;
+    background: none; min-height: var(--tap); padding: 4px 2px; cursor: pointer; }
+  .part.on { background: #fff4ea; }
+  .part .sw { width: 14px; height: 14px; border-radius: 3px; flex: none; border: 1px solid rgba(0,0,0,.15); }
+  .part .nm { flex: 1; font-size: 14px; }
+  .part .sz { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  ul.report { margin: 0; padding-left: 16px; font-size: 13px; }
+  ul.report li { margin: 4px 0; }
+  #status { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .foot { font-size: 11.5px; color: #7a858f; margin: 14px 0 0; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 20px; font-size: 15px; color: var(--muted); }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<main id="layout">
+  <section id="stage">
+    <div id="app"></div>
+    <svg id="leaders"></svg>
+    <div id="labels"></div>
+    <div id="overlay">
+      <div id="topbar">
+        <div class="seg" id="modes">
+          <button data-mode="ensemble">On the robot</button>
+          <button data-mode="boitier">Enclosure</button>
+          <button data-mode="support">+ Qi mount</button>
+        </div>
+        <div id="tools">
+          <button class="round" id="fit" title="Fit to view" aria-label="Fit to view">⤢</button>
+          <button class="round" id="explodeBtn" title="Exploded view" aria-label="Exploded view">✥</button>
+          <button class="round" id="sectionBtn" title="Section" aria-label="Section">◧</button>
+          <button class="round" id="fs" title="Full screen" aria-label="Full screen">⛶</button>
+        </div>
+      </div>
+      <div id="note" hidden>
+        <div class="head">
+          <button class="mini" id="prev" aria-label="Previous detail">‹</button>
+          <h3 id="noteTitle"></h3>
+          <button class="mini" id="next" aria-label="Next detail">›</button>
+          <button class="mini" id="noteMin" aria-label="Minimize">–</button>
+          <button class="mini" id="noteClose" aria-label="Close">✕</button>
+        </div>
+        <p id="noteText"></p>
+      </div>
+      <div id="card" hidden>
+        <h3 id="cardName"></h3>
+        <div class="size" id="cardSize"></div>
+        <p id="cardRole"></p>
+        <p class="print" id="cardNote"></p>
+        <div class="actions">
+          <button class="btn" id="cardFocus">Center</button>
+          <button class="btn" id="cardIsolate">Isolate</button>
+          <button class="btn" id="cardClose" style="margin-left:auto">Close</button>
+        </div>
+      </div>
+    </div>
+    <div id="loading">Loading the model…</div>
+  </section>
+
+  <aside id="panel">
+    <button id="grip" aria-label="Expand or collapse the panel"></button>
+    <nav id="tabs">
+      <button data-tab="vue" class="on">View</button>
+      <button data-tab="details">Details</button>
+      <button data-tab="pieces">Parts</button>
+      <button data-tab="dock">Docking</button>
+      <button data-tab="cotes">Dimensions</button>
+    </nav>
+
+    <div class="tab on" data-tab="vue">
+      <h2>Exploded view</h2>
+      <div class="slider"><input id="explode" type="range" min="0" max="100" step="1" value="0" aria-label="Exploded view"><output id="explodeV">0%</output></div>
+      <div class="row"><button class="btn" data-ex="0">Assembled</button><button class="btn" data-ex="50">Halfway</button><button class="btn" data-ex="100">Exploded</button></div>
+      <h2>Section</h2>
+      <div class="row" id="secAxis">
+        <button class="btn on" data-axis="">None</button>
+        <button class="btn" data-axis="y">Across</button>
+        <button class="btn" data-axis="x">Lengthwise</button>
+      </div>
+      <div class="slider"><input id="secOff" type="range" min="-72" max="72" step="0.5" value="0" aria-label="Section position"><output id="secOffV">—</output></div>
+      <h2>Viewpoint</h2>
+      <div class="row">
+        <button class="btn" data-view="iso">3/4</button><button class="btn" data-view="front">Front</button>
+        <button class="btn" data-view="side">Side</button><button class="btn" data-view="back">Rear</button>
+        <button class="btn" data-view="top">Top</button><button class="btn" data-view="bottom">Bottom</button>
+      </div>
+      <h2>Display</h2>
+      <label class="check"><input type="checkbox" id="annots"> All annotations</label>
+      <label class="check"><input type="checkbox" id="ghost"> See-through robot and garage</label>
+      <label class="check"><input type="checkbox" id="roof" checked> Garage roof</label>
+      <label class="check"><input type="checkbox" id="edges" checked> Edges</label>
+      <p class="foot">One finger: rotate · two fingers: zoom and pan · tap a part: its card.</p>
+    </div>
+
+    <div class="tab" data-tab="details"><div id="detailList"></div></div>
+    <div class="tab" data-tab="pieces"><div id="partList"></div></div>
+
+    <div class="tab" data-tab="dock">
+      <div class="row"><button class="btn" id="dockBtn">▶ Dock</button><button class="btn" id="leaveBtn">◀ Leave</button></div>
+      <h2>Remaining back-off before the base</h2>
+      <div class="slider"><input id="pos" type="range" min="0" max="900" step="1" value="0" aria-label="Remaining back-off"><output id="posV">0 mm</output></div>
+      <div id="status"></div>
+      <p class="foot">The LUBA 2 docks in reverse: the lid passes under the fixed transmitter mount, the camera stays in front.</p>
+    </div>
+
+    <div class="tab" data-tab="cotes">
+      <h2>Computed dimensions</h2>
+      <ul class="report" id="report"></ul>
+      <p class="foot">Simplified robot, station and garage, approximate dimensions: measure on site, then regenerate with
+        <code>cad/generate.py</code>.</p>
+    </div>
+  </aside>
+</main>
+
+<script>
+  // three.js comes from the CDN: warn if the module fails to load (offline).
+  setTimeout(() => { if (!window.__ready) { const l = document.getElementById("loading");
+    if (l) l.textContent = "The 3D engine (three.js, jsDelivr CDN) could not be loaded: a connection is required when opening the file."; } }, 12000);
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const META = __META_JSON__;
+const REPORT = __REPORT_JSON__;
+const PARTS = __PARTS_JSON__;
+const ANNOTS = __ANNOTS_JSON__;
+const DETAILS = __DETAILS_JSON__;
+const GLB = "__GLB_BASE64__";
+
+const $ = id => document.getElementById(id);
+const stage = $("stage"), panel = $("panel");
+const CAT_ORDER = [["boitier", "Printed enclosure"], ["quincaillerie", "Seal, screws and bonding"], ["electronique", "Electronics"],
+  ["support", "Transmitter mount (under the roof)"], ["robot", "Landmarks on the robot"]];
+const BOX_CATS = new Set(["boitier", "quincaillerie", "electronique"]);
+// part that must be visible for the annotation to be shown
+const NEED = { window: "lid", cord: "cord", groove: "base", lip: "lid", screw: "screw", nut: "nut_m3", vent: "vent", vhb: "vhb",
+  battery: "battery", esp: "esp_module", usb: "usb_c", rx: "rx_pad", foam: "foam", coilgap: "mount_body", air: "mount_body",
+  tx: "tx_coil", chamfer: "mount_body", rod: "rod", gland: "gland", camera: "camera", rain: "rain_sensor", sole: "sole" };
+
+// ---------------------------------------------------------------- rendering
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.localClippingEnabled = true;
+$("app").appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xeef1f4);
+const camera = new THREE.PerspectiveCamera(35, 1, 2, 20000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.12;
+controls.zoomToCursor = true;
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9a7a, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 2.0); sun.position.set(800, 1500, 900); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffffff, 0.8); fill.position.set(-900, 600, -700); scene.add(fill);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(2200, 64), new THREE.MeshStandardMaterial({ color: 0x9fbf8a, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.position.y = -0.5; scene.add(ground);
+
+// Model with z up (mm) → three.js with y up: (x, y, z) → (x, z, −y)
+const root = new THREE.Group(); root.rotation.x = -Math.PI / 2; scene.add(root);
+const groups = { robot: new THREE.Group(), tx: new THREE.Group(), static: new THREE.Group() };
+Object.values(groups).forEach(g => root.add(g));
+const m2t = (x, y, z) => new THREE.Vector3(x, z, -y);
+
+const meshes = [];            // { mesh, grp, key, cat, dz, edges, color, isRoof }
+const anchors = {};           // id -> { obj, a }
+const section = { axis: "", offset: 0, plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0) };
+const state = { mode: "ensemble", explode: 0, explodeTarget: 0, pos: 0, posTarget: 0, isolate: null, selected: null,
+  detail: -1, allNotes: false, ghost: false, roof: true, edges: true };
+let dirty = true;
+const invalidate = () => { dirty = true; };
+controls.addEventListener("change", invalidate);
+
+const catOf = (grp, key) => PARTS[key] ? PARTS[key].cat : grp === "static" ? "station" : "robot";
+const isGhost = e => state.ghost && (e.cat === "robot" || e.cat === "station") && !PARTS[e.key];
+
+function hatchMaterial(mat) {
+  // Back faces only show in a section: hatched in the color of the part.
+  mat.side = THREE.DoubleSide;
+  mat.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace("#include <dithering_fragment>", `#include <dithering_fragment>
+      if (!gl_FrontFacing) {
+        float h = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 10.0));
+        gl_FragColor = vec4(mix(diffuseColor.rgb * 0.42, diffuseColor.rgb * 0.78, h), 1.0);
+      }`);
+  };
+}
+
+function b64ToBuffer(b64) {
+  const bin = atob(b64); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
+new GLTFLoader().parse(b64ToBuffer(GLB), "", gltf => {
+  const found = [];
+  gltf.scene.traverse(o => { if (o.isMesh) found.push(o); });
+  for (const m of found) {
+    const name = m.name || m.parent?.name || "";
+    const [grp, key, dzs] = name.split("__");
+    m.updateWorldMatrix(true, false);
+    m.geometry.applyMatrix4(m.matrixWorld);
+    m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1);
+    m.material = m.material.clone();
+    m.material.flatShading = true;
+    const isRoof = key === "roof";
+    if (isRoof) { m.material.transparent = true; m.material.opacity = 0.22; m.material.depthWrite = false; }
+    else hatchMaterial(m.material);
+    m.material.needsUpdate = true;
+    (groups[grp] || groups.static).add(m);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 28),
+      new THREE.LineBasicMaterial({ color: 0x1b1f23, transparent: true, opacity: 0.35 }));
+    m.add(edges);
+    m.userData.key = key;
+    meshes.push({ mesh: m, grp, key, cat: catOf(grp, key), dz: parseFloat(dzs) || 0, edges, isRoof,
+      color: "#" + m.material.color.getHexString() });
+  }
+  for (const [id, a] of Object.entries(ANNOTS)) {
+    const obj = new THREE.Object3D(); (groups[a.grp] || groups.robot).add(obj);
+    anchors[id] = { obj, a };
+  }
+  buildLists();
+  $("loading").remove();
+  applyHash();
+  window.__ready = true;
+}, err => { $("loading").textContent = "Loading error: " + err; });
+
+// ---------------------------------------------------------------- visibility and materials
+function modeShows(e) {
+  if (e.isRoof) return state.mode === "ensemble" && state.roof;
+  if (state.mode === "ensemble") return true;
+  if (BOX_CATS.has(e.cat)) return true;
+  return state.mode === "support" && e.cat === "support";
+}
+const isVisible = e => modeShows(e) && (!state.isolate || state.isolate.has(e.key));
+const keyVisible = key => meshes.some(e => e.key === key && e.mesh.visible);
+
+function refresh() {
+  const planes = section.axis ? [section.plane] : [];
+  for (const e of meshes) {
+    e.mesh.visible = isVisible(e);
+    const mat = e.mesh.material;
+    if (!e.isRoof) {
+      const ghost = isGhost(e);
+      mat.transparent = ghost; mat.opacity = ghost ? 0.16 : 1; mat.depthWrite = !ghost;
+      mat.clippingPlanes = ghost ? [] : planes;
+      e.edges.material.clippingPlanes = mat.clippingPlanes;
+      e.edges.visible = state.edges && !ghost;
+    } else e.edges.visible = state.edges;
+    const sel = state.selected === e.key;
+    mat.emissive?.set(sel ? 0xff7a00 : 0x000000);
+    mat.emissiveIntensity = sel ? 0.45 : 1;
+  }
+  document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.mode === state.mode));
+  document.querySelectorAll("#secAxis button").forEach(b => b.classList.toggle("on", b.dataset.axis === section.axis));
+  $("sectionBtn").classList.toggle("on", !!section.axis);
+  $("explodeBtn").classList.toggle("on", state.explodeTarget > 0.5);
+  $("cardIsolate").textContent = state.isolate ? "Show all" : "Isolate";
+  document.querySelectorAll(".part").forEach(p => p.classList.toggle("on", p.dataset.key === state.selected));
+  document.querySelectorAll(".detail").forEach((d, i) => d.classList.toggle("on", i === state.detail));
+  invalidate();
+}
+
+// ---------------------------------------------------------------- positions (docking, exploded)
+const boxOrigin = () => [META.boxX + state.pos, META.boxY, META.boxZ];
+const mm = v => v.toFixed(1);
+function placeAll() {
+  groups.robot.position.x = state.pos;
+  groups.tx.position.z = META.explodeLift * state.explode;
+  for (const e of meshes) e.mesh.position.z = e.dz * state.explode;
+  for (const { obj, a } of Object.values(anchors)) obj.position.set(a.p[0], a.p[1], a.p[2] + a.dz * state.explode);
+  $("pos").value = Math.round(state.pos); $("posV").textContent = Math.round(state.pos) + " mm";
+  $("explode").value = Math.round(state.explode * 100); $("explodeV").textContent = Math.round(state.explode * 100) + "%";
+  const under = Math.abs(state.pos) < META.boxHalfX + META.supHalfX;
+  $("status").textContent = state.pos < 0.5
+    ? `Docked: fixed mount ${mm(META.airGap)} mm above the lid, coils ${mm(META.coilGap)} mm apart (plastic ${mm(META.plastic)} + air ${mm(META.airGap)}).`
+    : under ? `The lid passes under the mount, ${mm(META.airGap)} mm of clearance.`
+    : `Reversing in: nothing moves under the roof (minimum gap ${mm(META.sweepGap)} mm).`;
+  invalidate();
+}
+
+// Section plane: always remove the half facing the camera.
+function updateSectionPlane() {
+  if (!section.axis) return;
+  const o = boxOrigin();
+  const camModel = { x: camera.position.x, y: -camera.position.z };
+  if (section.axis === "y") {
+    const y0 = o[1] + section.offset, keepBelow = camModel.y > y0;
+    // y(model) = −z(three); keep y < y0 ⇔ z + y0 > 0
+    section.plane.set(new THREE.Vector3(0, 0, keepBelow ? 1 : -1), keepBelow ? y0 : -y0);
+  } else {
+    const x0 = o[0] + section.offset, keepBelow = camModel.x > x0;
+    section.plane.set(new THREE.Vector3(keepBelow ? -1 : 1, 0, 0), keepBelow ? x0 : -x0);
+  }
+}
+
+// ---------------------------------------------------------------- camera: framing and transitions
+let tween = null;
+function flyTo(pos, target, dur = 650) {
+  tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: target, start: performance.now(), dur };
+  invalidate();
+}
+function fitDistance(radius) {
+  const vfov = THREE.MathUtils.degToRad(camera.fov);
+  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+  return radius / Math.sin(Math.min(vfov, hfov) / 2) * 1.05;
+}
+function visibleBox(filter) {
+  const b = new THREE.Box3(), tmp = new THREE.Box3();
+  root.updateMatrixWorld(true);
+  for (const e of meshes) {
+    if (!e.mesh.visible || e.isRoof || (filter && !filter(e))) continue;
+    if (!filter && e.cat === "station" && e.key !== "plate") continue;
+    tmp.setFromObject(e.mesh); b.union(tmp);
+  }
+  return b;
+}
+function framing(filter, dir) {
+  const b = visibleBox(filter); if (b.isEmpty()) return null;
+  const c = b.getCenter(new THREE.Vector3()), r = b.getSize(new THREE.Vector3()).length() / 2;
+  const d = (dir || camera.position.clone().sub(controls.target)).clone().normalize();
+  return { p: c.clone().add(d.multiplyScalar(fitDistance(r))), t: c };
+}
+function frame(filter, dir) { const f = framing(filter, dir); if (f) flyTo(f.p, f.t); }
+const VIEWS = { iso: [1, 0.85, 0.75], front: [1, 0.02, 0.18], side: [0.02, 1, 0.12], back: [-1, 0.25, 0.4],
+  top: [0.001, 0.0, 1], bottom: [0.35, 0.45, -1] };
+const viewDir = v => { const d = VIEWS[v] || VIEWS.iso; return m2t(d[0], d[1], d[2]); };
+function setView(v) { frame(null, viewDir(v)); }
+
+// ---------------------------------------------------------------- details
+function applyDetail(i, animate = true) {
+  if (i < 0 || i >= DETAILS.length) { state.detail = -1; $("note").hidden = true; updateViewOffset(); refresh(); return; }
+  const d = DETAILS[i];
+  state.detail = i; state.mode = d.mode; state.isolate = null; state.selected = null; $("card").hidden = true;
+  state.explodeTarget = d.explode; if (!animate) state.explode = d.explode;
+  section.axis = d.section ? d.section.axis : ""; section.offset = d.section ? d.section.offset : 0;
+  syncSectionUi();
+  $("noteTitle").textContent = `${d.title} · ${i + 1}/${DETAILS.length}`;
+  $("noteText").textContent = d.text; $("note").hidden = false;
+  const small = stage.clientHeight < 640 || stage.clientWidth < 460;
+  $("note").classList.toggle("min", small); $("noteMin").textContent = small ? "+" : "–";
+  refresh(); placeAll();
+  const o = boxOrigin();
+  const k = camera.aspect < 1 ? Math.min(2.3, 1 / camera.aspect) : 1;
+  const tgt = m2t(o[0] + d.target[0], o[1] + d.target[1], o[2] + d.target[2]);
+  const pos = tgt.clone().add(m2t(d.cam[0] * k, d.cam[1] * k, d.cam[2] * k));
+  if (animate) flyTo(pos, tgt);
+  else { camera.position.copy(pos); controls.target.copy(tgt); controls.update(); }
+}
+
+// ---------------------------------------------------------------- part cards
+function selectKey(key, focus) {
+  const p = PARTS[key];
+  if (!p) { clearSelection(); return; }
+  state.selected = key;
+  $("cardName").textContent = p.name; $("cardSize").textContent = p.size || "";
+  $("cardRole").textContent = p.role || ""; $("cardNote").textContent = p.note || "";
+  $("card").hidden = false;
+  refresh();
+  if (focus) frame(e => e.key === key);
+}
+function clearSelection() { state.selected = null; $("card").hidden = true; refresh(); }
+
+function buildLists() {
+  const dl = $("detailList");
+  DETAILS.forEach((d, i) => {
+    const b = document.createElement("button"); b.className = "detail";
+    b.append(Object.assign(document.createElement("b"), { textContent: d.title }),
+             Object.assign(document.createElement("span"), { textContent: d.text }));
+    b.onclick = () => { applyDetail(i); collapseSheetIfSmall(); };
+    dl.appendChild(b);
+  });
+  const present = new Set(meshes.map(e => e.key));
+  const pl = $("partList");
+  for (const [cat, title] of CAT_ORDER) {
+    const keys = Object.keys(PARTS).filter(k => PARTS[k].cat === cat && present.has(k));
+    if (!keys.length) continue;
+    pl.appendChild(Object.assign(document.createElement("h2"), { textContent: title }));
+    for (const k of keys) {
+      const e = meshes.find(m => m.key === k);
+      const b = document.createElement("button"); b.className = "part"; b.dataset.key = k;
+      const sw = Object.assign(document.createElement("span"), { className: "sw" }); sw.style.background = e.color;
+      b.append(sw, Object.assign(document.createElement("span"), { className: "nm", textContent: PARTS[k].name }),
+               Object.assign(document.createElement("span"), { className: "sz", textContent: PARTS[k].size || "" }));
+      b.onclick = () => {
+        if (!modeShows(e)) state.mode = BOX_CATS.has(cat) ? "boitier" : cat === "support" ? "support" : "ensemble";
+        state.isolate = null; selectKey(k, true); collapseSheetIfSmall();
+      };
+      pl.appendChild(b);
+    }
+  }
+  const rep = $("report");
+  for (const [k, v] of Object.entries(REPORT)) {
+    const li = document.createElement("li");
+    li.append(Object.assign(document.createElement("b"), { textContent: k }), `: ${v}`);
+    rep.appendChild(li);
+  }
+}
+
+// ---------------------------------------------------------------- tap selection
+const ray = new THREE.Raycaster(); let down = null;
+renderer.domElement.addEventListener("pointerdown", ev => { if (ev.isPrimary) down = { x: ev.clientX, y: ev.clientY, t: performance.now(), multi: false };
+  else if (down) down.multi = true; });
+renderer.domElement.addEventListener("pointerup", ev => {
+  if (!down || !ev.isPrimary) return;
+  const d = down; down = null;
+  if (d.multi || Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 8 || performance.now() - d.t > 500) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1), camera);
+  const targets = meshes.filter(e => e.mesh.visible && !e.isRoof && !isGhost(e)).map(e => e.mesh);
+  const hit = ray.intersectObjects(targets, false).find(h => !section.axis || section.plane.distanceToPoint(h.point) >= -0.01);
+  if (hit) selectKey(hit.object.userData.key, false); else clearSelection();
+});
+
+// ---------------------------------------------------------------- annotations
+const labelEls = {};
+function activeNotes() {
+  if (state.detail >= 0) return new Set(DETAILS[state.detail].notes);
+  return state.allNotes ? new Set(Object.keys(ANNOTS)) : new Set();
+}
+function drawLabels() {
+  const show = activeNotes();
+  const svg = $("leaders"), box = $("labels");
+  const w = stage.clientWidth, h = stage.clientHeight, s = Math.min(1, w / 700);
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  const v = new THREE.Vector3(), items = [];
+  // free area: below the top bar and the note, above the card
+  const top0 = Math.max(0, ...["modes", "note"].map(id => $(id)).filter(e => !e.hidden && e.offsetParent)
+    .map(e => e.getBoundingClientRect().bottom - stage.getBoundingClientRect().top));
+  const bot0 = $("card").hidden ? h : $("card").getBoundingClientRect().top - stage.getBoundingClientRect().top;
+  for (const [id, { obj, a }] of Object.entries(anchors)) {
+    let el = labelEls[id];
+    let ok = show.has(id) && (!NEED[id] || keyVisible(NEED[id]));
+    if (ok) {
+      obj.getWorldPosition(v);
+      if (section.axis && section.plane.distanceToPoint(v) < -1.5) ok = false;
+      const p = v.clone().project(camera);
+      if (p.z > 1 || Math.abs(p.x) > 1.05 || Math.abs(p.y) > 1.05) ok = false;
+      if (ok) {
+        if (!el) { el = labelEls[id] = Object.assign(document.createElement("div"), { className: "label", textContent: a.text }); box.appendChild(el); }
+        el.style.display = "block";
+        const x = (p.x + 1) / 2 * w, y = (1 - p.y) / 2 * h;
+        items.push({ el, x, y, lx: x + a.dx * s, ly: y + a.dy * s, hw: el.offsetWidth / 2 + 3, hh: el.offsetHeight / 2 + 2 });
+      }
+    }
+    if (!ok && el) el.style.display = "none";
+  }
+  // push overlapping labels apart (vertical shift), staying inside the free area
+  const clamp = it => { it.lx = Math.max(it.hw, Math.min(w - it.hw, it.lx));
+    it.ly = Math.max(top0 + it.hh + 2, Math.min(bot0 - it.hh - 2, it.ly)); };
+  items.forEach(clamp);
+  for (let pass = 0; pass < 12; pass++) {
+    let moved = false;
+    items.sort((a, b) => a.ly - b.ly);
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+      const A = items[i], B = items[j];
+      const ox = A.hw + B.hw - Math.abs(A.lx - B.lx), oy = A.hh + B.hh - Math.abs(A.ly - B.ly);
+      if (ox > 0 && oy > 0) { A.ly -= oy / 2 + 1; B.ly += oy / 2 + 1; clamp(A); clamp(B); moved = true; }
+    }
+    if (!moved) break;
+  }
+  let paths = "";
+  for (const it of items) {
+    it.el.style.left = it.lx + "px"; it.el.style.top = it.ly + "px";
+    paths += `<line x1="${it.x}" y1="${it.y}" x2="${it.lx}" y2="${it.ly}" stroke="#1d2329" stroke-width="1.5"/>`
+           + `<circle cx="${it.x}" cy="${it.y}" r="4" fill="#fff" stroke="#1d2329" stroke-width="2"/>`;
+  }
+  svg.innerHTML = paths;
+}
+
+// ---------------------------------------------------------------- controls
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => {
+  state.mode = b.dataset.mode; state.isolate = null; state.detail = -1; $("note").hidden = true; updateViewOffset();
+  refresh(); frame();
+});
+$("fit").onclick = () => frame();
+$("explodeBtn").onclick = () => { state.explodeTarget = state.explodeTarget > 0.5 ? 0 : 1; refresh(); };
+$("sectionBtn").onclick = () => { section.axis = section.axis ? "" : "y"; section.offset = 0; syncSectionUi(); refresh(); };
+$("fs").onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else document.documentElement.requestFullscreen?.({ navigationUI: "hide" }).catch(() => {});
+};
+$("explode").oninput = e => { state.explode = state.explodeTarget = e.target.value / 100; refresh(); placeAll(); };
+document.querySelectorAll("[data-ex]").forEach(b => b.onclick = () => { state.explodeTarget = b.dataset.ex / 100; refresh(); });
+function syncSectionUi() {
+  const lim = section.axis === "x" ? 42 : 72;
+  const s = $("secOff"); s.min = -lim; s.max = lim; s.value = section.offset; s.disabled = !section.axis;
+  $("secOffV").textContent = section.axis ? `${mm(section.offset)} mm` : "—";
+}
+document.querySelectorAll("#secAxis button").forEach(b => b.onclick = () => { section.axis = b.dataset.axis; section.offset = 0; syncSectionUi(); refresh(); });
+$("secOff").oninput = e => { section.offset = parseFloat(e.target.value); syncSectionUi(); invalidate(); };
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => setView(b.dataset.view));
+$("annots").onchange = e => { state.allNotes = e.target.checked; invalidate(); };
+$("ghost").onchange = e => { state.ghost = e.target.checked; refresh(); };
+$("roof").onchange = e => { state.roof = e.target.checked; refresh(); };
+$("edges").onchange = e => { state.edges = e.target.checked; refresh(); };
+$("prev").onclick = () => applyDetail((state.detail - 1 + DETAILS.length) % DETAILS.length);
+$("next").onclick = () => applyDetail((state.detail + 1) % DETAILS.length);
+$("noteMin").onclick = () => { const n = $("note"); n.classList.toggle("min"); $("noteMin").textContent = n.classList.contains("min") ? "+" : "–"; };
+$("noteClose").onclick = () => applyDetail(-1);
+$("cardClose").onclick = clearSelection;
+$("cardFocus").onclick = () => state.selected && frame(e => e.key === state.selected);
+$("cardIsolate").onclick = () => {
+  state.isolate = state.isolate ? null : new Set([state.selected]);
+  refresh(); frame(state.isolate ? (e => e.key === state.selected) : null);
+};
+$("dockBtn").onclick = () => { if (state.pos < 1) state.pos = 900; state.posTarget = 0; invalidate(); };
+$("leaveBtn").onclick = () => { state.posTarget = 900; invalidate(); };
+$("pos").oninput = e => { state.pos = state.posTarget = parseFloat(e.target.value); placeAll(); };
+
+// tabs
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.tab === b.dataset.tab));
+  panel.classList.remove("collapsed");
+});
+
+// Bottom panel (portrait): tapping the grip collapses / expands it, dragging it sets the height.
+const sheetMode = () => getComputedStyle($("grip")).display !== "none";
+function collapseSheetIfSmall() { if (sheetMode() && stage.clientHeight < 460) panel.classList.add("collapsed"); }
+let drag = null;
+$("grip").addEventListener("pointerdown", ev => { drag = { y: ev.clientY, h: panel.offsetHeight, moved: false }; $("grip").setPointerCapture(ev.pointerId); });
+$("grip").addEventListener("pointermove", ev => {
+  if (!drag) return;
+  const dy = drag.y - ev.clientY; if (Math.abs(dy) > 6) drag.moved = true;
+  if (!drag.moved) return;
+  const hpx = Math.max(110, Math.min($("layout").clientHeight * 0.8, drag.h + dy));
+  panel.classList.remove("collapsed"); panel.style.setProperty("--sheet-h", hpx + "px");
+});
+$("grip").addEventListener("pointerup", () => { if (drag && !drag.moved) panel.classList.toggle("collapsed"); drag = null; });
+
+// ---------------------------------------------------------------- URL parameters (screenshots, links)
+function applyHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  state.pos = state.posTarget = parseFloat(h.get("pos") || "0");
+  if (h.get("mode")) state.mode = h.get("mode");
+  const ex = h.get("explode"); if (ex !== null) state.explode = state.explodeTarget = Math.min(1, parseFloat(ex));
+  if (h.get("roof") === "0") { state.roof = false; $("roof").checked = false; }
+  if (h.get("ghost") === "1") { state.ghost = true; $("ghost").checked = true; }
+  if (h.get("notes") === "1") { state.allNotes = true; $("annots").checked = true; }
+  if (h.get("section")) { const [ax, off] = h.get("section").split(":"); section.axis = ax; section.offset = parseFloat(off || "0"); }
+  if (h.get("ui") === "0") { panel.style.display = "none"; $("overlay").style.display = "none"; }
+  if (h.get("panel") === "min") panel.classList.add("collapsed");
+  if (h.get("tab")) document.querySelector(`#tabs button[data-tab="${h.get("tab")}"]`)?.click();
+  if (h.get("panel") === "min") panel.classList.add("collapsed");
+  syncSectionUi(); resize(); refresh(); placeAll();
+  if (h.get("detail") !== null) applyDetail(parseInt(h.get("detail"), 10), false);
+  else {
+    const f = framing(null, viewDir(h.get("view") || "iso"));
+    if (f) { camera.position.copy(f.p); controls.target.copy(f.t); controls.update(); }
+  }
+  if (h.get("select")) selectKey(h.get("select"), false);
+  invalidate();
+}
+
+// ---------------------------------------------------------------- loop and resizing
+function resize() {
+  const w = Math.max(1, stage.clientWidth), h = Math.max(1, stage.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; updateViewOffset();
+}
+// The image center moves down below the top bar and the detail note: the model stays unobstructed.
+let viewShift = -1;
+function updateViewOffset() {
+  const w = Math.max(1, stage.clientWidth), h = Math.max(1, stage.clientHeight);
+  const n = $("note"), t = $("modes");
+  const covered = (!n.hidden && n.offsetParent ? n.getBoundingClientRect().bottom : t.offsetParent ? t.getBoundingClientRect().bottom : 0)
+    - stage.getBoundingClientRect().top;
+  const shift = Math.round(Math.max(0, Math.min(h * 0.3, covered * 0.5)));
+  if (shift === viewShift && camera.view && camera.view.fullWidth === w && camera.view.fullHeight === h) return;
+  viewShift = shift;
+  camera.setViewOffset(w, h, 0, -shift, w, h);
+  camera.updateProjectionMatrix(); invalidate();
+}
+new ResizeObserver(updateViewOffset).observe($("note"));
+new ResizeObserver(resize).observe(stage);
+resize();
+
+const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+let last = performance.now();
+renderer.setAnimationLoop(now => {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (Math.abs(state.posTarget - state.pos) > 0.01) {
+    state.pos += Math.sign(state.posTarget - state.pos) * Math.min(Math.abs(state.posTarget - state.pos), 300 * dt); placeAll();
+  }
+  if (Math.abs(state.explodeTarget - state.explode) > 0.001) {
+    state.explode += (state.explodeTarget - state.explode) * Math.min(1, dt * 6);
+    if (Math.abs(state.explodeTarget - state.explode) <= 0.002) state.explode = state.explodeTarget;
+    placeAll();
+  }
+  if (tween) {
+    const t = Math.min(1, (now - tween.start) / tween.dur), k = ease(t);
+    camera.position.lerpVectors(tween.p0, tween.p1, k); controls.target.lerpVectors(tween.t0, tween.t1, k);
+    if (t >= 1) tween = null;
+    dirty = true;
+  }
+  controls.update();
+  if (!dirty) return;
+  dirty = false;
+  updateSectionPlane();
+  renderer.render(scene, camera);
+  drawLabels();
+});
+</script>
+</body>
+</html>

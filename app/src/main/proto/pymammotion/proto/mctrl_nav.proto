@@ -1,0 +1,619 @@
+syntax = "proto3";
+
+// Java options added by DumbyLuba; schema unchanged.
+option java_package = "fr.luba.poc.proto";
+option java_outer_classname = "MctrlNavProto";
+
+import "pymammotion/proto/common.proto";
+
+message NavLatLonUp {
+  double lat = 1;
+  double lon = 2;
+}
+
+message NavBorderState {
+  int32 bdstate = 1;
+}
+
+message NavPosUp {
+  float x = 1;
+  float y = 2;
+  int32 status = 3;
+  int32 toward = 4;
+  int32 stars = 5;
+  float age = 6;
+  float latStddev = 7;
+  float lonStddev = 8;
+  int32 l2dfStars = 9;
+  int32 posType = 10;
+  int64 cHashId = 11;
+  int32 posLevel = 12;
+}
+
+message NavBorderDataGetAck {
+  int32 jobId = 1;
+  int32 currentFrame = 2;
+}
+
+message NavObstiBorderDataGet {
+  int32 obstacleIndex = 1;
+  int32 currentFrame = 2;
+  int32 obstaclesLen = 3;
+}
+
+message NavObstiBorderDataGetAck {
+  int32 obstacleIndex = 1;
+  int32 currentFrame = 2;
+}
+
+message NavCHlLineData {
+  int32 startJobRI = 1;
+  int32 endJobRI = 2;
+  int32 currentFrame = 3;
+  int32 channelLineLen = 4;
+}
+
+message NavCHlLineDataAck {
+  int32 startJobRI = 1;
+  int32 endJobRI = 2;
+  int32 currentFrame = 3;
+}
+
+message NavTaskInfo {
+  int32 area = 1;
+  int32 time = 2;
+  int32 allFrame = 3;
+  int32 currentFrame = 4;
+  int32 pathlen = 5;
+  repeated CommDataCouple dc = 6;
+}
+
+message NavBorderDataGet {
+  int32 jobId = 1;
+  int32 currentFrame = 2;
+  int32 borderLen = 3;
+}
+
+message NavOptLineUp {
+  int32 startJobRI = 1;
+  int32 endJobRI = 2;
+  int32 allFrame = 3;
+  int32 currentFrame = 4;
+  int32 channelDataLen = 5;
+  repeated CommDataCouple dc = 6;
+}
+
+message NavOptiBorderInfo {
+  int32 jobId = 1;
+  int32 allFrame = 2;
+  int32 currentFrame = 3;
+  int32 borderDataLen = 4;
+  repeated CommDataCouple dc = 5;
+}
+
+message NavOptObsInfo {
+  int32 obstacleId = 1;
+  int32 allFrame = 2;
+  int32 currentFrame = 3;
+  int32 obstacleDataLen = 4;
+  repeated CommDataCouple dc = 5;
+}
+
+message NavStartJob {
+  int64 jobId = 1;
+  int32 jobVer = 2;
+  int32 jobMode = 3;
+  int32 rainTactics = 4;
+  int32 knifeHeight = 5;
+  float speed = 6;
+  int32 channelWidth = 7;
+  int32 UltraWave = 8;
+  int32 channelMode = 9;
+}
+
+message NavTaskProgress {
+  int32 taskProgress = 1;
+}
+
+message NavResFrame {
+  int32 frameid = 1;
+}
+
+message NavGetHashList {
+  int32 pver = 1;
+  int32 subCmd = 2;
+  int32 totalFrame = 3;
+  int32 currentFrame = 4;
+  fixed64 dataHash = 5;
+  string reserved = 6;
+}
+
+message NavGetHashListAck {
+  int32 pver = 1;
+  int32 subCmd = 2;
+  int32 totalFrame = 3;
+  int32 currentFrame = 4;
+  fixed64 dataHash = 5;
+  int32 hashLen = 6;
+  string reserved = 7;
+  int32 result = 8;
+  repeated int64 dataCouple = 13;
+}
+
+message NavGetCommData {
+  int32 pver = 1;
+  int32 subCmd = 2;
+  int32 action = 3;
+  int32 type = 4;
+  int64 hash = 5;
+  int64 paternalHashA = 6;
+  int64 paternalHashB = 7;
+  int32 totalFrame = 8;
+  int32 currentFrame = 9;
+  fixed64 dataHash = 10;
+  string reserved = 11;
+}
+
+message NavGetNameTime {
+  string name = 1;
+  fixed64 create_time = 2;
+  fixed64 modify_time = 3;
+}
+
+message NavGetCommDataAck {
+  int32 pver = 1;
+  int32 subCmd = 2;
+  int32 result = 3;
+  int32 action = 4;
+  int32 type = 5;
+  fixed64 Hash = 6;
+  fixed64 paternalHashA = 7;
+  fixed64 paternalHashB = 8;
+  int32 totalFrame = 9;
+  int32 currentFrame = 10;
+  fixed64 dataHash = 11;
+  int32 dataLen = 12;
+  repeated CommDataCouple dataCouple = 13;
+  string reserved = 14;
+  NavGetNameTime nameTime = 15;
+}
+
+message NavReqCoverPath {
+  int32 pver = 1;
+  fixed64 jobId = 2;
+  int32 jobVer = 3;
+  int32 jobMode = 4;
+  int32 subCmd = 5;
+  int32 edgeMode = 6;
+  int32 knifeHeight = 7;
+  int32 channelWidth = 8;
+  int32 UltraWave = 9;
+  int32 channelMode = 10;
+  int32 toward = 11;
+  float speed = 12;
+  repeated fixed64 zoneHashs = 13;
+  fixed64 pathHash = 14;
+  string reserved = 15;
+  int32 result = 16;
+  int32 toward_mode = 17;
+  int32 toward_included_angle = 18;
+  float ride_boundary_distance = 19;
+  // App-side choice of the advanced (1) or basic (0) task settings screen; not mower behaviour.
+  int32 task_settings_mode = 20;
+  // "Auto-reverse Mowing Direction" (flip the mowing direction between runs): echoed as 11 on / 10 off,
+  // packed on some firmware and a bare varint on others.
+  repeated int32 auto_change_direction = 21;
+}
+
+message NavUploadZigZagResult {
+  int32 pver = 1;
+  fixed64 jobId = 2;
+  int32 jobVer = 3;
+  int32 result = 4;
+  int32 area = 5;
+  int32 time = 6;
+  int32 totalZoneNum = 7;
+  int32 currentZonePathNum = 8;
+  int32 currentZonePathId = 9;
+  int32 currentZone = 10;
+  fixed64 currentHash = 11;
+  int32 totalFrame = 12;
+  int32 currentFrame = 13;
+  int32 channelMode = 14;
+  int32 channelModeId = 15;
+  fixed64 dataHash = 16;
+  int32 dataLen = 17;
+  string reserved = 18;
+  repeated CommDataCouple dataCouple = 19;
+  int32 subCmd = 20;
+}
+
+message NavUploadZigZagResultAck {
+  int32 pver = 1;
+  int32 currentZone = 2;
+  fixed64 currentHash = 3;
+  int32 totalFrame = 4;
+  int32 currentFrame = 5;
+  fixed64 dataHash = 6;
+  string reserved = 7;
+  int32 subCmd = 8;
+}
+
+message NavTaskCtrl {
+  int32 type = 1;
+  int32 action = 2;
+  int32 result = 3;
+  string reserved = 4;
+}
+
+message NavTaskIdRw {
+  int32 pver = 1;
+  int32 subCmd = 2;
+  string taskName = 3;
+  string taskId = 4;
+  int32 result = 5;
+  string reserved = 6;
+}
+
+message NavSysHashOverview {
+  fixed64 commonhashOverview = 1;
+  fixed64 pathHashOverview = 2;
+}
+
+message NavTaskBreakPoint {
+  float x = 1;
+  float y = 2;
+  int32 toward = 3;
+  int32 flag = 4;
+  int32 action = 5;
+  fixed64 zoneHash = 6;
+}
+
+message NavPlanJobSet {
+  int32 pver = 1;
+  int32 subCmd = 2;
+  int32 area = 3;
+  int32 workTime = 4;
+  string version = 5;
+  string id = 6;
+  string userId = 7;
+  string deviceId = 8;
+  string planId = 9;
+  string taskId = 10;
+  string jobId = 11;
+  string startTime = 12;
+  string endTime = 13;
+  int32 week = 14;
+  int32 knifeHeight = 15;
+  int32 model = 16;
+  int32 edgeMode = 17;
+  int32 requiredTime = 18;
+  int32 routeAngle = 19;
+  int32 routeModel = 20;
+  int32 routeSpacing = 21;
+  int32 ultrasonicBarrier = 22;
+  int32 totalPlanNum = 23;
+  int32 PlanIndex = 24;
+  int32 result = 25;
+  float speed = 26;
+  string taskName = 27;
+  string jobName = 28;
+  repeated fixed64 zoneHashs = 29;
+  string reserved = 30;
+  string startDate = 31;
+  string endDate = 32;
+  int32 triggerType = 33;
+  int32 day = 34;
+  repeated fixed32 weeks = 35;
+  int64 remained_seconds = 36;
+  int32 towardMode = 37;
+  int32 towardIncludedAngle = 38;
+  // "Edge Coverage", as NavReqCoverPath field 19; the app sends it on every full plan write.
+  float ride_boundary_distance = 39;
+  // The app's app_display_mode, as NavReqCoverPath field 20.
+  int32 task_settings_mode = 40;
+  // The app's string reserved2, as NavReqCoverPath field 21 (wire-identical for values < 128).
+  repeated int32 auto_change_direction = 41;
+}
+
+message NavUnableTimeSet {
+  int32 subCmd = 1;
+  string deviceId = 2;
+  string unableStartTime = 3;
+  string unableEndTime = 4;
+  int32 result = 5;
+  string reserved = 6;
+  int32 trigger = 7;
+}
+
+message chargePileType {
+  int32 toward = 1;
+  float x = 2;
+  float y = 3;
+}
+
+message SimulationCmdData {
+  int32 subCmd = 1;
+  int32 param_id = 2;
+  repeated int32 param_value = 3;
+}
+
+message WorkReportUpdateCmd {
+  int32 subCmd = 1;
+}
+
+message WorkReportUpdateAck {
+  bool update_flag = 1;
+  int32 info_num = 2;
+}
+
+message WorkReportCmdData {
+  int32 subCmd = 1;
+  int32 getInfoNum = 2;
+}
+
+message WorkReportInfoAck {
+  bool interrupt_flag = 1;
+  int64 start_work_time = 2;
+  int64 end_work_time = 3;
+  int32 work_time_used = 4;
+  double work_ares = 5;
+  int32 work_progress = 6;
+  int32 height_of_knife = 7;
+  int32 work_type = 8;
+  int32 work_result = 9;
+  int32 total_ack_num = 10;
+  int32 current_ack_num = 11;
+  int32 job_content = 12;
+}
+
+// "Continue last job": resume the cloud work report work_id; the device echoes it with result set.
+message WorkReportStartWorkingMsg {
+  uint64 accountID = 1;
+  uint64 work_id = 2;
+  uint64 stamp = 3;
+  int32 result = 4;
+  int32 type = 5;
+}
+
+message app_request_cover_paths_t {
+  int32 pver = 1;
+  int32 subCmd = 2;
+  int32 totalFrame = 3;
+  int32 currentFrame = 4;
+  fixed64 dataHash = 5;
+  int64 transaction_id = 6;
+  repeated int64 reserved = 7;
+  repeated fixed64 hash_list = 8;
+}
+
+message cover_path_packet_t {
+  fixed64 path_hash = 1;
+  int32 path_type = 2;
+  int32 path_total = 3;
+  int32 path_cur = 4;
+  fixed64 zone_hash = 5;
+  repeated CommDataCouple dataCouple = 6;
+}
+
+message cover_path_upload_t {
+  int32 pver = 1;
+  int32 result = 2;
+  int32 subCmd = 3;
+  int32 area = 4;
+  int32 time = 5;
+  int32 totalFrame = 6;
+  int32 currentFrame = 7;
+  int32 total_path_num = 8;
+  int32 valid_path_num = 9;
+  fixed64 dataHash = 10;
+  int64 transaction_id = 11;
+  repeated int64 reserved = 12;
+  int32 dataLen = 13;
+  repeated cover_path_packet_t path_packets = 14;
+}
+
+message zone_start_precent_t {
+  fixed64 dataHash = 1;
+  float x = 2;
+  float y = 3;
+  int32 index = 4;
+}
+
+message vision_ctrl_msg {
+  int32 type = 1;
+  int32 cmd = 2;
+}
+
+message nav_sys_param_msg {
+  int32 rw = 1;
+  int32 id = 2;
+  int32 context = 3;
+}
+
+message nav_plan_task_execute {
+  int32 subCmd = 1;
+  string id = 2;
+  string name = 3;
+  int32 result = 4;
+}
+
+message costmap_t {
+  int32 width = 1;
+  int32 height = 2;
+  float center_x = 3;
+  float center_y = 4;
+  float yaw = 5;
+  float res = 6;
+  repeated int32 costmap = 7;
+}
+
+message svg_message_t {
+  double x_move = 1;
+  double y_move = 2;
+  double scale = 3;
+  double rotate = 4;
+  double base_width_m = 5;
+  double base_height_m = 6;
+  int32 base_width_pix = 7;
+  int32 base_height_pix = 8;
+  string svg_file_name = 9;
+  string svg_file_data = 10;
+  int32 name_count = 11;
+  int32 data_count = 12;
+  bool hide_svg = 13;
+}
+
+message svg_message_ack_t {
+  int32 pver = 1;
+  int32 subCmd = 2;
+  int32 totalFrame = 3;
+  int32 currentFrame = 4;
+  fixed64 dataHash = 5;
+  fixed64 paternalHashA = 6;
+  int32 type = 7;
+  int32 result = 8;
+  svg_message_t svg_message = 9;
+}
+
+message plan_task_name_id_t {
+  string id = 1;
+  string name = 2;
+}
+
+message nav_get_all_plan_task {
+  repeated plan_task_name_id_t tasks = 1;
+}
+
+message area_hash_name {
+  fixed64 hash = 1;
+  string name = 2;
+}
+
+message AppGetAllAreaHashName {
+  string deviceId = 1;
+  repeated area_hash_name hashnames = 2;
+}
+
+message NavTaskCtrlAck {
+  int32 type = 1;
+  int32 action = 2;
+  int32 result = 3;
+  int32 nav_state = 4;
+  string reserved = 5;
+}
+
+message NavMapNameMsg {
+  int32 rw = 1;
+  fixed64 hash = 2;
+  string name = 3;
+  int32 result = 4;
+  string deviceId = 5;
+}
+
+message NavEdgePoints {
+  int32 result = 1;
+  int32 action = 2;
+  int32 type = 3;
+  fixed64 Hash = 4;
+  int32 totalFrame = 5;
+  int32 currentFrame = 6;
+  repeated CommDataCouple dataCouple = 7;
+}
+
+message NavEdgePointsAck {
+  int32 result = 1;
+  int32 action = 2;
+  int32 type = 3;
+  fixed64 Hash = 4;
+  int32 totalFrame = 5;
+  int32 currentFrame = 6;
+}
+
+message ManualElementMessage {
+  int32 pver = 1;
+  int32 type = 2;
+  int32 shape = 3;
+  int32 result = 4;
+  int32 subCmd = 5;
+  fixed64 dataHash = 6;
+  bool ifHide = 7;
+  string reserved = 8;
+  double point1_center_x = 9;
+  double point1_center_y = 10;
+  double point2_width_x = 11;
+  double point2_height_y = 12;
+  double rotate_radius = 13;
+  int32 point_count = 14;
+  repeated CommDataCouple dataCouple = 15;
+}
+
+message MctlNav {
+  oneof SubNavMsg {
+    NavLatLonUp toapp_lat_up = 1;
+    NavPosUp toapp_pos_up = 2;
+    NavCHlLineData todev_chl_line_data = 3;
+    NavTaskInfo toapp_task_info = 4;
+    NavOptLineUp toapp_opt_line_up = 5;
+    NavOptiBorderInfo toapp_opt_border_info = 6;
+    NavOptObsInfo toapp_opt_obs_info = 7;
+    NavResFrame todev_task_info_ack = 8;
+    NavResFrame todev_opt_border_info_ack = 9;
+    NavResFrame todev_opt_obs_info_ack = 10;
+    NavResFrame todev_opt_line_up_ack = 11;
+    chargePileType toapp_chgpileto = 12;
+    int32 todev_sustask = 13;
+    int32 todev_rechgcmd = 14;
+    int32 todev_edgecmd = 15;
+    int32 todev_draw_border = 16;
+    int32 todev_draw_border_end = 17;
+    int32 todev_draw_obs = 18;
+    int32 todev_draw_obs_end = 19;
+    int32 todev_chl_line = 20;
+    int32 todev_chl_line_end = 21;
+    int32 todev_save_task = 22;
+    int32 todev_cancel_suscmd = 23;
+    int32 todev_reset_chg_pile = 24;
+    int32 todev_cancel_draw_cmd = 25;
+    int32 todev_one_touch_leave_pile = 26;
+    NavStartJob todev_mow_task = 27;
+    NavBorderState toapp_bstate = 28;
+    int32 todev_lat_up_ack = 29;
+    NavGetHashList todev_gethash = 30;
+    NavGetHashListAck toapp_gethash_ack = 31;
+    NavGetCommData todev_get_commondata = 32;
+    NavGetCommDataAck toapp_get_commondata_ack = 33;
+    NavReqCoverPath bidire_reqconver_path = 34;
+    NavUploadZigZagResult toapp_zigzag = 35;
+    NavUploadZigZagResultAck todev_zigzag_ack = 36;
+    NavTaskCtrl todev_taskctrl = 37;
+    NavTaskIdRw bidire_taskid = 38;
+    NavTaskBreakPoint toapp_bp = 39;
+    NavPlanJobSet todev_planjob_set = 40;
+    NavUnableTimeSet todev_unable_time_set = 41;
+    SimulationCmdData simulation_cmd = 42;
+    WorkReportUpdateCmd todev_work_report_update_cmd = 43;
+    WorkReportUpdateAck toapp_work_report_update_ack = 44;
+    WorkReportCmdData todev_work_report_cmd = 45;
+    WorkReportInfoAck toapp_work_report_ack = 46;
+    WorkReportInfoAck toapp_work_report_upload = 47;
+    app_request_cover_paths_t app_request_cover_paths = 48;
+    cover_path_upload_t cover_path_upload = 49;
+    zone_start_precent_t zone_start_precent = 50;
+    vision_ctrl_msg vision_ctrl = 51;
+    nav_sys_param_msg nav_sys_param_cmd = 52;
+    nav_plan_task_execute plan_task_execute = 53;
+    costmap_t toapp_costmap = 54;
+    plan_task_name_id_t plan_task_name_id = 55;
+    nav_get_all_plan_task all_plan_task = 56;
+    NavTaskCtrlAck todev_taskctrl_ack = 57;
+    NavMapNameMsg toapp_map_name_msg = 58;
+    svg_message_ack_t todev_svg_msg = 59;
+    svg_message_ack_t toapp_svg_msg = 60;
+    AppGetAllAreaHashName toapp_all_hash_name = 61;
+    NavEdgePoints toapp_edge_points = 62;
+    NavEdgePointsAck toapp_edge_points_ack = 63;
+    ManualElementMessage toapp_manual_element = 64;
+    WorkReportStartWorkingMsg todev_work_report_start_working_msg = 65;
+  }
+}

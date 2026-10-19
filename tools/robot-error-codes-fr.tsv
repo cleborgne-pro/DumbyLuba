@@ -1,0 +1,199 @@
+# French labels added or corrected for Mammotion codes (code<TAB>label), written by the project.
+# They take precedence over PyMammotion's fr_implication column; see tools/build-robot-error-codes.py.
+1132	Déplacement de la station de charge détecté
+1194	Échec du positionnement : obstacles autour du robot
+1307	Accostage terminé : approche infrarouge de la station réussie
+2401	Anomalie du capteur LiDAR
+2407	Anomalie du capteur LiDAR
+2501	Échec du chargement de la centrale inertielle (IMU)
+2502	Robot trop incliné
+2703	Capteur de distance gauche anormal
+2704	Capteur de distance avant gauche anormal
+2710	Erreur de communication du capteur de distance gauche
+2712	Erreur de communication du capteur de distance avant gauche
+2801	Capteur de soulèvement déclenché
+3101	Capteur anti-pincement déclenché
+3102	Capteur anti-pincement déclenché
+3103	Capteur anti-pincement déclenché
+3104	Capteur anti-pincement déclenché
+3201	Réservoir d'eau incomplet, fonctionnement impossible
+3789	Vibrations excessives détectées
+5002	Vision : forte présence d'eau dans le champ de la caméra
+5004	Vision : eau détectée dans le champ de la caméra
+5008	Objectif de la caméra de vision sale
+6006	Dôme du LiDAR sale
+7001	Température MOS de la carte de commande des roues anormale : protection déclenchée
+7101	Température MOS de la carte de commande du disque de coupe trop élevée : protection déclenchée
+7501	Surintensité du moteur du bras oscillant
+7502	Surchauffe du moteur du bras oscillant
+7503	Moteur du bras oscillant bloqué
+7505	Surintensité du moteur du crochet
+7506	Moteur du crochet bloqué
+8003	Batterie faible au démarrage
+8101	Échec de la charge
+8102	Charge suspendue : contacts de charge en surchauffe
+9008	Certificat de l'appareil bientôt expiré
+9009	Mémoire saturée : un processus système a été arrêté
+9010	Mémoire saturée : un service de plateforme a été arrêté
+9011	Mémoire saturée : le processus de navigation a été arrêté
+9012	Mémoire saturée : le processus de perception visuelle a été arrêté
+9013	Mémoire saturée : un processus de positionnement a été arrêté
+9019	Arrêt imminent : le robot n'a pas pu passer en veille
+9021	Redémarrer le robot pour activer la 4G
+11100	Tâche impossible après le coucher du soleil : état iNavi anormal
+11101	Tâche suspendue et retour à la station après le coucher du soleil : iNavi anormal
+11103	Échec d'enregistrement de la zone interdite : chevauchement avec une zone sans obstacle
+11104	Tâche impossible après le coucher du soleil
+11105	Tâche suspendue et retour à la station après le coucher du soleil
+11106	Zone isolée : pelouse non reliée
+11109	Positionnement faible ou éclairage insuffisant pendant la mise à jour de la station
+11110	Opération impossible : la tâche ne peut pas reprendre
+11111	La carte a changé : la tâche ne peut pas reprendre
+11112	Robot coincé
+11113	Passage bloqué par des obstacles
+11114	Retour à la station impossible depuis la position actuelle
+11116	Protection pluie activée
+11117	Échec du retour à la station
+11120	Enfant détecté près du robot : tâche suspendue jusqu'à son départ
+11121	Obstacle devant : impossible d'avancer
+11122	Passage vers la zone cible bloqué
+11123	Une partie de la zone de travail est inaccessible
+11125	Clé de sécurité non insérée
+11131	Lames arrêtées : soulèvement arrière en marche arrière
+11132	Lames arrêtées : patinage des roues en marche arrière
+11133	Lames arrêtées : soulèvement arrière pendant un pivot sur place
+11134	Lames arrêtées : patinage des roues pendant un pivot sur place
+11135	Lames arrêtées : marche arrière au-delà de la distance sûre pour les lames
+11136	Échec du retour à la station : vérifier la station de charge
+11137	Stations de charge trop proches : ajout impossible
+1000003	Nombre maximal de clôtures virtuelles atteint
+1000004	Nombre maximal de zones interdites atteint
+1000005	Nombre maximal de zones sans obstacle atteint
+1000006	Cette clôture virtuelle existe déjà
+1000007	Cette zone interdite existe déjà
+1000008	Cette zone sans obstacle existe déjà
+1000009	Élément de carte ajouté invalide
+1000010	Après la sortie de la station, le robot n'est pas sur la pelouse
+1000011	Échec de la recharge
+1000012	Périmètre non enregistré : robot trop loin du point de départ
+1000013	Zone trop petite : création impossible
+1000014	Échec de l'activation du disque de coupe latéral
+1000015	Limite de surface de tonte atteinte : tâche arrêtée automatiquement
+1000016	Clôture virtuelle non enregistrée : chevauchement avec un motif
+1000017	Zone interdite non enregistrée : chevauchement avec un motif
+1000018	Cartographie impossible ici : emplacement trop dégagé
+1000019	Échec du positionnement
+1000020	Système de positionnement sans réponse
+1000021	Station de charge introuvable
+1000022	Lumière insuffisante la nuit : fonction indisponible
+2000701	Roues avant du robot peut-être coincées
+2000807	Grille de pompe non détectée
+2001001	Panier filtrant non détecté
+2001002	Panier filtrant interne installé : déplacement le long des parois impossible
+2001101	Eau à l'intérieur du robot
+2001102	Infiltration d'eau sur la carte électronique
+6000678	Moteur du disque de coupe latéral : erreur de communication
+6000680	Moteur du disque de coupe latéral : température trop basse
+6000682	Moteur du disque de coupe latéral : surintensité
+6000684	Moteur du disque de coupe latéral : contrôleur en surcharge
+6000685	Moteur du disque de coupe latéral : surcharge
+6000690	Moteur du disque de coupe latéral : délai de commutation dépassé
+6000691	Moteur du disque de coupe latéral : délai de démarrage dépassé
+6000692	Moteur du disque de coupe latéral : température anormale
+6000693	Moteur du disque de coupe latéral : température MOS anormale
+6000694	Moteur du disque de coupe latéral : délai de commutation dépassé au démarrage
+6001001	Moteur d'aspiration gauche : erreur de communication
+6001002	Moteur d'aspiration gauche : tension basse
+6001003	Moteur d'aspiration gauche : surintensité du module de commande
+6001004	Moteur d'aspiration gauche : contrôleur en surcharge
+6001005	Moteur d'aspiration gauche : surcharge
+6001006	Moteur d'aspiration gauche : délai de commutation dépassé
+6001007	Moteur d'aspiration gauche : délai de démarrage dépassé
+6001008	Moteur d'aspiration gauche : température anormale
+6001009	Moteur d'aspiration gauche : température MOS anormale
+6001010	Moteur d'aspiration gauche : délai de commutation dépassé au démarrage
+6001011	Moteur d'aspiration gauche : délai de mise hors tension dépassé
+6001012	Moteur d'aspiration gauche : délai de commande dépassé
+6001013	Moteur d'aspiration droit : délai de mise hors tension dépassé
+6001014	Moteur d'aspiration droit : délai de commande dépassé
+6001015	Moteur d'aspiration arrière : erreur de communication
+6001016	Moteur d'aspiration arrière : tension basse
+6001017	Moteur d'aspiration arrière : surintensité du module de commande
+6001018	Moteur d'aspiration arrière : contrôleur en surcharge
+6001019	Moteur d'aspiration arrière : surcharge
+6001020	Moteur d'aspiration arrière : délai de commutation dépassé
+6001021	Moteur d'aspiration arrière : délai de démarrage dépassé
+6001022	Moteur d'aspiration arrière : température anormale
+6001023	Moteur d'aspiration arrière : température MOS anormale
+6001024	Moteur d'aspiration arrière : délai de commutation dépassé au démarrage
+6001025	Moteur d'aspiration arrière : délai de mise hors tension dépassé
+6001026	Moteur d'aspiration arrière : délai de commande dépassé
+6001101	Moteur d'aspiration droit : erreur de communication
+6001102	Moteur d'aspiration droit : tension basse
+6001103	Moteur d'aspiration droit : surintensité du module de commande
+6001104	Moteur d'aspiration droit : contrôleur en surcharge
+6001105	Moteur d'aspiration droit : surcharge
+6001106	Moteur d'aspiration droit : délai de commutation dépassé
+6001107	Moteur d'aspiration droit : délai de démarrage dépassé
+6001108	Moteur d'aspiration droit : température anormale
+6001109	Moteur d'aspiration droit : température MOS anormale
+6001110	Moteur d'aspiration droit : délai de commutation dépassé au démarrage
+6001501	Moteur de roue gauche bloqué
+6001502	Moteur de roue gauche en surcharge
+6001503	Moteur de roue gauche : perte de phase
+6001504	Moteur de roue gauche : déséquilibre de courant
+6001505	Moteur de roue gauche : erreur du capteur à effet Hall
+6001506	Moteur de roue gauche : dérive du zéro du capteur à effet Hall
+6001507	Moteur de roue gauche : courant de bus anormal
+6001508	Moteur de roue gauche proche de la surcharge
+6001509	Moteur de roue gauche : anomalie de communication
+6001510	Moteur de roue gauche : surtension
+6001511	Moteur de roue gauche : sous-tension
+6001512	Moteur de roue gauche : délai de réponse en vitesse dépassé
+6001513	Moteur de roue gauche : surintensité du module de commande
+6001514	Moteur de roue gauche : surintensité de phase
+6001515	Moteur de roue gauche : température trop élevée
+6001516	Moteur de roue gauche : erreur du capteur de température
+6001517	Moteur de roue gauche : température MOS trop élevée
+6001518	Moteur de roue gauche : température MOS trop basse
+6001519	Moteur de roue gauche : délai de mise hors tension dépassé
+6001520	Moteur de roue gauche : délai de commande dépassé
+6001521	Moteur de roue gauche : dérive du zéro
+6001522	Moteur de roue droit : délai de mise hors tension dépassé
+6001523	Moteur de roue droit : délai de commande dépassé
+6001524	Moteur de roue droit : dérive du zéro
+6001601	Moteur de roue droit bloqué
+6001602	Moteur de roue droit en surcharge
+6001603	Moteur de roue droit : perte de phase
+6001604	Moteur de roue droit : déséquilibre de courant
+6001605	Moteur de roue droit : erreur du capteur à effet Hall
+6001606	Moteur de roue droit : dérive du zéro du capteur à effet Hall
+6001607	Moteur de roue droit : courant de bus anormal
+6001608	Moteur de roue droit proche de la surcharge
+6001609	Moteur de roue droit : erreur de communication
+6001610	Moteur de roue droit : surtension
+6001611	Moteur de roue droit : sous-tension
+6001612	Moteur de roue droit : délai de réponse en vitesse dépassé
+6001613	Moteur de roue droit : surintensité du module de commande
+6001614	Moteur de roue droit : surintensité de phase
+6001615	Moteur de roue droit : température trop élevée
+6001616	Moteur de roue droit : erreur du capteur de température
+6001617	Moteur de roue droit : température MOS trop élevée
+6001618	Moteur de roue droit : température MOS trop basse
+7000001	Batterie faible
+7000002	Batterie faible
+7000003	Surintensité batterie : protection activée
+7000004	Batterie trop froide : alimentation indisponible
+7000005	Batterie trop chaude : alimentation indisponible
+7000006	Batterie mal fixée
+7000101	Batterie trop froide : charge impossible
+7000102	Batterie trop chaude : charge impossible
+7000103	Erreur de charge
+7000104	Échec de la charge
+7000107	Mauvais contact entre le robot et la station de charge
+8000031	Un processus système a planté (vidage mémoire)
+8000032	Un service de plateforme a planté (vidage mémoire)
+8000033	Le processus de navigation a planté (vidage mémoire)
+8000034	Le processus de perception visuelle a planté (vidage mémoire)
+8000035	Un processus de positionnement a planté (vidage mémoire)
+8000036	Trace de plantage du noyau d'une exécution précédente trouvée

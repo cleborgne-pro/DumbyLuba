@@ -1,0 +1,257 @@
+package fr.luba.poc.ble
+
+import fr.luba.poc.diagnostics.CampaignConfig
+import fr.luba.poc.diagnostics.MotorWatchdogResult
+import fr.luba.poc.map.Point
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/**
+ * End-to-end moves and supervised tests: go-to-point move (and contact on the way), bumper test,
+ * command cutoff (motor watchdog), unlock, back-off before resume, Mammotion task, BLE campaign.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class RobotBleEssaisTest {
+    private val bench = RobotBench(Point(5.0, 2.0), 90.0)
+    @After fun tearDown() = bench.close()
+
+    private fun connectedInZone() { bench.installMap(); bench.connect() }
+
+    // ───── Go-to-point move ─────
+
+    @Test fun `go-to-point move with blades stopped up to the destination`() {
+        connectedInZone()
+        bench.ble.previewNavTest(2.0)
+        assertTrue(bench.state.navTest.preview, bench.state.navTest.preview.startsWith("Aperçu"))
+        bench.ble.startPointNavigation(Point(6.0, 4.5))
+        assertTrue(bench.state.navTest.status, bench.state.navTest.running)
+        bench.until(5 * 60_000, "destination") { !bench.state.navTest.running }
+        assertEquals(bench.dump(), "PASS", bench.state.navTest.outcome)
+        assertTrue(bench.sim.position.distance(Point(6.0, 4.5)) < 0.35)
+        assertTrue(bench.sim.trace.none { it.second == "blades-on" })
+        // Manual mode with blades OFF held for the bumper, left on arrival.
+        assertTrue(bench.sim.trace.any { it.second == "manual" })
+        bench.advance(2000)
+        assertFalse(bench.sim.manual)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+    }
+
+    @Test fun `go-to-point move interrupted, destination kept then resumed until arrival`() {
+        connectedInZone()
+        val target = Point(6.0, 4.5)
+        bench.ble.startPointNavigation(target)
+        assertEquals(target, bench.state.pointResume?.target)
+        assertNull("In progress: no reason (app closed if it stops there)", bench.state.pointResume?.interruption)
+        bench.until(30_000, "moving") { bench.sim.speed > 0.05 }
+        bench.ble.stopNavTest("STOP manuel", userInitiated = true)
+        val saved = requireNotNull(bench.state.pointResume)
+        assertEquals("STOP manuel", saved.interruption)
+        // Saved to disk (write off the main thread): read back after an app restart.
+        val store = fr.luba.poc.simulation.PointResumeStore(bench.app.filesDir)
+        bench.awaitReal(5000, "reason saved") { store.read(bench.device.address) == saved }
+        bench.until(15_000, "robot ready after the stop") { bench.state.telemetry.robotState == 11 }
+        bench.ble.startPointNavigation(saved.target)
+        assertTrue(bench.state.navTest.status, bench.state.navTest.running)
+        bench.until(5 * 60_000, "destination") { !bench.state.navTest.running }
+        assertEquals(bench.dump(), "PASS", bench.state.navTest.outcome)
+        assertNull(bench.state.pointResume)
+        bench.awaitReal(5000, "save cleared") { store.read(bench.device.address) == null }
+    }
+
+    @Test fun `go-to-point move interrupted then discarded`() {
+        connectedInZone()
+        bench.ble.startPointNavigation(Point(6.5, 5.0))
+        bench.until(30_000, "moving") { bench.sim.speed > 0.05 }
+        bench.ble.stopNavTest(userInitiated = true)
+        assertNotNull(bench.state.pointResume)
+        bench.ble.discardPointResume()
+        assertNull(bench.state.pointResume)
+    }
+
+    @Test fun `go-to-point move stopped by the user then refused outside the map`() {
+        connectedInZone()
+        bench.ble.startPointNavigation(Point(6.5, 5.0))
+        bench.until(30_000, "moving") { bench.sim.speed > 0.05 }
+        val mark = bench.mark()
+        bench.ble.stopNavTest(userInitiated = true)
+        assertFalse(bench.state.navTest.running)
+        assertEquals("ABORTED", bench.state.navTest.outcome)
+        bench.advance(3000)
+        assertTrue(bench.labelsAfter(mark).none { it.startsWith("move") })
+        assertEquals(0.0, bench.sim.speed, 0.005)
+        bench.ble.startPointNavigation(Point(20.0, 20.0))
+        assertFalse(bench.state.navTest.running)
+        assertTrue(bench.state.navTest.status, bench.state.navTest.status.startsWith("Navigation refusée"))
+    }
+
+    @Test fun `contact during a go-to-point move, back-off then new path`() {
+        connectedInZone()
+        bench.ble.setObstaclePhotoEnabled(false)
+        bench.sim.obstacle = Point(5.0, 3.6) to 0.2
+        bench.ble.startPointNavigation(Point(5.0, 5.2))
+        bench.until(2 * 60_000, "contact") { bench.sim.contacts > 0 }
+        val mark = bench.mark()
+        bench.until(60_000, "back-off") { bench.labelsAfter(mark).any { it.startsWith("move -") } }
+        bench.until(5 * 60_000, "end of move") { !bench.state.navTest.running }
+        // Destination reached via the new path, or safety stop by the footprint guard (pivot near the
+        // obstacle's margin): never a second contact nor movement after the stop.
+        assertTrue(bench.dump(), bench.state.navTest.outcome == "PASS" && bench.sim.position.distance(Point(5.0, 5.2)) < 0.35 ||
+            bench.state.navTest.outcome == "ABORTED" && bench.state.navTest.status.contains("Emprise"))
+        bench.advance(2000)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+        // Obstacle saved in front of the position where the robot stopped at contact, bypassed by the new path.
+        val touched = bench.state.obstacles.single()
+        assertEquals(3.6, touched.y, 0.15)
+        assertEquals(1, bench.sim.contacts)
+    }
+
+    // ───── Bumper ─────
+
+    @Test fun `stationary bumper test validated then approach`() {
+        connectedInZone()
+        bench.ble.startObstacleTest(approach = true)
+        assertFalse("Approach refused before validation", bench.state.teach.running)
+        bench.ble.startObstacleTest(approach = false)
+        assertTrue(bench.state.teach.running)
+        bench.advance(2000)
+        bench.sim.injectError(1014)
+        bench.until(3000, "contact") { !bench.state.teach.running }
+        assertEquals("CONTACT_DETECTED", bench.state.teach.outcome)
+        assertTrue(bench.state.teach.contactValidated)
+        assertTrue(bench.sim.trace.none { it.second.startsWith("move") && it.second != "move 0 0" })
+        // Slow approach, stop on contact against a real object.
+        bench.sim.obstacle = Point(5.0, 2.7) to 0.15
+        bench.sim.friction = 0   // approach at 20 units (≈ 2 cm/s): the simulated robot must move
+        bench.advance(2000)
+        bench.ble.startObstacleTest(approach = true)
+        assertTrue(bench.state.teach.status, bench.state.teach.running)
+        bench.until(40_000, "approach contact") { !bench.state.teach.running }
+        assertEquals(bench.dump(), "CONTACT_DETECTED", bench.state.teach.outcome)
+        assertNotNull(bench.state.teach.proposal)
+        bench.advance(2000)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+    }
+
+    @Test fun `bumper test without contact, ends after 30 s`() {
+        connectedInZone()
+        bench.ble.startObstacleTest(approach = false, manualMode = true)
+        bench.until(40_000, "end of test") { !bench.state.teach.running }
+        assertEquals("NOT_DETECTED", bench.state.teach.outcome)
+        assertFalse(bench.sim.bladesOn)
+        bench.ble.recordBumperBeep()
+    }
+
+    // ───── Command cutoff ─────
+
+    @Test fun `command cutoff, robot stops on its own`() {
+        connectedInZone()
+        bench.ble.startSilenceTest(100)
+        assertTrue(bench.state.silenceTest.status, bench.state.silenceTest.running)
+        bench.until(60_000, "verdict") { !bench.state.silenceTest.running }
+        val result = requireNotNull(bench.state.motorWatchdog)
+        assertTrue(result.detail, result.outcome != MotorWatchdogResult.INCONCLUSIVE)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+        assertEquals("stop", bench.sim.trace.last().second)
+    }
+
+    @Test fun `command cutoff, robot keeps going, STOP by the app`() {
+        connectedInZone()
+        bench.sim.motorWatchdogMs = null
+        bench.ble.startSilenceTest(100)
+        bench.until(60_000, "verdict") { !bench.state.silenceTest.running }
+        val result = requireNotNull(bench.state.motorWatchdog)
+        assertTrue(result.detail, result.outcome != MotorWatchdogResult.INCONCLUSIVE)
+        bench.advance(2000)
+        assertEquals("STOP sent: the robot is stopped", 0.0, bench.sim.speed, 0.005)
+    }
+
+    @Test fun `command cutoff refused without clearance, interrupted on release`() {
+        bench.sim.place(Point(5.0, 5.2), 90.0)
+        connectedInZone()
+        bench.ble.startSilenceTest(100)
+        assertFalse(bench.state.silenceTest.running)
+        assertTrue(bench.state.silenceTest.status, bench.state.silenceTest.status.startsWith("Essai refusé"))
+        bench.sim.place(Point(5.0, 2.0), 90.0)
+        bench.advance(2000)
+        bench.ble.startSilenceTest(100)
+        bench.until(5000, "moving forward") { bench.sim.speed > 0.02 }
+        bench.ble.stopSilenceTest()
+        assertFalse(bench.state.silenceTest.running)
+        bench.advance(2000)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+    }
+
+    // ───── Locks and back-off ─────
+
+    @Test fun `collision lock, unlock back-off along a free line`() {
+        connectedInZone()
+        bench.sim.selfCheck = 25
+        bench.sim.latchRelease = true
+        bench.sim.obstacle = Point(5.0, 2.5) to 0.1
+        bench.advance(2000)
+        bench.ble.unlockAfterStop()
+        assertTrue(bench.state.unlockPending)
+        bench.until(60_000, "unlock") { !bench.state.unlockPending }
+        assertTrue(bench.state.unlockStatus, bench.state.unlockStatus.startsWith("Robot déverrouillé"))
+        assertTrue(bench.sim.trace.any { it.second.startsWith("move -") })
+        assertTrue(bench.sim.position.y < 1.9)
+    }
+
+    @Test fun `back-off before resume, reversing to a safe position`() {
+        bench.sim.place(Point(4.0, 0.55), 270.0)
+        connectedInZone()
+        val engine = bench.mowingEngine()
+        bench.ble.backOffBeforeResume(engine)
+        bench.until(60_000, "back-off") { !bench.state.backOffPending }
+        assertTrue(bench.state.backOffStatus, bench.state.backOffStatus.startsWith("Robot reculé") || bench.state.backOffStatus.startsWith("Déblocage impossible"))
+        assertTrue(bench.sim.trace.none { it.second == "blades-on" })
+        bench.ble.backOffBeforeResume(engine)
+        bench.ble.stopBackOff()
+        // Wait for the stop to be applied rather than a fixed delay (the back-off thread may lag under load).
+        bench.until(10_000, "back-off stopped") { !bench.state.backOffPending }
+        assertFalse(bench.state.backOffPending)
+    }
+
+    @Test fun `Mammotion task stopped, then refused without a task`() {
+        bench.sim.idleState = 13
+        connectedInZone()
+        bench.ble.stopMammotionTask()
+        assertTrue(bench.state.taskStopPending)
+        bench.until(20_000, "task stopped") { !bench.state.taskStopPending }
+        assertEquals("Tâche arrêtée : READY et lames OFF reçus", bench.state.taskStopStatus)
+        val labels = bench.sim.trace.map { it.second }
+        assertTrue(labels.toString(), labels.containsAll(listOf("task-pause", "task-cancel", "blades-off", "stop")))
+        bench.ble.stopMammotionTask()
+        assertEquals("Aucune tâche Mammotion active ou en pause observée", bench.state.taskStopStatus)
+    }
+
+    // ───── Diagnostic campaign ─────
+
+    @Test fun `stationary BLE campaign complete`() {
+        bench.connect()
+        bench.ble.startCampaign(CampaignConfig(durationMinutes = 1))
+        assertTrue(bench.state.status, bench.state.campaign.running)
+        bench.until(10 * 60_000, "end of campaign") { !bench.state.campaign.running }
+        assertEquals(bench.state.campaign.summary + "\n" + bench.state.campaign.results.joinToString("\n"), "PASS BLE ONLY", bench.state.campaign.outcome)
+        assertTrue(bench.sim.trace.none { it.second.startsWith("move") })
+        assertTrue(bench.links.size >= 3)
+    }
+
+    @Test fun `campaign interrupted by STOP`() {
+        bench.connect()
+        bench.ble.startCampaign(CampaignConfig(durationMinutes = 1))
+        bench.advance(10_000)
+        bench.ble.stop()
+        assertEquals("ABORTED", bench.state.campaign.outcome)
+        bench.until(5000, "closing") { bench.state.connection == ConnectionState.Disconnected }
+    }
+}

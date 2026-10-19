@@ -1,0 +1,11 @@
+
+syntax = "proto3";
+
+// Java options added by DumbyLuba; schema unchanged.
+option java_package = "fr.luba.poc.proto";
+option java_outer_classname = "CommonProto";
+
+message CommDataCouple {
+    float x = 1;
+    float y = 2;
+}

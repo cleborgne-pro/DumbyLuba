@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- LUBA camera stream: Agora audience member (same sequence as the Mammotion-HA card agora-client.js).
+     Sends no audio/video: joins the channel, subscribes to the published cameras (uid 1, 2, 3) and shows the chosen one. -->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #ccc; font: 13px sans-serif; overflow: hidden; }
+  #video { position: absolute; inset: 0; }
+  #video div, #video video { width: 100% !important; height: 100% !important; object-fit: contain !important; background: #000 !important; }
+  #msg { position: absolute; left: 0; right: 0; top: 45%; text-align: center; padding: 0 16px; }
+</style>
+<script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.24.3.js"></script>
+</head>
+<body>
+<div id="video"></div>
+<div id="msg">Loading the video SDK…</div>
+<script>
+  "use strict";
+  // Interface language: French on a French device, English otherwise (same rule as the app).
+  const FR = (navigator.language || "").toLowerCase().startsWith("fr");
+  function t(en, fr) { return FR ? fr : en; }
+  document.documentElement.lang = FR ? "fr" : "en";
+  document.getElementById("msg").textContent = t("Loading the video SDK…", "Chargement du SDK vidéo…");
+  let client = null, users = {}, target = 1, shown = null, statsTimer = null;
+  // Last frame actually displayed (phone clock) and tracked video element: a photo must not reuse a frozen frame
+  // from before the back-off (delayed or frozen stream).
+  let watched = null, lastFrameAt = 0;
+  function watchFrames() {
+    const v = document.querySelector("#video video");
+    if (!v || v === watched || !v.requestVideoFrameCallback) return;
+    watched = v; lastFrameAt = 0;
+    const tick = () => { if (watched !== v) return; lastFrameAt = Date.now(); v.requestVideoFrameCallback(tick); };
+    v.requestVideoFrameCallback(tick);
+  }
+  /** End-to-end delay (ms) of the displayed stream according to Agora, 0 if unknown. */
+  function endToEndDelay() {
+    try { const s = client && shown !== null ? (client.getRemoteVideoStats() || {})[shown] : null; return s ? Math.round(s.end2EndDelay || 0) : 0; }
+    catch (e) { return 0; }
+  }
+  const bridge = window.LubaCamera || { status: (s) => console.log(s), sdk: () => {}, users: () => {}, peerLeft: () => {}, stats: () => {}, frame: () => {}, snapshot: () => {} };
+  function say(text, overlay) {
+    document.getElementById("msg").textContent = overlay === false ? "" : text;
+    bridge.status(text);
+  }
+  function publishUsers() { bridge.users(Object.keys(users).join(",")); }
+  function show() {
+    const uids = Object.keys(users).map(Number);
+    if (uids.length === 0) { say(t("Waiting for the robot camera…", "En attente de la caméra du robot…")); return; }
+    const uid = uids.includes(target) ? target : uids[0];
+    if (shown === uid) return;
+    if (shown !== null && users[shown] && users[shown].videoTrack) users[shown].videoTrack.stop();
+    const box = document.getElementById("video"); box.innerHTML = "";
+    users[uid].videoTrack.play(box, { fit: "contain" });
+    shown = uid; watchFrames();
+    say(t("Camera " + uid + " live", "Caméra " + uid + " en direct"), false);
+  }
+  function base64ToBytes(b64) {
+    const bin = atob(b64); const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  async function start(params) {
+    await stop(true);
+    target = params.target || 1;
+    if (!window.AgoraRTC) { say(t("Agora video SDK not loaded (phone network?)", "SDK vidéo Agora non chargé (réseau du téléphone ?)")); return; }
+    try {
+      AgoraRTC.setLogLevel(3);
+      if (AgoraRTC.disableLogUpload) AgoraRTC.disableLogUpload();
+      client = AgoraRTC.createClient({ mode: "live", codec: "vp8", role: "host" });
+      if (params.encrypted && params.key) client.setEncryptionConfig("aes-256-gcm2", params.key, base64ToBytes(params.salt));
+      client.on("user-published", async (user, mediaType) => {
+        if (mediaType !== "video") return;
+        await client.subscribe(user, "video");
+        users[user.uid] = user; publishUsers(); show();
+        // First decoded frame: the stream can be used for a photo.
+        // Frame and display area sizes in the player state: a zero-height area makes the video invisible.
+        if (user.videoTrack && user.videoTrack.on) user.videoTrack.on("first-frame-decoded", () => {
+          bridge.frame(user.uid); watchFrames();
+          const v = document.querySelector("#video video"), box = document.getElementById("video");
+          if (shown === user.uid) say(t("Camera ", "Caméra ") + user.uid + t(" live · frame ", " en direct · image ") + (v ? v.videoWidth + "×" + v.videoHeight : "?") +
+            t(" · area ", " · zone ") + box.clientWidth + "×" + box.clientHeight + " px", false);
+        });
+      });
+      client.on("user-unpublished", (user, mediaType) => {
+        if (mediaType !== "video") return;
+        delete users[user.uid]; if (shown === user.uid) shown = null; publishUsers(); show();
+      });
+      client.on("user-left", (user) => {
+        delete users[user.uid]; if (shown === user.uid) shown = null; publishUsers();
+        if (Object.keys(users).length === 0) bridge.peerLeft();
+        show();
+      });
+      client.on("connection-state-change", (cur, prev, reason) => {
+        bridge.status("Agora : " + cur + (reason ? " (" + reason + ")" : ""));
+        if (cur === "DISCONNECTED") document.getElementById("msg").textContent = t("Stream disconnected", "Flux déconnecté");
+      });
+      say(t("Joining the video channel…", "Connexion au canal vidéo…"));
+      // Joining the channel is limited to 20 s: without an answer from Agora, an explicit error instead of a silent wait.
+      await Promise.race([
+        client.join(params.appid, params.channel, params.token, Number(params.uid)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(t("no answer from Agora within 20 s (phone Internet?)", "pas de réponse d'Agora en 20 s (Internet du téléphone ?)"))), 20000)),
+      ]);
+      say(t("Channel joined · waiting for the robot camera…", "Canal rejoint · en attente de la caméra du robot…"));
+      statsTimer = setInterval(() => {
+        if (!client || shown === null) return;
+        const s = (client.getRemoteVideoStats() || {})[shown];
+        if (s) bridge.stats(s.receiveResolutionWidth + "×" + s.receiveResolutionHeight + " · " + Math.round(s.receiveFrameRate || 0) + t(" fps · ", " i/s · ") +
+          Math.round((s.receiveBitrate || 0) / 1000) + t(" kbit/s · delay ", " kbit/s · délai ") + Math.round(s.end2EndDelay || 0) + " ms");
+      }, 2000);
+    } catch (e) {
+      say(t("Agora error: ", "Erreur Agora : ") + (e && (e.code || e.name)) + " " + (e && e.message ? e.message : ""));
+    }
+  }
+  /**
+   * JPEG photo (base64) of the displayed camera, returned under identifier [id] with the time of the last displayed frame
+   * (0: no frame displayed since tracking started, -1: tracking impossible) and the Agora end-to-end delay (0 if
+   * unknown); empty if there is no frame or if [uid] (non-zero) is not displayed.
+   */
+  function snapshot(id, uid) {
+    try {
+      watchFrames();
+      if (uid && shown !== uid) { bridge.snapshot(id, "", 0, 0, 0, 0); return; }
+      const v = document.querySelector("#video video");
+      if (!v || !v.videoWidth || v.readyState < 2) { bridge.snapshot(id, "", 0, 0, 0, 0); return; }
+      const c = document.createElement("canvas");
+      c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext("2d").drawImage(v, 0, 0);
+      bridge.snapshot(id, c.toDataURL("image/jpeg", 0.85).split(",")[1], c.width, c.height,
+        !v.requestVideoFrameCallback ? -1 : v === watched ? lastFrameAt : 0, endToEndDelay());
+    } catch (e) { bridge.snapshot(id, "", 0, 0, 0, 0); }
+  }
+  function select(uid) { target = uid; shown = null; show(); }
+  /**
+   * Stream state for the live view watchdog: time of the last displayed frame (0: none since tracking started,
+   * -1: tracking impossible), Agora connection state and published cameras.
+   */
+  function health() {
+    watchFrames();
+    const v = document.querySelector("#video video");
+    return { at: !v || !v.requestVideoFrameCallback ? -1 : v === watched ? lastFrameAt : 0,
+      state: client ? client.connectionState : "NONE", users: Object.keys(users).length, shown: shown === null ? 0 : shown };
+  }
+  /** Shows the chosen camera again in a new video element (frozen frame after coming back to the screen). */
+  function replay() {
+    if (shown !== null && users[shown] && users[shown].videoTrack) users[shown].videoTrack.stop();
+    shown = null; watched = null; show();
+  }
+  async function stop(silent) {
+    if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+    users = {}; shown = null; watched = null; lastFrameAt = 0; publishUsers();
+    document.getElementById("video").innerHTML = "";
+    if (client) { const c = client; client = null; try { await c.leave(); } catch (e) {} }
+    if (!silent) say(t("Stream stopped", "Flux arrêté"));
+  }
+  window.addEventListener("load", () => {
+    bridge.sdk(!!window.AgoraRTC);
+    if (window.AgoraRTC) say(t("SDK ready", "SDK prêt")); else say(t("Agora video SDK not loaded (phone network?)", "SDK vidéo Agora non chargé (réseau du téléphone ?)"));
+  });
+</script>
+</body>
+</html>

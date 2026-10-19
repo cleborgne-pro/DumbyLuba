@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.DumbyLuba.Starting" parent="Theme.DumbyLuba">
+        <item name="android:windowSplashScreenBackground">@color/brand_forest</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/dumby_splash_animated</item>
+        <item name="android:windowSplashScreenAnimationDuration">650</item>
+    </style>
+</resources>

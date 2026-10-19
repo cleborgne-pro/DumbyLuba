@@ -1,0 +1,13 @@
+<resources>
+    <style name="Theme.DumbyLuba" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/brand_mint</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/brand_forest</item>
+        <item name="android:navigationBarColor">@color/brand_forest</item>
+        <item name="android:windowBackground">@color/brand_forest</item>
+    </style>
+    <style name="Theme.DumbyLuba.Starting" parent="Theme.DumbyLuba">
+        <item name="android:windowBackground">@drawable/dumby_launch_background</item>
+    </style>
+</resources>

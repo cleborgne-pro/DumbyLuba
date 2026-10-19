@@ -1,0 +1,22 @@
+/.gradle/
+/.kotlin/
+/local.properties
+**/build/
+*.iml
+.idea/
+.DS_Store
+artifacts/
+
+**/__pycache__/
+home-server/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# PlatformIO
+**/.pio/
+
+# Release signing
+keystore.properties
+*.jks
+*.keystore

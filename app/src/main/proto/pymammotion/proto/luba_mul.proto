@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+// Java options added by DumbyLuba; schema unchanged.
+option java_package = "fr.luba.poc.proto";
+option java_outer_classname = "LubaMulProto";
+
+enum MUL_LANGUAGE {
+  ENGLISH = 0;
+  GERMAN = 1;
+  FRENCH = 2;
+  ITALIAN = 3;
+  SPANISH = 4;
+  PORTUGUESE = 5;
+  DUTCH = 6;
+  SWEDISH = 7;
+  NONE_LAN = 8;
+}
+
+enum MUL_SEX {
+  MAN = 0;
+  WOMAN = 1;
+  NONE_SEX = 2;
+}
+
+enum MUL_CAMERA_POSITION {
+  LEFT = 0;
+  RIGHT = 1;
+  REAR = 2;
+  ALL = 3;
+}
+
+enum MUL_VIDEO_ERROR_CODE {
+  SUCCESS = 0;
+  ACTIVATION_FAILED = 1;
+  NETWORK_NOT_AVAILABLE = 2;
+  CREATE_CHANNEL_FAILED = 3;
+  PARAM_INVAILD = 4;
+}
+
+enum MUL_WIPER_ERROR_CODE {
+  SET_SUCCESS = 0;
+  HW_ERROR = 1;
+  NAVIGATION_WORK_FORBID = 2;
+}
+
+enum lamp_ctrl_sta {
+  power_off = 0;
+  power_on = 1;
+  power_ctrl_on = 2;
+}
+
+enum lamp_manual_ctrl_sta {
+  manual_power_off = 0;
+  manual_power_on = 1;
+}
+
+message MulSetAudio {
+  oneof AudioCfg_u {
+    int32 at_switch = 1;
+    MUL_LANGUAGE au_language = 2;
+    MUL_SEX sex = 3;
+    int32 au_volume = 4;
+  }
+}
+
+message MulSetVideo {
+  MUL_CAMERA_POSITION position = 1;
+  int32 vi_switch = 2;
+}
+
+message MulSetVideoAck {
+  MUL_VIDEO_ERROR_CODE error_code = 1;
+}
+
+message MulAudioCfg {
+  int32 au_switch = 1;
+  MUL_LANGUAGE au_language = 2;
+  MUL_SEX sex = 3;
+  int32 au_volume = 4;
+}
+
+message MulSetWiper {
+  int32 round = 1;
+}
+
+message GetHeadlamp {
+  int32 get_ids = 1;
+}
+
+
+message SetHeadlamp {
+  int32 set_ids = 1;
+  int32 lamp_power_ctrl = 2;
+  lamp_ctrl_sta lamp_ctrl = 3;
+  bool ctrl_lamp_bright = 4;
+  int32 lamp_bright = 5;
+  lamp_manual_ctrl_sta lamp_manual_ctrl = 6;
+}
+
+message Setlamprsp {
+  int32 set_ids = 1;
+  int32 result = 2;
+}
+
+message Getlamprsp {
+  int32 get_ids = 1;
+  int32 result = 2;
+  lamp_ctrl_sta lamp_ctrl = 3;
+  int32 lamp_bright = 4;
+  lamp_manual_ctrl_sta lamp_manual_ctrl = 5;
+}
+
+message MulSetWiperAck {
+  MUL_WIPER_ERROR_CODE error_code = 1;
+}
+
+message MulSetEncode {
+  bool encode = 1;
+}
+
+message SocMul {
+  oneof SubMul {
+    MulSetAudio set_audio = 1;
+    MulAudioCfg audio_cfg = 2;
+    MulSetVideo set_video = 3;
+    MulSetVideoAck set_video_ack = 4;
+    MulSetWiper set_wiper = 5;
+    MulSetWiperAck set_wiper_ack = 6;
+    GetHeadlamp get_lamp = 7;
+    SetHeadlamp set_lamp = 8;
+    Setlamprsp set_lamp_rsp = 9;
+    Getlamprsp get_lamp_rsp = 10;
+    MulSetEncode req_encode = 11;
+  }
+}

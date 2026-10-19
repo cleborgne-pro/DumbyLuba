@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mammotion product photos resolved by name (RobotModel.image): keep them if resource shrinking is enabled. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/robot_photo_*" />
