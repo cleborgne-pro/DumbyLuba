@@ -62,7 +62,7 @@ line behind the robot. Candidate points (`ObstacleBypass.backOffCandidates`, 10 
 0.25 m of the guide and stop before the first step that would hit an edge, a no-go zone or a physical obstacle; the point
 kept is the first where the robot can pivot and drive with the margins of the resume route
 (`ObstacleBypass.backOff`), otherwise the farthest that allows a physical pivot, otherwise the farthest admissible.
-Execution is that of the back-off after contact (`reverseStraight`: lateral deviation ≤ 12 cm, progress, envelope,
+Execution is that of the back-off after contact (`reverseStraight`: lateral deviation ≤ 12 cm with heading hold by in-place pivots since 1.1.4, progress, envelope,
 blades, battery, state). Refusal: link, activity in progress, stale state, robot charging, STOP lock, protection
 other than the collision lock, unknown position or heading. Under the collision lock (25), the back-off is allowed as
 after a contact, then the release of the lock is awaited. Log: `resume_back_off_start|done|failed|stopped|refused`.

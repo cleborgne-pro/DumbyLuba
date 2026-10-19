@@ -56,7 +56,9 @@ percentage) and the layers bar are hidden to keep the map visible; the same goes
   from the starting one (RTK noise, axis taken during docking) and must not change the resumed plan. A station moved by
   more than 25 cm or turned by more than 15° counts as a new base. The mowing then restarts **30 cm before** the point
   reached (overlap). The link is computed from the actual position with the usual checks; if the robot is on the base,
-  it waits for the resume threshold, then leaves in a straight line. The trace already covered stays on the map and
+  it waits for the resume threshold, then leaves in a straight line. A robot stopped with its chassis overlapping a
+  border (1.1.4) first moves straight ahead, blades stopped, as long as this only moves it away from the border; before,
+  the resume was refused with "Link unreachable: … No safe local link". The trace already covered stays on the map and
   keeps growing: the route history covers the whole mowing, recharges and resumes included (0.45.2).
 - **Discard** deletes the save, after confirmation ("Discard the interrupted task?" — "The progress is cleared: the
   next task will start from the beginning."). The resume needs a known base ("Unknown base: place the base before

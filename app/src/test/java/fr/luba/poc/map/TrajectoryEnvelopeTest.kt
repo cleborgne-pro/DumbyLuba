@@ -27,6 +27,26 @@ class TrajectoryEnvelopeTest {
         assertFalse(envelope.poseSafe(RobotPose(Point(0.0,0.0),0.0)))
         assertTrue(envelope.poseSafe(RobotPose(Point(0.0,0.0),180.0)))
     }
+    @Test fun chassisOverlappingAnEdgeMayOnlyMoveAway() {
+        // Robot facing east, its rear 14.5 cm beyond the west wall (stopped there after a drifting back-off).
+        val envelope = TrajectoryEnvelope(room())
+        val stuck = Point(-4.8, 0.0)
+        assertFalse(envelope.poseSafe(RobotPose(stuck, 0.0)))
+        assertNotNull(envelope.motionCollision(RobotPose(stuck, 0.0), RobotPose(Point(-3.5, 0.0), 0.0)))
+        assertTrue("straight ahead, away from the wall", envelope.leavesStraight(stuck, Point(-3.5, 0.0), 0.0))
+        assertTrue("slightly oblique", envelope.leavesStraight(stuck, Point(-3.5, 0.05), 0.0))
+        assertFalse("diagonal: the overlapping rear sweeps new ground beyond the wall", envelope.leavesStraight(stuck, Point(-3.8, 1.0), 0.0))
+        assertFalse("towards the wall", envelope.leavesStraight(stuck, Point(-5.5, 0.0), 0.0))
+        assertFalse("along the wall, never inside", envelope.leavesStraight(stuck, Point(-4.8, 2.0), 0.0))
+        assertFalse("no translation", envelope.leavesStraight(stuck, stuck, 0.0))
+        // Thin obstacle after the chassis is back inside: the rest of the translation is still checked.
+        val post = TrajectoryEnvelope(room().difference(obstacle(-3.0, 0.0, 0.05)))
+        assertTrue(post.leavesStraight(stuck, Point(-3.9, 0.0), 0.0))
+        assertFalse(post.leavesStraight(stuck, Point(-2.5, 0.0), 0.0))
+        // Start already inside: plain translation check.
+        assertTrue(envelope.leavesStraight(Point(0.0, 0.0), Point(1.0, 0.0), 0.0))
+        assertFalse(post.leavesStraight(Point(-4.0, 0.0), Point(-2.0, 0.0), 0.0))
+    }
     @Test fun straightSweepDetectsThinObstacleBetweenClearEndpoints() {
         val envelope = TrajectoryEnvelope(room().difference(rectangle(-0.001,-0.01,0.002,0.02)))
         assertTrue(envelope.poseSafe(RobotPose(Point(-2.0,0.0),0.0)))

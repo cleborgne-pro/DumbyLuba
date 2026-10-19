@@ -402,6 +402,8 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
     }
     /** LUBA 2 footprint entirely inside the physical surface (recorded outline, exclusions). */
     fun footprintSafe(pose: RobotPose): Boolean { queryCount.incrementAndGet(); return envelope.poseSafe(pose) }
+    /** Straight escape of a chassis that may already overlap an edge ([TrajectoryEnvelope.leavesStraight]). */
+    fun leavesStraight(from: Point, to: Point, heading: Double): Boolean { queryCount.incrementAndGet(); return envelope.leavesStraight(from, to, heading) }
     /** Chassis inside the free physical surface at [center], whatever the heading ([TrajectoryEnvelope.bodySafe]). */
     fun bodySafe(center: Point): Boolean = envelope.bodySafe(center)
     fun motionCollision(from: RobotPose, to: RobotPose): EnvelopeCollision? {

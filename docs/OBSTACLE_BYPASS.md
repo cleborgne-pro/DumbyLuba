@@ -26,7 +26,16 @@ the preparation.
    physical radius; the list stops at the first blocked step. Back-off chosen: the shortest one that allows a full
    pivot and travel with the margins, otherwise the longest one that allows a physical pivot (departure then
    includes a clearance move). During the back-off: lateral deviation ≤ 12 cm, progress, envelope at every step,
-   bumper detection kept alive, 20 s maximum, confirmed stop.
+   bumper detection kept alive, 20 s maximum (pivot time excluded), confirmed stop.
+   Heading hold (`BackOffSteering`, 1.1.4): the reverse is commanded with a zero angular speed and the robot does not
+   steer while reversing (steering sign in reverse never measured). When the heading error exceeds 8°, the robot
+   pivots in place (verified convention) to the back-off heading tilted towards the line (atan(offset / 0.4 m),
+   20° at most) until the error is below 3°; heading compared through the change of the reported heading since the
+   start (no compass offset). No pivot in the first 10 cm, pivot checked with the physical envelope, 4 s at most
+   (then 15 cm of reverse before the next one), 6 per back-off. A deviation beyond 12 cm (`BackOffDeviation`) after a
+   contact during a mission becomes a `RouteDrift` handled by `DriftRecovery` on the repaired route, instead of
+   stopping the mowing. Oct 19, 14:02, Fosse: heading 90° → 55° over 0.69 m (slip at 43 %), 14 cm, mowing stopped
+   15 cm from the border; replayed in `BackOffSteeringTest`: the pivot would have started at 1.7 cm of deviation.
    **Obstacle photo** (setting enabled by default): the camera stream is requested as soon as the contact occurs;
    after the confirmed stop, the robot waits stationary, blades OFF, up to 25 s for the photo from its camera, then
    resumes (details: [CAMERA.md](CAMERA.md)).

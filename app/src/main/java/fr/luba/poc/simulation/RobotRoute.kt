@@ -87,7 +87,8 @@ object RobotRoute {
             for (distance in listOf(0.3,0.5,0.75,1.0,1.5,2.0)) {
                 val p = Point(start.x+distance*kotlin.math.cos(rad),start.y+distance*kotlin.math.sin(rad))
                 if (!routes.safe(p,p) || !routes.supportsPivot(p)) continue
-                if (physical.motionCollision(fr.luba.poc.map.RobotPose(start,heading),fr.luba.poc.map.RobotPose(p,heading)) != null) break
+                // The chassis may already overlap the edge: allowed if the translation only moves it away ([TrajectoryPlanner.leavesStraight]).
+                if (!physical.leavesStraight(start,p,heading)) break
                 return p
             }
         }

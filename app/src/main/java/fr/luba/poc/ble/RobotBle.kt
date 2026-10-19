@@ -168,6 +168,8 @@ private const val BACK_OFF_TIMEOUT_MS = 20_000L
 
 /** Bumper contact during a route: pose at contact (fused tracking heading, cleared by the STOP). */
 private data class RouteContact(val code: Int, val x: Double, val y: Double, val heading: Double, val atMs: Long)
+/** Straight back-off that left its line sideways (wheel slip): after a contact during a mission, recovered like a trajectory exit. */
+private class BackOffDeviation(message: String) : IllegalStateException(message)
 /** Obstacle discovered while tracking a route: [index] = current edge. */
 private class ObstacleEncounter(val index: Int, val contact: RouteContact?, val added: List<fr.luba.poc.obstacles.LocalObstacle>,
                                 message: String) : Exception(message)
@@ -2862,7 +2864,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             check(intruding.isEmpty()) { tr("Local obstacle added inside the robot envelope", "Obstacle local ajouté dans l'enveloppe robot") }
                             val envelopeRoutes = if (escaping) routePhysicalRoutes ?: missionRoutes else missionRoutes
                             // Oriented envelope only with a confirmed heading; otherwise slow advance, centre and deviation checked.
-                            if (headingTrusted && envelopeRoutes.motionCollision(RobotPose(position,heading),next)!=null)
+                            // Escape in a straight line of a chassis already overlapping an edge: allowed while it only moves away.
+                            val leaving = escaping && next.position != position && envelopeRoutes.leavesStraight(position,next.position,heading)
+                            if (headingTrusted && !leaving && envelopeRoutes.motionCollision(RobotPose(position,heading),next)!=null)
                                 throw RouteDrift(follower.index,tr("Robot envelope outside the safe corridor", "Enveloppe robot hors du couloir sûr"))
                             if (blades && now>=keepalive) { send(commands.manualBlades(true,heightMm),"ROUTE_BLADES_KEEPALIVE"); keepalive=now+600 }
                             if (!blades && bumperWatch && now>=keepalive) { send(commands.manualMow(1,0,heightMm),"ROUTE_BUMPER_KEEPALIVE_OFF"); keepalive=now+500 }
@@ -3323,7 +3327,17 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                                 "meters" to d.meters,"borderClearanceM" to d.borderClearanceM,"bladesOn" to d.bladesOn,"inner" to d.inner) }))
                         repair.backOff?.let { target ->
                             routeStatus(RoutePhase.FOLLOWING,tr("Straight back-off of %.0f cm · blades OFF", "Recul de %.0f cm en ligne droite · lames OFF").format(target.distance(position)*100))
-                            reverseStraight(position,target,heading,requireNotNull(repair.physical),heightMm,"ROUTE",afterContact=contact!=null)
+                            try {
+                                reverseStraight(position,target,heading,requireNotNull(repair.physical),heightMm,"ROUTE",afterContact=contact!=null,
+                                    degreesPerUnit=routeReckoning.degreesPerUnit)
+                            } catch (deviation: BackOffDeviation) {
+                                // Robot yawed while reversing (slip): the repaired route is kept and the robot is brought back
+                                // like after a trajectory exit (back-off along its trail into the safe surface, then link).
+                                routeEdges=repair.edges; routeOrigins=repair.origins
+                                update { it.copy(robotRoute=it.robotRoute.copy(count=repair.edges.size,planned=listOf(repair.edges.first().a)+repair.edges.map { e -> e.b })) }
+                                if (contact != null) awaitCollisionLatchCleared("ROUTE",heightMm)
+                                throw RouteDrift(0,deviation.message ?: tr("Back-off deviation", "Écart au recul"))
+                            }
                             if (contact != null) {
                                 routeStatus(RoutePhase.FOLLOWING,tr("Obstacle photo · robot still, blades OFF", "Photo de l'obstacle · robot immobile, lames OFF"))
                                 holdForObstaclePhoto("ROUTE",heightMm)
@@ -3373,7 +3387,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             "edges" to plan.edges.size))
                         plan.backOff?.let { target ->
                             routeStatus(RoutePhase.FOLLOWING,tr("Back-off of %.0f cm towards the safe surface · blades OFF", "Recul de %.0f cm vers la surface sûre · lames OFF").format(target.distance(position)*100))
-                            reverseStraight(position,target,heading,physical,heightMm,"ROUTE",recovering=true)
+                            reverseStraight(position,target,heading,physical,heightMm,"ROUTE",recovering=true,degreesPerUnit=routeReckoning.degreesPerUnit)
                         }
                         routeEdges=plan.edges; routeOrigins=plan.origins
                         update { it.copy(robotRoute=it.robotRoute.copy(count=plan.edges.size,planned=listOf(plan.edges.first().a)+plan.edges.map { e -> e.b })) }
@@ -3395,8 +3409,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             val heading=routeReckoning.heading(requireNotNull(latched.heading))
                             event("route_latch_contact",tr("Collision lock without a contact code: handled as a contact", "Verrou de collision sans code de contact : traité comme un contact"),
                                 mapOf("edge" to pause.index,"x" to latched.x,"y" to latched.y,"heading" to heading))
-                            return avoidObstacle(ObstacleEncounter(pause.index,RouteContact(CollisionLatch.VALUE.toInt(),requireNotNull(latched.x),
-                                requireNotNull(latched.y),heading,System.currentTimeMillis()),emptyList(),tr("Contact (collision lock)", "Contact (verrou de collision)")))
+                            return try { avoidObstacle(ObstacleEncounter(pause.index,RouteContact(CollisionLatch.VALUE.toInt(),requireNotNull(latched.x),
+                                requireNotNull(latched.y),heading,System.currentTimeMillis()),emptyList(),tr("Contact (collision lock)", "Contact (verrou de collision)"))) }
+                                catch (drift: RouteDrift) { recoverDrift(drift) }
                         }
                         ProtectionPause.refusal(protectionPauses)?.let { error(tr("${pause.message}: $it", "${pause.message} : $it")) }
                         protectionPauses++
@@ -3454,7 +3469,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             while (at<routeEdges.size) {
                                 routeStatus(phase,status)
                                 at=try { followAll(routeEdges,at,lastArrivalM=lastArrivalM) }
-                                    catch (encounter: ObstacleEncounter) { avoidObstacle(encounter) }
+                                    catch (encounter: ObstacleEncounter) { try { avoidObstacle(encounter) } catch (drift: RouteDrift) { recoverDrift(drift) } }
                                     catch (drift: RouteDrift) { recoverDrift(drift) }
                                     catch (pause: RouteProtection) { pauseForProtection(pause) }
                                     catch (lost: RouteLegLost) { recoverLostLeg(lost) }
@@ -3468,7 +3483,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     while(index<routeEdges.size) {
                         routeStatus(RoutePhase.FOLLOWING,tr("BLE tracking · ${index+1}/${routeEdges.size}", "Suivi BLE · ${index+1}/${routeEdges.size}"))
                         val reached=try { followAll(routeEdges,index,shown=true,watchBattery=intent==RouteIntent.FOLLOW) }
-                            catch (encounter: ObstacleEncounter) { index=avoidObstacle(encounter); continue }
+                            catch (encounter: ObstacleEncounter) { index=try { avoidObstacle(encounter) } catch (drift: RouteDrift) { recoverDrift(drift) }; continue }
                             catch (drift: RouteDrift) { index=recoverDrift(drift); continue }
                             catch (pause: RouteProtection) { index=pauseForProtection(pause); continue }
                             catch (lost: RouteLegLost) { index=recoverLostLeg(lost); continue }
@@ -4520,13 +4535,17 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
      * (line checked at planning time, [DriftRecovery.backOff]) and the envelope is only checked once the chassis is back in.
      */
     private suspend fun reverseStraight(from: Point, target: Point, heading: Double, physical: TrajectoryPlanner, heightMm: Int, prefix: String,
-                                        recovering: Boolean = false, afterContact: Boolean = false) {
+                                        recovering: Boolean = false, afterContact: Boolean = false,
+                                        degreesPerUnit: Double = DeadReckoning.DEFAULT_DEGREES_PER_UNIT) {
         val length = from.distance(target)
         if (length < 0.05) return
         val ux = (target.x-from.x)/length; val uy = (target.y-from.y)/length
         val began = SystemClock.elapsedRealtime()
         val motionProgress = MotionProgressGuard()
         var keepalive = 0L; var queryAt = 0L
+        // Heading hold ([BackOffSteering]): in-place pivots when the robot yaws while reversing (wheel slip).
+        val reportedAtStart = state.value.telemetry.heading?.takeIf { it.isFinite() }
+        var pivotSince = 0L; var pivotMs = 0L; var pivots = 0; var maxError = 0.0; var pivotFrom = BackOffSteering.FREE_START_M
         try {
             while (true) {
                 val now = SystemClock.elapsedRealtime()
@@ -4540,17 +4559,40 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 val position = Point(requireNotNull(live.x),requireNotNull(live.y))
                 val along = (position.x-from.x)*ux + (position.y-from.y)*uy
                 val lateral = kotlin.math.abs((position.x-from.x)*uy - (position.y-from.y)*ux)
-                check(lateral <= 0.12) { tr("Back-off deviation >12 cm (%.0f cm)", "Écart au recul >12 cm (%.0f cm)").format(lateral*100) }
+                if (lateral > 0.12) throw BackOffDeviation(tr("Back-off deviation >12 cm (%.0f cm)", "Écart au recul >12 cm (%.0f cm)").format(lateral*100))
                 if (along >= length-0.03) break
-                check(now-began < BACK_OFF_TIMEOUT_MS) { tr("Back-off timed out: clearance point not reached", "Recul expiré : point de dégagement non atteint") }
+                check(now-began-pivotMs < BACK_OFF_TIMEOUT_MS) { tr("Back-off timed out: clearance point not reached", "Recul expiré : point de dégagement non atteint") }
+                val reported = live.heading?.takeIf { it.isFinite() }
+                val bodyHeading = if (reportedAtStart != null && reported != null) BackOffSteering.current(heading,reportedAtStart,reported) else heading
+                val headingError = BackOffSteering.error(BackOffSteering.wanted(heading,from,target,position),bodyHeading)
+                maxError = maxOf(maxError,kotlin.math.abs(headingError))
+                val pivoting = pivotSince != 0L
+                val pivotWanted = reportedAtStart != null && reported != null && along >= pivotFrom &&
+                    (pivoting || pivots < BackOffSteering.MAX_PIVOTS) && BackOffSteering.pivotNeeded(headingError,pivoting) && (!pivoting || now-pivotSince < BackOffSteering.PIVOT_TIMEOUT_MS) &&
+                    physical.footprintSafe(RobotPose(position,bodyHeading)) &&
+                    physical.motionCollision(RobotPose(position,bodyHeading),RobotPose(position,bodyHeading+kotlin.math.sign(headingError)*6.0)) == null
+                if (pivotWanted) {
+                    if (!pivoting) { pivotSince = now; pivots++ }
+                    motionProgress.reset()
+                    if (now >= keepalive) { send(commands.manualMow(1,0,heightMm),"${prefix}_BACKOFF_BUMPER_OFF",periodic=true); keepalive = now+500 }
+                    if (now >= queryAt) { send(commands.errorQuery(),"${prefix}_BACKOFF_ERRORS",periodic=true); queryAt = now+500 }
+                    send(commands.movement(0,BackOffSteering.pivotAngular(headingError,degreesPerUnit)),"${prefix}_BACKOFF_PIVOT")
+                    delay(200)
+                    continue
+                }
+                if (pivoting) {
+                    // Pivot finished or abandoned: the next one only after some more reverse.
+                    if (now-pivotSince >= BackOffSteering.PIVOT_TIMEOUT_MS) pivotFrom = along+BackOffSteering.RETRY_AFTER_M
+                    pivotMs += now-pivotSince; pivotSince = 0L
+                }
                 check(!motionProgress.blocked(position,positionPrevious,now,-BACK_OFF_LINEAR)) {
                     if (CollisionLatch.latched(live.selfCheck)) tr("Back-off refused by the robot under collision lock (self-check 25): ${StopUnlock.PROTECTION_PHYSICAL}", "Recul refusé par le robot sous verrou de collision (self-check 25) : ${StopUnlock.PROTECTION_PHYSICAL}")
                     else tr("Back-off blocked for 3 s", "Recul bloqué depuis 3 s") }
                 // The first 10 centimetres move away from the obstacle that was hit (line already checked at planning time).
-                if (along >= 0.10 && (!recovering || physical.footprintSafe(RobotPose(position,heading)))) {
+                if (along >= 0.10 && (!recovering || physical.footprintSafe(RobotPose(position,bodyHeading)))) {
                     val step = minOf(0.10,length-along)
                     val next = Point(position.x+ux*step,position.y+uy*step)
-                    check(physical.motionCollision(RobotPose(position,heading),RobotPose(next,heading)) == null) { tr("Back-off outside the safe envelope", "Recul hors enveloppe sûre") }
+                    check(physical.motionCollision(RobotPose(position,bodyHeading),RobotPose(next,bodyHeading)) == null) { tr("Back-off outside the safe envelope", "Recul hors enveloppe sûre") }
                 }
                 // Keep-alive and error reads are not stacked: through the gateway (≈ 430 ms per write on 10-14 at
                 // 14:35), they piled up beyond 4 in the queue and the back-off stopped with "BLE interrupted".
@@ -4570,7 +4612,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             delay(100)
         }
         event("${prefix.lowercase()}_back_off",if (recovering) tr("Straight back-off to the safe area finished", "Recul rectiligne vers la surface sûre terminé") else tr("Straight back-off after contact finished", "Recul rectiligne après contact terminé"),mapOf("fromX" to from.x,"fromY" to from.y,
-            "toX" to target.x,"toY" to target.y,"meters" to length,"durationMs" to SystemClock.elapsedRealtime()-began))
+            "toX" to target.x,"toY" to target.y,"meters" to length,"durationMs" to SystemClock.elapsedRealtime()-began,
+            "headingPivots" to pivots,"maxHeadingErrorDegrees" to maxError,"pivotMs" to pivotMs))
     }
 
     /**

@@ -22,7 +22,11 @@ data class EnvelopeCollision(val segment: Int, val motion: EnvelopeMotion, val p
  * by the maximum sagitta of the arcs swept by the corners.
  * This continuous upper bound ALSO covers the space between samples, not only the poses.
  */
-class TrajectoryEnvelope(area: JtsGeometry, val robot: RobotEnvelope = RobotEnvelope.LUBA2) {
+class TrajectoryEnvelope(private val area: JtsGeometry, val robot: RobotEnvelope = RobotEnvelope.LUBA2) {
+    companion object {
+        /** Ground outside the free area newly swept by an escape ([leavesStraight]), at most (m²). */
+        const val ESCAPE_NEW_GROUND_M2 = 0.002
+    }
     private val factory = GeometryFactory()
     init { require(!area.isEmpty && area.isValid) { tr("Free physical area invalid or empty", "Surface physique libre invalide ou vide") } }
     // Exact distances to the edge of the free area, without a JTS allocation per check.
@@ -65,6 +69,29 @@ class TrajectoryEnvelope(area: JtsGeometry, val robot: RobotEnvelope = RobotEnve
      * Position check (drift tolerated on return), independent of the heading, in addition to the oriented checks.
      */
     fun bodySafe(center: Point): Boolean = index.containsDisc(center.x, center.y, robot.halfWidthM)
+    /**
+     * Straight translation [from] → [to] at [heading] that may start with the chassis already overlapping an edge or an
+     * obstacle (2026-10-19, Fosse: robot stopped 15 cm from the border after a back-off that drifted; every link was
+     * refused because the start pose itself collides). Allowed if the swept chassis, up to the first pose fully inside,
+     * covers nothing outside the free area that the start footprint did not already cover (the robot only moves away),
+     * and the rest of the translation is free. A start pose already inside: plain translation check.
+     */
+    fun leavesStraight(from: Point, to: Point, heading: Double, step: Double = 0.02): Boolean {
+        val start = RobotPose(from, heading)
+        if (poseSafe(start)) return straightCollision(from, to, heading) == null
+        val length = from.distance(to)
+        if (length < 1e-9) return false
+        val ux = (to.x - from.x) / length; val uy = (to.y - from.y) / length
+        var along = step
+        while (along < length && !poseSafe(RobotPose(Point(from.x + ux*along, from.y + uy*along), heading))) along += step
+        if (along >= length) return false
+        val inside = Point(from.x + ux*along, from.y + uy*along)
+        val startFootprint = footprintGeometry(start)
+        val swept = startFootprint.union(footprintGeometry(RobotPose(inside, heading))).convexHull()
+        // Tolerance: a few degrees between the heading and the translation sweep a thin sliver (≈ 4 cm² at 2°).
+        if (swept.difference(area).difference(startFootprint).area > ESCAPE_NEW_GROUND_M2) return false
+        return straightCollision(inside, to, heading) == null
+    }
     fun poseSafe(pose: RobotPose): Boolean {
         val corners = footprint(pose)
         return index.containsConvex(DoubleArray(4) { corners[it].x }, DoubleArray(4) { corners[it].y }, 4, 0.0)

@@ -187,6 +187,11 @@ the margin (0.5 + 0.43 > 0.87 m): refused, whatever the heading. Physically, the
   checked with obstacles at their physical radius (without margin); a full physical pivot is required at
   the start; the rest of the route keeps its margins. On this segment, tracking applies the same
   physical geometry (`SimEdge.escape`). Return to base: same departure.
+  Chassis already overlapping an edge at the start (1.1.4, `TrajectoryEnvelope.leavesStraight`): the straight escape
+  ahead is accepted if the chassis swept up to the first pose fully inside covers no ground outside the free area
+  other than what the start footprint already covers (20 cm² tolerance), the rest of the translation being free;
+  tracking (Fold and gateway) applies the same rule on escape edges. Oct 19, Fosse: robot stopped 15 cm from the
+  border, "Resume" refused twice ("Link unreachable: Fosse → Fosse"); test `StuckNearBorderResumeTest`.
 - Obstacles suggested on contact: placed with the fused heading when it is confirmed by
   movement (the published heading could be wrong by 80–90°).
 - Test `RouteDepartureEscapeTest`: reference map + real obstacles from the Fold; refusal reproduced

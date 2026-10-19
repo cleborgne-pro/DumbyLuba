@@ -403,7 +403,9 @@ class LegRunner(
                 check(intruding.isEmpty()) { if (added.isEmpty()) DriftRecovery.OBSTACLE_RESERVE else tr("Local obstacle added inside the robot envelope", "Obstacle local ajouté dans l'enveloppe robot") }
                 val envelopeGuard = if (escaping) physicalGuard ?: guard else guard
                 // Oriented envelope only with a confirmed heading; otherwise slow advance, centre and deviation checked.
-                check(!headingTrusted || envelopeGuard == null || envelopeGuard.motionCollision(RobotPose(position, heading), next) == null) { tr("Robot envelope outside the safe corridor", "Enveloppe robot hors du couloir sûr") }
+                // Escape in a straight line of a chassis already overlapping an edge: allowed while it only moves away.
+                val leaving = escaping && next.position != position && envelopeGuard?.leavesStraight(position, next.position, heading) == true
+                check(!headingTrusted || envelopeGuard == null || leaving || envelopeGuard.motionCollision(RobotPose(position, heading), next) == null) { tr("Robot envelope outside the safe corridor", "Enveloppe robot hors du couloir sûr") }
                 if (blades && now >= keepalive) { env.send(commands.manualBlades(true, heightMm), "ROUTE_BLADES_KEEPALIVE"); keepalive = now + 600 }
                 if (!blades && bumperWatch && now >= keepalive) { env.send(commands.manualMow(1, 0, heightMm), "ROUTE_BUMPER_KEEPALIVE_OFF"); keepalive = now + 500 }
                 // Bumper contact read from the error history: queried twice per second.

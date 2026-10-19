@@ -335,3 +335,12 @@ revokes the session and its refresh token: the next video token request was refu
 and the camera showed "Sign in to your Mammotion account (Me tab)". When the refresh is refused, the app now signs
 in again by itself with the saved credentials and replays the request; it still asks to sign in after an explicit
 sign-out, without saved credentials or if they are refused, and keeps the session on a network failure.
+
+Version 1.1.4 (165): **back-off after a contact kept on its line, resume next to a border**. On Oct 19 in Fosse, a
+wheel slipped during the 80 cm back-off after a bumper contact: the robot turned from 90° to 55°, drifted 14 cm
+sideways towards the border and the mowing stopped ("Back-off deviation >12 cm"); "Resume" was then refused
+("Link unreachable: Fosse → Fosse") because the robot's chassis overlapped the border. The back-off now holds its
+heading: beyond 8° of error, the robot pivots in place back towards its line, then reverses again. A deviation that
+still exceeds 12 cm no longer stops the mowing: the robot is brought back like after a trajectory exit. A robot
+whose chassis overlaps a border can leave straight ahead when this only moves it away from the border (start,
+resume, Fold and gateway tracking).

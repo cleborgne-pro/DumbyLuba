@@ -27,6 +27,12 @@ Applies to mowing, signal surveys, station routes and go-to-point moves.
 3. **Back-off** in a straight line along the traveled track, heading unchanged, ≈ 10 cm/s, from 30 cm to 1 m. The
    chassis sweep is checked against the borders, no-go zones and obstacles; lateral deviation ≤ 12 cm, 20 s at
    most. Keep-alive commands no longer pile up when the link through the gateway is slow.
+   **Heading hold (1.1.4)**: when a wheel slips and the robot turns while reversing (more than 8° away from the wanted
+   heading), the reverse pauses and the robot **pivots in place** back to the back-off heading, slightly tilted
+   towards its line so it returns onto it, then reverses again (not in the first 10 cm, pivot checked against the
+   borders and obstacles, at most 6 pivots of 4 s). If the deviation still exceeds 12 cm, the mowing no longer
+   stops: the repaired route is kept and the robot is brought back like after a
+   [trajectory exit](real-mowing.md#leaving-the-trajectory-back-off-and-resume).
 4. **Photo** of the obstacle if the option is enabled ([camera](camera.md#obstacle-photo-after-a-contact)).
 5. **Repair of the remaining route**: the portions too close to the obstacle are removed, including later passes
    that cross it again; the kept pieces are joined by a **tight detour** around the obstacle (≈ 1.2 m from its
