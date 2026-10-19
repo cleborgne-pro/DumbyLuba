@@ -328,3 +328,10 @@ the *Map → Map source* sheet. An empty map now shows a *No map on this phone* 
 (the gateway reads the map over Bluetooth and relays it to the pilot), or **Read the robot map** in direct
 Bluetooth, and **Account map**, with the reading progress; the home screen offers the same action under *MY MAP*.
 The reading is refused while a route, a mission, manual control, a test or a simulation is running.
+
+Version 1.1.3 (164): **camera and cloud kept working when the Mammotion session is revoked**. Signing in with the
+same account elsewhere (the published build and the Fold build installed side by side, or the Mammotion app)
+revokes the session and its refresh token: the next video token request was refused, the app signed the account out
+and the camera showed "Sign in to your Mammotion account (Me tab)". When the refresh is refused, the app now signs
+in again by itself with the saved credentials and replays the request; it still asks to sign in after an explicit
+sign-out, without saved credentials or if they are refused, and keeps the session on a network failure.

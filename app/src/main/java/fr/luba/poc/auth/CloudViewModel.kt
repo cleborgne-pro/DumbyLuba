@@ -41,6 +41,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
     private val mqttConnector:((CloudRobot,Boolean)->MqttLink)?=null):AndroidViewModel(app) {
     constructor(app:Application):this(app,MammotionCloud(SessionStore(app)),AccountStore(app))
     private val restoredAccount=accountStore.read()
+    init { api.savedAccount=accountStore::read }
     private val positionStore=LastKnownPositionStore(app.filesDir)
     private val cache=MapCache(app)
     private val preferences=app.getSharedPreferences("mammotion_map_selection",android.content.Context.MODE_PRIVATE)

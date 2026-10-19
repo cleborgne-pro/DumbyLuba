@@ -111,6 +111,49 @@ class MammotionCloudTest {
         assertEquals(listOf(devicesPath), server.paths()); assertFalse(api.connected())
     }
 
+    @Test fun `session revoked elsewhere signs in again with the saved account`() {
+        // Same account signed in from another build of the app: refresh token refused, saved account used.
+        var api = connected()
+        api.savedAccount = { SavedAccount("moi@example.com", "secret") }
+        val fresh = jwt(tag = "e")
+        server.on(devicesPath, { _ -> FakeMammotionServer.Reply(401, ByteArray(0)) }, { _ -> FakeMammotionServer.Reply(200, records.toByteArray()) })
+        server.on(TOKEN_PATH, { _ -> FakeMammotionServer.Reply(401, ByteArray(0)) }, { _ -> FakeMammotionServer.Reply(200, ok(session(access = fresh, refresh = "refresh-9")).toByteArray()) })
+        assertEquals(1, api.devices().length())
+        assertEquals(listOf(devicesPath, TOKEN_PATH, TOKEN_PATH, devicesPath), server.paths())
+        val (_, refresh, signIn, retry) = server.requests
+        assertEquals("refresh_token", query(refresh)["grant_type"])
+        assertEquals("password", query(signIn)["grant_type"]); assertEquals("moi@example.com", query(signIn)["username"])
+        assertEquals("Bearer $fresh", retry.headers["authorization"])
+        assertTrue(api.connected()); assertEquals("refresh-9", JSONObject(store.read()!!).getString("refresh_token"))
+        // Without refresh token: direct sign-in.
+        api = connected(refresh = null); api.savedAccount = { SavedAccount("moi@example.com", "secret") }; server.requests.clear()
+        server.on(devicesPath, { _ -> FakeMammotionServer.Reply(460, ByteArray(0)) }, { _ -> FakeMammotionServer.Reply(200, records.toByteArray()) })
+        server.json(TOKEN_PATH, ok(session(access = fresh)))
+        assertEquals(1, api.devices().length())
+        assertEquals("password", query(server.requests[1])["grant_type"]); assertTrue(api.connected())
+    }
+
+    @Test fun `saved account refused or network failure while signing in again`() {
+        val api = connected()
+        api.savedAccount = { SavedAccount("moi@example.com", "ancien") }
+        server.status(devicesPath, 401)
+        server.on(TOKEN_PATH, { _ -> FakeMammotionServer.Reply(401, ByteArray(0)) }, { _ -> FakeMammotionServer.Reply(401, ByteArray(0)) })
+        assertEquals("Mammotion : session expirée et compte enregistré refusé, reconnectez-vous",
+            assertThrows(IllegalStateException::class.java) { api.devices() }.message)
+        assertFalse(api.connected()); assertNull(store.read())
+        // Explicit sign-out: no silent sign-in even with a saved account.
+        server.requests.clear(); server.status("/device-server/v1/stream/token", 401)
+        assertEquals("Mammotion : session expirée, reconnectez votre compte",
+            assertThrows(IllegalStateException::class.java) { api.streamToken("iot1") }.message)
+        assertFalse(server.paths().contains(TOKEN_PATH)); assertFalse(api.connected())
+        // Network lost during the sign-in: session kept for a later attempt.
+        val kept = connected(); kept.savedAccount = { SavedAccount("moi@example.com", "secret") }
+        server.status(devicesPath, 401)
+        server.on(TOKEN_PATH, { _ -> FakeMammotionServer.Reply(401, ByteArray(0)) }, { _ -> throw IOException("coupure") })
+        assertThrows(IOException::class.java) { kept.devices() }
+        assertTrue(kept.connected()); assertNotNull(store.read())
+    }
+
     @Test fun `persistent 401 after renewal without loop`() {
         val api = connected()
         server.status(devicesPath, 401)

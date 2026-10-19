@@ -27,8 +27,12 @@ reading" or "Not signed in · sign in"; tapping it opens the **Mammotion account
    and the session are encrypted on the phone with an Android Keystore key (AES-GCM), in two separate stores.
    Unchecked, previously saved credentials are erased.
 3. **Sign in** (enabled once both fields are filled). A rejected sign-in shows "Mammotion: email or password rejected
-   (code N)"; a missing network shows "network unavailable"; an expired session that cannot be refreshed asks to
-   sign in again.
+   (code N)"; a missing network shows "network unavailable". An expired session is renewed with its refresh token;
+   if the cloud refuses it (session revoked because the same account signed in elsewhere: another build of the app,
+   such as the published one next to the Fold build, or the Mammotion app), the app signs in again by itself with the
+   saved credentials and replays the request (camera, robot list, MQTT). Without saved credentials, after an explicit
+   **Sign out**, or if the saved credentials are refused ("Mammotion: session expired and saved account refused, sign
+   in again"), it asks to sign in again; a network failure during this sign-in keeps the session for a later attempt.
 4. **Account robots** lists the account's `Luba…` devices (other products are ignored). The followed robot is the
    last one read, otherwise the first of the list. Tapping a robot (**Read the map**) reads its map through the cloud
    (90 s at most, otherwise "Cloud map incomplete: 90 s timeout, planning disabled"); **Open the map** shows the

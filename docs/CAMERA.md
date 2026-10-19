@@ -96,6 +96,10 @@ A fallback stream thumbnail appears at the bottom left while the camera is runni
 
 - Video commands go over the robot link (direct Bluetooth or gateway) if it is ready, otherwise over cloud MQTT. The `CloudReadOnly` barrier only accepts, in addition to reads, `set_video` (position LEFT, 0/1) and `req_encode`: no movement or blade command.
 - The token is never logged: the log (`camera`) only keeps a summary (viewer, cameras, encryption, quota).
+- Session revoked (same account signed in from another build of the app or from the Mammotion app): the token
+  request gets 401/460, the refresh token is refused, and since 1.1.3 the app signs in again with the saved account
+  and replays the token request. Before, it signed the account out and the video failed with "Sign in to your
+  Mammotion account (Me tab)" (Fold, Oct 19: published build 1.0.1 and Fold build 1.1.2 installed side by side).
 - Prerequisites: Mammotion account connected (Me tab), robot online (Wi-Fi or 4G), network on the phone. On 4G, video time is deducted from the Mammotion quota.
 
 Code: `camera/CameraStream.kt` (token), `camera/CameraRobot.kt` (fpv_info, network, acknowledgement), `camera/CameraController.kt` (shared player), `camera/CameraHost.kt` (stream, photo, thumbnail), `camera/CameraPage.kt` (page), `camera/ObstaclePhotoStore.kt` (photos), `assets/camera/agora.html`. Tests: `CameraTest`, `ObstaclePhotoStoreTest`, `LiveCameraTest`.

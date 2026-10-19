@@ -8,7 +8,7 @@ Inventory of 2026-10-11. Sources: PyMammotion 0.10.10 (commit `967c7ac9`), Mammo
 
 | Channel | Access | Used by the app |
 |---|---|---|
-| OAuth2 `id.mammotion.com/oauth2/token` | Bearer token + refresh | yes |
+| OAuth2 `id.mammotion.com/oauth2/token` | Bearer token + refresh (refused refresh: new password sign-in with the saved account, since 1.1.3) | yes |
 | `{iot}/v1/user/device/page` | list of robots (`deviceName`, `iotId`, `productKey`, `status`) | yes |
 | `{iot}/v1/mqtt/auth/jwt` + MQTT TLS | robot events | yes |
 | `{iot}/v1/mqtt/rpc/thing/service/invoke` | sends a protobuf `LubaMsg` to the robot | yes, filtered by `CloudReadOnly` |

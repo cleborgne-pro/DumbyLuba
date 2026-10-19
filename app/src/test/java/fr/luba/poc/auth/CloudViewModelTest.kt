@@ -131,6 +131,17 @@ class CloudViewModelTest {
         assertFalse(vm.state.value.connected); assertNull(sessionStore.read())
     }
 
+    @Test fun `session revoked by another sign-in renewed with the saved account`() {
+        accounts.save(SavedAccount("moi@example.com", "secret"))
+        val vm = connected()
+        server.on(devicesPath, { _ -> FakeMammotionServer.Reply(401, ByteArray(0)) },
+            { _ -> FakeMammotionServer.Reply(200, robots(Triple("Luba-VS1", "iot1", "pk1")).toByteArray()) })
+        server.on(TOKEN_PATH, { _ -> FakeMammotionServer.Reply(401, ByteArray(0)) }, { _ -> FakeMammotionServer.Reply(200, ok(session()).toByteArray()) })
+        vm.refresh()
+        until("new sign-in") { !vm.state.value.busy && vm.state.value.status == "1 LUBA dans le compte" }
+        assertTrue(vm.state.value.connected); assertNotNull(sessionStore.read())
+    }
+
     @Test fun `sign-out then forgetting the credentials`() {
         accounts.save(SavedAccount("moi@example.com", "secret"))
         val vm = connected()

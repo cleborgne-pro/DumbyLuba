@@ -54,10 +54,21 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
         val data=json.getJSONObject("data");check(data.optString("access_token").isNotBlank()) { tr("No session", "Session absente") }
         store.save(data.toString());token=data.getString("access_token")
     }
+    /**
+     * Saved account (Me tab, encrypted) used to sign in again when the session can no longer be renewed: signing in
+     * with the same account elsewhere (other build of the app, Mammotion app) revokes this session and its refresh token.
+     */
+    @Volatile var savedAccount:()->SavedAccount? = { null }
     @Synchronized private fun refreshSession() {
         val old=store.read()?.let(::JSONObject)
-        val refresh=old?.optString("refresh_token").orEmpty()
-        if(refresh.isBlank()) { logout();error(tr("Mammotion: session expired, sign in to your account again", "Mammotion : session expirée, reconnectez votre compte")) }
+        // Explicit sign-out: no silent sign-in.
+        if(old==null) { logout();error(tr("Mammotion: session expired, sign in to your account again", "Mammotion : session expirée, reconnectez votre compte")) }
+        val refresh=old.optString("refresh_token")
+        if(refresh.isNotBlank() && renew(old,refresh)) return
+        signInAgain()
+    }
+    /** Refresh-token grant; false if the cloud refuses the refresh token. */
+    private fun renew(old:JSONObject,refresh:String):Boolean {
         val params=linkedMapOf("client_id" to OAUTH_CLIENT,"grant_type" to "refresh_token","refresh_token" to refresh)
         val timestamp=System.currentTimeMillis()
         val compact=params.entries.joinToString(",", "{", "}") { JSONObject.quote(it.key)+":"+JSONObject.quote(it.value) }
@@ -67,17 +78,26 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
                 mapOf("Ma-App-Key" to OAUTH_CLIENT,"Ma-Signature" to OAuthSignature.sign(OAUTH_CLIENT,OAUTH_SECRET,timestamp,compact),
                     "Ma-Timestamp" to timestamp.toString()))
         } catch(e:CloudResponseException) {
-            if(e.code in listOf(401,403,40101,40102)) {
-                logout();error(tr("Mammotion: session expired, sign in to your account again", "Mammotion : session expirée, reconnectez votre compte"))
-            }
+            if(e.code in listOf(401,403,40101,40102)) return false
             throw e
         }
         val data=response.getJSONObject("data")
         check(data.optString("access_token").isNotBlank()) { tr("No session", "Session absente") }
         data.keys().forEach { key ->
-            if(!data.isNull(key) && !(key=="refresh_token" && data.optString(key).isBlank())) old!!.put(key,data.get(key))
+            if(!data.isNull(key) && !(key=="refresh_token" && data.optString(key).isBlank())) old.put(key,data.get(key))
         }
-        store.save(old!!.toString());token=old.getString("access_token")
+        store.save(old.toString());token=old.getString("access_token")
+        return true
+    }
+    /** Session revoked: new sign-in with the saved account, otherwise sign-out. A network failure keeps the session for a later attempt. */
+    private fun signInAgain() {
+        val account=savedAccount()
+        if(account==null) { logout();error(tr("Mammotion: session expired, sign in to your account again", "Mammotion : session expirée, reconnectez votre compte")) }
+        try { login(account.email,account.password) }
+        catch(e:java.io.IOException) { throw e }
+        catch(e:Exception) {
+            logout();throw IllegalStateException(tr("Mammotion: session expired and saved account refused, sign in again", "Mammotion : session expirée et compte enregistré refusé, reconnectez-vous"),e)
+        }
     }
     fun userAccount():Int = store.read()?.let { JSONObject(it).optJSONObject("userInformation")?.optString("userAccount")?.toIntOrNull() } ?: 0
     fun connected()=token.isNotBlank()
