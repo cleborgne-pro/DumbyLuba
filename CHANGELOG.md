@@ -321,3 +321,10 @@ the Mammotion account map, read successfully, stayed hidden because the account 
 link, and the map remained empty. Once telemetry is received, a robot without any known map now has its map read over
 BLE automatically, once per connection (`map_auto_read` event), silently skipped while a route, a mission, manual
 control or a test is running; *Read the robot map* stays available.
+
+Version 1.1.2 (163): **robot map read from the pilot through the gateway, from the empty map**. With the pilot
+connected through the gateway and no map on the phone, the map stayed empty and the Bluetooth reading was only in
+the *Map → Map source* sheet. An empty map now shows a *No map on this phone* panel with **Read via the gateway**
+(the gateway reads the map over Bluetooth and relays it to the pilot), or **Read the robot map** in direct
+Bluetooth, and **Account map**, with the reading progress; the home screen offers the same action under *MY MAP*.
+The reading is refused while a route, a mission, manual control, a test or a simulation is running.

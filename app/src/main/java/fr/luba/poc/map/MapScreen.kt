@@ -1121,6 +1121,10 @@ fun MapScreen(
                     // Link, positioning and battery are in the top pill: only a Mammotion task in progress or the demo map
                     // are still flagged above the bar.
                     if (demo || state.mowing.active) MapFloatingNote(if (demo) tr("Demo map", "Carte de démonstration") else state.mowing.status, NoteTone.INFO)
+                    // No map on this phone (new installation, cache cleared): reading triggered from here, over Bluetooth
+                    // by the gateway when the pilot goes through it, instead of an empty map with the action hidden in the sheet.
+                    if (!demo && !map.complete && !state.mowing.active) NoMapPanel(state, cloud, mapFetchAllowed(state, false),
+                        onFetch = { demo = false; onFetchMap() }, onAccount = onOpenAccount)
                     ActionBar {
                         // Mow goes back to the preparation in progress (preview already computed); otherwise zone choice.
                         ActionBarItem(Icons.Rounded.PlayArrow, if (state.mowing.active) tr("Follow", "Suivre") else tr("Mow", "Tondre"), colors.ActionMow, {
@@ -1216,7 +1220,7 @@ fun MapScreen(
                 availableLayers(displayedSignalSamples, signalView.relief != null, surveySignal) else emptyList(),
                 surveySignal, showSignalHeat, layersOpen, simulatedSurvey),
             mapLoading = state.mapLoading,
-            fetchEnabled = state.ready && !state.mapLoading && !state.campaign.running && !state.bladeTestActive && !state.navTest.running && !state.teach.running && !state.robotRoute.running && !state.mowing.active && sim.engine == null,
+            fetchEnabled = mapFetchAllowed(state, sim.engine != null),
             accountEnabled = sim.engine == null,
             demoEnabled = !computing && !state.robotRoute.running && !state.mowing.active && sim.engine == null,
             onSignal = { surveySignal = it; showSignalHeat = true },
@@ -1576,6 +1580,31 @@ private fun MapFloatingNote(text: String, tone: NoteTone, onDismiss: (() -> Unit
         Row(Modifier.padding(Dimens.Xs), verticalAlignment = Alignment.CenterVertically) {
             StatusNote(text, tone, Modifier.weight(1f))
             if (onDismiss != null) TextAction("OK", onDismiss)
+        }
+    }
+}
+
+/** BLE map reading possible now (robot linked directly or through the gateway, no mission, test or simulation). */
+internal fun mapFetchAllowed(state: RobotUi, simulating: Boolean): Boolean =
+    state.ready && !state.mapLoading && !state.campaign.running && !state.bladeTestActive && !state.navTest.running &&
+        !state.teach.running && !state.robotRoute.running && !state.mowing.active && !state.manualActive && !simulating
+
+/** Empty map: read the robot map (through the gateway when the pilot uses it) or open the Mammotion account map. */
+@Composable
+private fun NoMapPanel(state: RobotUi, cloud: Boolean, fetchEnabled: Boolean, onFetch: () -> Unit, onAccount: () -> Unit) {
+    val gateway = state.viaGateway && !cloud
+    val subtitle = when {
+        state.mapLoading -> (if (gateway) tr("Reading the robot map over Bluetooth through the gateway…", "Lecture de la carte du robot en Bluetooth par la passerelle…")
+            else tr("Reading the robot map over Bluetooth…", "Lecture de la carte du robot en Bluetooth…")) + " " + state.mammotionMap.source
+        state.ready && gateway -> tr("Robot connected through the gateway: the gateway reads its map over Bluetooth.", "Robot connecté par la passerelle : la passerelle lit sa carte en Bluetooth.")
+        state.ready -> tr("Robot connected over Bluetooth: read its map.", "Robot connecté en Bluetooth : lisez sa carte.")
+        else -> tr("Connect the robot (Bluetooth or gateway) to read its map, or view the Mammotion account map.", "Connectez le robot (Bluetooth ou passerelle) pour lire sa carte, ou consultez la carte du compte Mammotion.")
+    }
+    MapPanel(tr("No map on this phone", "Aucune carte sur ce téléphone"), subtitle = subtitle) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalAlignment = Alignment.CenterVertically) {
+            SecondaryPillButton(tr("Account map", "Carte du compte"), onAccount, Modifier.weight(1f))
+            PrimaryPillButton(if (state.mapLoading) tr("Reading…", "Lecture…") else if (gateway) tr("Read via the gateway", "Lire par la passerelle") else tr("Read the robot map", "Lire la carte du robot"),
+                onFetch, Modifier.weight(1.3f), enabled = fetchEnabled && !cloud)
         }
     }
 }

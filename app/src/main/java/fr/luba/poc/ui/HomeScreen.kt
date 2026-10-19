@@ -237,6 +237,14 @@ fun HomeScreen(
                 }
             }
 
+            // Robot linked (directly or through the gateway) without a map on this phone: Bluetooth reading from here.
+            if (state.ready && !map.complete && !state.mowing.active) {
+                TextAction(when {
+                    state.mapLoading -> tr("Reading the robot map…", "Lecture de la carte du robot…")
+                    state.viaGateway -> tr("Read the robot map via the gateway", "Lire la carte du robot par la passerelle")
+                    else -> tr("Read the robot map over Bluetooth", "Lire la carte du robot en Bluetooth")
+                }, onFetch, Modifier.fillMaxWidth().padding(top = Dimens.Sm), enabled = fr.luba.poc.map.mapFetchAllowed(state, false))
+            }
             if (!cloudState.connected && cloudState.map.shapes.isEmpty() && !map.complete) {
                 TextAction(tr("Read the map via the Mammotion account", "Lire la carte via le compte Mammotion"), onAccount, Modifier.fillMaxWidth().padding(top = Dimens.Sm))
             }

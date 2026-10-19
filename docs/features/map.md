@@ -39,6 +39,12 @@ cleared cache, robot never read), its map is read over BLE by itself as soon as 
 connection. It is skipped silently while a route, a mission, manual control or a test is running; **Read the robot
 map** stays available. The account map is only shown without a robot link, so it cannot fill this gap.
 
+**No map on this phone** (1.1.2): an empty map shows a panel above the action bar with **Read via the gateway**
+(pilot connected through the [gateway](gateway.md): the gateway reads the map over Bluetooth and relays it) or
+**Read the robot map** (direct Bluetooth), and **Account map**. While reading, the panel shows the progress
+("BLE map · n/N items"); the button is disabled when the robot is not linked or busy (route, mission, manual
+control, test, simulation). The home screen offers the same reading under the **MY MAP** card.
+
 ## Screen
 
 - **Header**: **Back** and a status pill — link (Bluetooth icon, or a router when the robot is connected through the
