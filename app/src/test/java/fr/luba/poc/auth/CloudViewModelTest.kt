@@ -82,15 +82,15 @@ class CloudViewModelTest {
 
     @Test fun `remembered sign-in then list of the account LUBA`() {
         server.json(TOKEN_PATH, ok(session()))
-        server.json(devicesPath, robots(Triple("Luba-VS1", "iot1", "pk1"), Triple("Yuka-02", "iot2", "pk2"), Triple("LUBA-2", "iot3", "pk1")))
+        server.json(devicesPath, robots(Triple("Luba-VS1", "iot1", "pk1"), Triple("Yuka-02", "iot2", "pk2"), Triple("Spino-S1-04", "iot4", "pk4"), Triple("LUBA-2", "iot3", "pk1")))
         val vm = model()
         assertFalse(vm.state.value.connected); assertEquals("Compte non connecté", vm.state.value.status)
         vm.login(" moi@example.com ", "secret")
         until("sign-in") { !vm.state.value.busy && vm.state.value.robots.isNotEmpty() }
         val s = vm.state.value
         assertTrue(s.connected); assertTrue(s.accountSaved); assertEquals("moi@example.com", s.accountEmail)
-        assertEquals("Mowers only", listOf("Luba-VS1", "LUBA-2"), s.robots.map { it.name })
-        assertEquals("iot1", s.selected?.id); assertEquals("2 LUBA dans le compte", s.status)
+        assertEquals("Mowers only (Yuka included, pool cleaner excluded)", listOf("Luba-VS1", "Yuka-02", "LUBA-2"), s.robots.map { it.name })
+        assertEquals("iot1", s.selected?.id); assertEquals("3 LUBA dans le compte", s.status)
         assertEquals(SavedAccount("moi@example.com", "secret"), accounts.read())
         // Restart: session and credentials kept.
         val restarted = model().state.value

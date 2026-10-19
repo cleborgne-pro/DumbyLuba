@@ -253,6 +253,7 @@ object GatewayWireText {
         "Message BluFi en cours d'écriture : réessayer" to "BluFi message being written: try again",
         "État du robot absent ou périmé sur la passerelle" to "Robot state missing or stale on the gateway",
         "Position du robot absente ou périmée sur la passerelle" to "Robot position missing or stale on the gateway",
+        "Modèle de robot en lecture seule : suivi autonome refusé" to "Robot model in read-only mode: autonomous tracking refused",
         "Écriture du pilote pendant le suivi autonome" to "Pilot write during autonomous tracking",
         "opération GATT sans réponse" to "GATT operation without response",
         "connexion sans réponse" to "connection without response",

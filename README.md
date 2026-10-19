@@ -2,7 +2,9 @@
 
 # DumbyLuba
 
-**Drive your Mammotion LUBA 2 AWD robot mower from your phone, locally, with your own mowing planner.**
+**Drive your Mammotion robot mower from your phone, locally, with your own mowing planner.**
+
+Validated on the LUBA 2 AWD · other Mammotion mowers connect in read-only mode, [testers wanted](docs/features/supported-models.md)
 
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 ![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white)
@@ -28,8 +30,11 @@
 
 </div>
 
-DumbyLuba is a free and open-source Android app (Kotlin, Jetpack Compose) that talks directly to the **LUBA 2 AWD**
-over Bluetooth Low Energy. It reads the robot's map, **computes the mowing route on the phone**, checks it against the
+DumbyLuba is a free and open-source Android app (Kotlin, Jetpack Compose) that talks directly to **Mammotion robot
+mowers** over Bluetooth Low Energy. The **LUBA 2 AWD** is the only model validated so far; the other Mammotion mowers
+(LUBA 1, LUBA 3, LUBA mini, Yuka…) are recognized and connect in **read-only mode** (telemetry, map, diagnostics, no
+motion and no blades) until each one is adapted and tested with its owners: see the
+[supported models](docs/features/supported-models.md). It reads the robot's map, **computes the mowing route on the phone**, checks it against the
 robot's footprint, simulates it, then has the robot follow it command by command, with return to base, recharging and
 resume. Above all, it adds what the official app does not offer:
 [remote control with the camera view](#remote-control-with-the-camera-view), fast and animated route generation,
@@ -51,8 +56,8 @@ The app UI is available in English and French: it follows the phone language, or
 > - **The ultrasonic sensors are not available**: the known protocol does not publish any ultrasonic distance.
 >   Only the **bumper** detects obstacles; the app reacts on contact (stop, back-off, bypass), not on approach.
 
-> *DumbyLuba is an experimental, open-source Android app that drives a Mammotion LUBA 2 AWD robot mower over
-> Bluetooth LE with on-phone coverage path planning, simulation, obstacle bypass, interrupted-mow resume, signal
+> *DumbyLuba is an experimental, open-source Android app that drives Mammotion robot mowers (validated on the
+> LUBA 2 AWD, other models in read-only mode) over Bluetooth LE with on-phone coverage path planning, simulation, obstacle bypass, interrupted-mow resume, signal
 > heatmaps and an on-robot Wi-Fi gateway (Android phone or ESP32). Unofficial, not affiliated with Mammotion,
 > provided without any warranty.*
 
@@ -66,6 +71,10 @@ The app UI is available in English and French: it follows the phone language, or
 > - That the robot's firmware stops it when the app goes silent **has not been demonstrated**: check it on your own
 >   robot (Service → Command cutoff) before any mowing.
 > - Using it may breach Mammotion's terms of use and affect the robot's warranty.
+> - Only the LUBA 2 AWD (`Luba-VS…`) receives motion and blade commands. Any other model stays in read-only mode: do
+>   not try to bypass it, report your model instead ([supported models](docs/features/supported-models.md)).
+> - "Mammotion", "LUBA" and "Yuka" are trademarks of Mammotion, named only to indicate compatibility; the name
+>   DumbyLuba does not imply any endorsement.
 >
 > You use it entirely at your own risk (see sections 15 and 16 of the [license](LICENSE)).
 
@@ -331,7 +340,7 @@ flowchart LR
         Planner --> Follower["Route tracking<br/>+ safety guards"]
     end
     Follower -- "Wi-Fi · TCP 8766" --> GW["Gateway placed on the robot<br/>(Android or ESP32)"]
-    GW -- "BLE · BluFi + protobuf" --> Robot["LUBA 2 AWD"]
+    GW -- "BLE · BluFi + protobuf" --> Robot["Mammotion mower<br/>(LUBA 2 AWD validated)"]
     Follower -. "Direct BLE · close range" .-> Robot
     Phone -. "HTTPS · optional" .-> Cloud["Mammotion cloud<br/>(map, status, camera)"]
     Relay["Relay phone"] -. "HTTP · 3 s" .-> Server["Home server<br/>(local web page)"]
@@ -352,14 +361,32 @@ schemas are included: see [docs/MAMMOTION_PROTOCOL.md](docs/MAMMOTION_PROTOCOL.m
 
 | Item | Required | Tested |
 |---|---|---|
-| Robot | **Mammotion LUBA 2 AWD** (Bluetooth name `Luba-VS…`) | a single LUBA 2 AWD |
+| Robot | **Mammotion mower**: full control on the LUBA 2 AWD (`Luba-VS…`), read-only on the other models | a single LUBA 2 AWD |
 | Pilot phone | Android **8.0+** (API 26) with Bluetooth LE | Samsung Galaxy Z Fold |
 | **Gateway placed on the robot** (required) | Android 8.0+ phone or LILYGO TTGO T-Call V1.3 board (ESP32), on the same Wi-Fi as the pilot phone | Redmi A1, T-Call V1.3 |
 | Mammotion account (optional) | for camera video, remote map, native return and firmware | |
 | Home server (optional) | any machine with Python 3.10+ on the local network | macOS |
 
-Nothing guarantees it works with another model (LUBA 1, Yuka…), another firmware or another phone. Speeds remain in
-raw, uncalibrated units. The robot's ultrasonic sensors are not used: only the bumper detects obstacles.
+### Supported robot models
+
+| Model | Bluetooth name | Status | What works |
+|---|---|---|---|
+| **LUBA 2 AWD** | `Luba-VS…` | ✅ validated (a single robot) | everything: control, mowing, gateway, surveys |
+| LUBA 2 AWD X series | `Luba-VP…` | 🔒 read-only, tester wanted | connection, telemetry, map, camera, diagnostics |
+| LUBA AWD (LUBA 1) | `Luba…` | 🔒 read-only, tester wanted | same |
+| LUBA 3 AWD | `Luba-VA…` | 🔒 read-only, tester wanted | same |
+| LUBA mini AWD | `Luba-MN…`, `Luba-LD…` | 🔒 read-only, tester wanted | same |
+| LUBA mini 2 AWD | `Luba-LA…`, `Luba-MD…`, `Luba-MB…`, `Luba-LS…`, `Luba-MS…` | 🔒 read-only, tester wanted | same |
+| Yuka family | `Yuka…`, `Ezy-…` | 🔒 read-only, tester wanted | same, protocol differences expected |
+| Other recent Luba | `Luba-HM…`, `Luba-ME…`, `Luba-TR…`, `Luba-SP…` | 🔒 read-only, tester wanted | same |
+
+**Read-only** means the app refuses every motion, blade, blade-height and navigation command for that model, at the
+last step before Bluetooth, whatever the screen. Each model is unlocked only after an owner has run the documented
+tests on their robot, blades stopped first. Own one of them? Read
+[supported models](docs/features/supported-models.md) and open a *Model compatibility report* issue.
+
+Nothing guarantees it works with another firmware or another phone. Speeds remain in raw, uncalibrated units. The
+robot's ultrasonic sensors are not used: only the bumper detects obstacles.
 
 ## Installation
 
@@ -516,7 +543,8 @@ tools/check.sh full      # build + tests + lint
 
 ## Project status
 
-Proof of concept developed and tested on **a single** LUBA 2 AWD, with a Samsung Galaxy Z Fold as the pilot and a
+Proof of concept developed and tested on **a single** LUBA 2 AWD (the other models are read-only, see
+[supported robot models](#supported-robot-models)), with a Samsung Galaxy Z Fold as the pilot and a
 Redmi A1 or a LILYGO T-Call (ESP32) as the gateway. Many features are validated in simulation and JVM tests (about
 230 test files), but only partly in the field. Each [feature](docs/FEATURES.md) page states what has actually been
 verified; the [milestones](docs/FEATURES.md#milestones) table summarizes progress.
@@ -579,8 +607,10 @@ than 2 s (except during autonomous tracking).
 <details>
 <summary><b>Does it work with other Mammotion robots?</b></summary>
 
-Only the LUBA 2 AWD has been tested, and motion commands are restricted to `Luba-VS…` names. The protocol is similar
-on other models: contributions with documented tests are welcome.
+Not fully yet. Every Mammotion mower (LUBA 1, LUBA 2 X, LUBA 3, LUBA mini, Yuka…) is recognized and connects in
+read-only mode: telemetry, map, camera and diagnostics export, without motion or blades. Only the LUBA 2 AWD
+(`Luba-VS…`) is validated for control. Each other model will be adapted with the help of its owners: see
+[supported models](docs/features/supported-models.md) to send a compatibility report.
 </details>
 
 <details>
@@ -607,4 +637,5 @@ schemas from [PyMammotion](https://github.com/mikey0000/PyMammotion), under the 
 licenses and services used: [THIRD_PARTY.md](THIRD_PARTY.md).
 
 Thanks to the authors of PyMammotion and Mammotion-HA, without whom the protocol could not have been understood.
-"Mammotion" and "LUBA" are trademarks of their respective owners, mentioned only to indicate compatibility.
+"Mammotion", "LUBA" and "Yuka" are trademarks of Mammotion, mentioned only to indicate compatibility. DumbyLuba is
+an independent project, not affiliated with, endorsed by or supported by Mammotion.

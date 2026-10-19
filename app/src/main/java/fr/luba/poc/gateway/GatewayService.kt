@@ -179,7 +179,7 @@ class GatewayService : Service() {
         val callback = object : ScanCallback() {
             override fun onScanResult(type: Int, result: ScanResult) {
                 val name = result.scanRecord?.deviceName ?: result.device.name ?: return
-                if (!name.startsWith("Luba", ignoreCase = true)) return
+                if (!fr.luba.poc.protocol.ModelSupport.isMower(name)) return
                 if (synchronized(seen) { seen.add(result.device.address) }) onResult(name, result.device.address, result.rssi)
             }
         }

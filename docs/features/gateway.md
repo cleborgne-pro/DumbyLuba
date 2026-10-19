@@ -186,6 +186,9 @@ own. Installation: see the [firmware README](../../firmware/esp32-gateway/README
 
 ## Limitations
 
+- Read-only mode: the gateway lists every Mammotion mower (Android gateway; the ESP32 still lists only `Luba…`
+  names), but autonomous tracking is only offered for the validated LUBA 2 AWD and the Android gateway refuses a leg for
+  a known robot name that is not validated ([supported models](supported-models.md)).
 - Latency mostly comes from the **gateway phone's Wi-Fi** (screen off, Wi-Fi/Bluetooth coexistence, weak signal in the
   garden): moving the access point closer or adding a repeater remains the best remedy.
 - Both phones must run the same version (protocol v2).

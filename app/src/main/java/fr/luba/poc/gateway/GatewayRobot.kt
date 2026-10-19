@@ -378,6 +378,9 @@ class GatewayRobot(
         override fun refusal(): String? = synchronized(lock) {
             when {
                 link == null || !ready -> "Robot non connecté en Bluetooth sur la passerelle"
+                // Read-only mode (docs/features/supported-models.md): a known robot name that is not validated never
+                // gets an autonomous leg. An unknown name is left to the pilot, which checks the robot it selected.
+                name != null && !fr.luba.poc.protocol.ModelSupport.motionValidated(name) -> "Modèle de robot en lecture seule : suivi autonome refusé"
                 safety.midMessage -> "Message BluFi en cours d'écriture : réessayer"
                 // Same preconditions as starting a route on the pilot: fresh robot state and position (≤ 2 s).
                 observer.view.let { v -> v.devicePrevious == 0L || monotonicMs() - v.devicePrevious !in 0..2000 } ->

@@ -15,7 +15,9 @@ import fr.luba.poc.R
  * Luba-VS / Luba-VP → LUBA 2 AWD (VP = X series), Luba-VA → LUBA 3 AWD (HM442), Luba-MN / Luba-LD → LUBA mini AWD
  * (HM430/431), Luba-LA / Luba-MD / Luba-MB and their SE (LS, MS) → LUBA mini 2 AWD (HM432 to 434).
  * Newer Luba models with no established trade name (HM, ME, TR, SP) stay generic; any other "Luba…" name is a
- * LUBA 1, as in the original app.
+ * LUBA 1, as in the original app. Yuka mowers (Yuka-, Yuka-MN, Yuka-YM, Yuka-VP, Yuka-MV, Yuka-ML, Yuka-CV, Yuka-HS and
+ * the Ezy-VT / Ezy-LD names) share a single generic entry, without photo.
+ * Only the LUBA 2 AWD `Luba-VS…` is validated for motion: see [fr.luba.poc.protocol.ModelSupport].
  */
 enum class RobotModel(val label: String, private val photoName: String? = null) {
     LUBA_1("LUBA AWD", "robot_photo_luba1"),
@@ -25,6 +27,8 @@ enum class RobotModel(val label: String, private val photoName: String? = null) 
     LUBA_MINI_2("LUBA mini 2 AWD", "robot_photo_luba_mini2"),
     /** Identified Luba with no trade name or dedicated photo (recent model). */
     LUBA_OTHER("LUBA"),
+    /** Yuka family (mowers with a grass collector), generic label and illustration. */
+    YUKA("Yuka"),
     /** No known robot: generic illustration. */
     UNKNOWN("LUBA");
 
@@ -51,6 +55,7 @@ enum class RobotModel(val label: String, private val photoName: String? = null) 
             "Luba-LS" to LUBA_MINI_2, "Luba-MS" to LUBA_MINI_2,
             "Luba-HM" to LUBA_OTHER, "Luba-MH" to LUBA_OTHER, "Luba-ME" to LUBA_OTHER,
             "Luba-TR" to LUBA_OTHER, "Luba-SP" to LUBA_OTHER,
+            "Yuka" to YUKA, "Ezy-" to YUKA,
         )
 
         private val productKeys: Map<String, RobotModel> = buildMap {
@@ -61,6 +66,9 @@ enum class RobotModel(val label: String, private val photoName: String? = null) 
             listOf("a1L5ZfJIxGl", "a1dCWYFLROK", "ftDnXns2cdT", "a1jDMfG2Fgj", "a1vtZq9LUFS", "FpstPz2SpwH").forEach { put(it, LUBA_MINI) }
             listOf("CDYuKXTYrSP", "a1YbcqQYFv2", "a1T6VTFTc0C", "a14iRDqMepW", "a1pb9toor70", "3drMFnqGVNe",
                 "k8H4M5KZ6Fn", "f4KFveHngnm").forEach { put(it, LUBA_MINI_2) }
+            listOf("a1kT0TlYEza", "a1IQV0BrnXb", "KJHXKHMEvj3", "a1lNESu9VST", "a1zAEzmvWDa", "UfsEwwHp8uz", "a1BqmEWMRbX",
+                "a1biqVGvxrE", "8xMGQS6DESC", "a1jFe8HzcDb", "a16cz0iXgUJ", "USpE46bNTC7", "pdA6uJrBfjz", "a1OWGO8WXbh",
+                "a1s6znKxGvI", "5BMtap5Q3Yq", "h8ZyNy8FV3u", "rBGTwYhfhyY", "NnbeYtaEUGE").forEach { put(it, YUKA) }
             listOf("HK8snDC8Kxh", "tBnCA8u2Aps", "jvEDnj42DRK", "z8Pu2TEeNZU", "SNvVHSxfU73").forEach { put(it, LUBA_OTHER) }
         }
 

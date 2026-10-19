@@ -135,7 +135,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         load()
     }
     fun refresh()=work {load()}
-    private fun load(){val a=api.devices();val robots=(0 until a.length()).map{a.getJSONObject(it)}.map { CloudRobot(it.getString("deviceName"),it.getString("iotId"),it.getString("productKey")) }.filter{it.name.startsWith("Luba",true)}
+    private fun load(){val a=api.devices();val robots=(0 until a.length()).map{a.getJSONObject(it)}.map { CloudRobot(it.getString("deviceName"),it.getString("iotId"),it.getString("productKey")) }.filter{fr.luba.poc.protocol.ModelSupport.isMower(it.name)}
         val selected=robots.firstOrNull { it.id == preferences.getString("robot",null) } ?: robots.firstOrNull()
         mutable.value=mutable.value.copy(robots=robots,selected=selected,telemetry=fr.luba.poc.protocol.Telemetry(),details=if(selected?.id==mutable.value.selected?.id) mutable.value.details else RobotDetails(),connected=true,map=selected?.let{cache.read(it.id)} ?: RobotMap(),lastKnown=selected?.let{positionStore.read(it.id)});status(tr("${robots.size} LUBA in the account", "${robots.size} LUBA dans le compte"))}
     fun logout(){job?.cancel();api.logout();preferences.edit().clear().apply();val saved=accountStore.read();mutable.value=CloudUi(accountSaved=saved!=null,accountEmail=saved?.email.orEmpty());status(tr("Session deleted", "Session supprimée"))}
@@ -291,6 +291,8 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
     fun nativeReturnToBase() {
         if(following()) return
         val robot=mutable.value.selected ?: run { setReturn(CloudReturnUi(CloudReturnPhase.FAILED,tr("No LUBA selected in the account", "Aucun LUBA sélectionné dans le compte"),now()));return }
+        // Read-only mode: a model that is not validated never receives a motion order, native return included.
+        fr.luba.poc.protocol.ModelSupport.refusal(robot.name)?.let { setReturn(CloudReturnUi(CloudReturnPhase.FAILED,it,now()));return }
         if(!api.connected()) { setReturn(CloudReturnUi(CloudReturnPhase.FAILED,tr("Sign in to your Mammotion account (Me tab)", "Connectez votre compte Mammotion (onglet Moi)"),now()));return }
         setReturn(CloudReturnUi(CloudReturnPhase.CONNECTING,tr("Connecting to the robot through the account…", "Connexion au robot par le compte…"),now()))
         followJob=viewModelScope.launch(Dispatchers.IO) {
@@ -391,6 +393,8 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         if(following()) return
         val robot=mutable.value.selected ?: return
         val check=mutable.value.firmwareCheck
+        // Read-only mode: the firmware of a model that is not validated is updated from the Mammotion app only.
+        fr.luba.poc.protocol.ModelSupport.refusal(robot.name)?.let { setFirmware(FirmwareUpdateUi(status=tr("Update not started: $it", "Mise à jour non lancée : $it")));return }
         FirmwareUpdatePolicy.refusal(check,mutable.value.details)?.let { setFirmware(FirmwareUpdateUi(status=tr("Update not started: $it", "Mise à jour non lancée : $it")));return }
         val target=check!!.latest!!
         val started=now()

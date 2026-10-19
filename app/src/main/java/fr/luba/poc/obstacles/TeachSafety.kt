@@ -33,7 +33,7 @@ object TeachSafety {
         sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, bladeTestRunning: Boolean,
         navRunning: Boolean, mapLoading: Boolean, batteryFloor: Int = 30,
     ): List<Triple<String, Boolean, String>> = listOf(
-        Triple("Robot LUBA 2", name?.startsWith("Luba-VS", ignoreCase = true) == true, tr("Teaching reserved for a LUBA 2 identified as Luba-VS", "Apprentissage réservé au LUBA 2 identifié Luba-VS")),
+        Triple("Robot LUBA 2", fr.luba.poc.protocol.ModelSupport.motionValidated(name), tr("Teaching reserved for a LUBA 2 identified as Luba-VS", "Apprentissage réservé au LUBA 2 identifié Luba-VS")),
         Triple(tr("BLE diagnostics stopped", "Diagnostic BLE arrêté"), !campaignRunning, tr("Stop the BLE campaign before teaching", "Arrêter la campagne BLE avant l'apprentissage")),
         Triple(tr("No blade test", "Aucun essai de coupe"), !bladeTestRunning, tr("Finish the blade test before teaching", "Terminer l'essai de coupe avant l'apprentissage")),
         Triple(tr("No course running", "Aucun parcours en cours"), !navRunning, tr("Finish the random walk before teaching", "Terminer la marche aléatoire avant l'apprentissage")),

@@ -77,7 +77,7 @@ object NavSafety {
         sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, bladeTestRunning: Boolean,
         mapLoading: Boolean, heightMm: Int, batteryFloor: Int = 30,
     ): String? {
-        if (name?.startsWith("Luba-VS", ignoreCase = true) != true) return tr("Walk reserved for a LUBA 2 identified as Luba-VS", "Marche réservée au LUBA 2 identifié Luba-VS")
+        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Walk reserved for a LUBA 2 identified as Luba-VS", "Marche réservée au LUBA 2 identifié Luba-VS")
         if (campaignRunning) return tr("Stop the BLE campaign before the walk", "Arrêter la campagne BLE avant la marche")
         if (bladeTestRunning) return tr("Finish the cutting test before the walk", "Terminer l'essai de coupe avant la marche")
         if (mapLoading) return tr("Wait for the map to be read", "Attendre la lecture de carte")

@@ -20,8 +20,9 @@ account, secret or prior pairing is needed.
 2. Service → Bluetooth connection (or tap the robot card at the top of the Service tab). When no robot is connected,
    the page starts a search on its own; **Search for robots** (bottom button, "Searching…" while it runs) starts a
    new one. A search lasts 15 s. The **Detected robots** list shows the name, the Bluetooth address and the signal
-   (dBm) of devices whose name starts with `Luba`; LUBA robots already paired in Android are listed too, with "paired,
-   signal unknown".
+   (dBm) of Mammotion mowers (names starting with `Luba`, `Yuka`, `Ezy-`, `Kumar` or `Maston`); robots already
+   paired in Android are listed too, with "paired, signal unknown". Models other than the LUBA 2 AWD connect in
+   [read-only mode](supported-models.md).
 3. Tap the robot (**Connect**). Automatic connection: after 4 s of listening (then at the end of the search), if a
    single robot was actually received, the app connects to it; with several, it shows "Several robots detected:
    choose the one to connect". Robots that are only paired do not count.
@@ -105,8 +106,8 @@ Group **Test limits**: **Minimum battery** 30 % (fixed). The page also holds the
 ## Limitations
 
 - The protocol comes from reverse engineering (PyMammotion) and may change with a firmware update.
-- Only `Luba-VS…` names (LUBA 2) are accepted for movement commands; a name proves neither the exact model nor the
-  owner.
+- Only `Luba-VS…` names (LUBA 2) are accepted for movement and blade commands; every other model is in
+  [read-only mode](supported-models.md). A name proves neither the exact model nor the owner.
 - The robot's Bluetooth range is a few meters: direct Bluetooth from the phone is only usable nearby (tests,
   configuration). To control the robot across the whole garden, **a device placed on the LUBA is required**: the
   [gateway](gateway.md) (Android phone or ESP32), to which the pilot phone connects over Wi-Fi. Commands, telemetry

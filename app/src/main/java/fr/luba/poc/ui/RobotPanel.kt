@@ -326,6 +326,8 @@ private fun ServiceHub(state: RobotUi, modifier: Modifier, open: (String) -> Uni
                 Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = colors.TextTertiary)
             }
         }
+        // Read-only mode of a model that is not validated (docs/features/supported-models.md).
+        fr.luba.poc.protocol.ModelSupport.readOnlyNote(robotName, model.label)?.let { StatusNote(it, NoteTone.WARNING) }
         // Groups by intent; one-line subtitles, status on the right only when useful.
         SettingsGroup(tr("Connection", "Connexion")) {
             Entry(ServicePage.CONNECTION, Icons.Rounded.Bluetooth, tr("Search, connect, disconnect", "Rechercher, connecter, déconnecter"))

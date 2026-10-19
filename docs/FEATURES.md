@@ -21,6 +21,7 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 | Page | In short |
 |---|---|
 | [Interface and navigation](features/interface.md) | Device / Service / Me tabs, Service page groups, global STOP bar, light and dark theme, English or French |
+| [Supported models](features/supported-models.md) | LUBA 2 AWD validated; LUBA 1, LUBA 3, LUBA mini, Yuka… in read-only mode, how to test your model |
 | [Bluetooth connection](features/bluetooth-connection.md) | scanning, connection, link loss, link kept in the background, advanced settings |
 | [Mammotion account](features/mammotion-account.md) | optional: map and status through the cloud, camera, native return, firmware update |
 | [Map](features/map.md) | BLE or cloud reading, cache, map sheet (background, layers, legend, source), local corrections (zones, no-go zones, obstacles), base and manual accesses, device status, last known position |

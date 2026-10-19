@@ -224,7 +224,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
 
     /** Routes are tracked by the gateway (Redmi) if it advertises it and the setting is not turned off. */
     private fun autonomousLegsAvailable(): Boolean =
-        (gatt as? fr.luba.poc.gateway.GatewayLink)?.supportsLegs == true && fr.luba.poc.autonomy.AutonomySettings.enabled(getApplication())
+        (gatt as? fr.luba.poc.gateway.GatewayLink)?.supportsLegs == true && fr.luba.poc.autonomy.AutonomySettings.enabled(getApplication()) &&
+            fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name)
 
     /**
      * Tracking handed to the gateway ([fr.luba.poc.autonomy.LegRunner] on the Redmi): waits for its outcome while keeping
@@ -234,6 +235,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     private suspend fun runRemoteLeg(link: fr.luba.poc.gateway.GatewayLink, spec: fr.luba.poc.autonomy.LegSpec, path: List<SimEdge>,
                                      obstacles: () -> List<fr.luba.poc.obstacles.LocalObstacle>, planned: () -> Set<String>, originOf: (Int) -> Int,
                                      navProgress: ((fr.luba.poc.autonomy.LegProgress) -> Unit)? = null): Int {
+        // Read-only mode: the gateway writes the leg itself, out of reach of the send() barrier, so it is refused here.
+        fr.luba.poc.protocol.ModelSupport.refusal(state.value.selected?.name)?.let { error(it) }
         fun legObstacles() = obstacles().map { o -> fr.luba.poc.autonomy.LegObstacle(o.id, o.x, o.y, o.radiusM, o.exclusionRadiusM, o.id in planned()) }
         // Move to a point ([navProgress]): progress and trail kept by the navigation screen, not by the mowing route.
         val shown = spec.shown && navProgress == null
@@ -799,6 +802,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     /** Motion setpoint frames removed from the queue, replaced by a more recent setpoint. */
     private var setpointsReplaced = 0L
     private var periodicSkipped = 0L
+    /** Commands dropped by the read-only mode of a model that is not validated. */
+    private var readOnlyRefused = 0L
     private var motionStarvedLogged = false
     /** Last non-zero motion setpoint confirmed as written (0: none since the stop). */
     private var motionWrittenAt = 0L
@@ -1440,8 +1445,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 val name = result.scanRecord?.deviceName ?: result.device.name
                 if (scanAddresses.add(result.device.address)) event("scan_advertisement", tr("BLE advertisement", "Annonce BLE"), mapOf("name" to name, "address" to result.device.address, "rssiDbm" to result.rssi, "serviceUuids" to result.scanRecord?.serviceUuids?.map { it.toString() }))
                 if (name == null) return@post
-                // Luba-VS = LUBA 2. Other Luba models stay visible for diagnostics.
-                if (!name.startsWith("Luba", ignoreCase = true)) return@post
+                // Every Mammotion mower is listed; only the validated models (Luba-VS) leave read-only mode.
+                if (!fr.luba.poc.protocol.ModelSupport.isMower(name)) return@post
                 val device = SeenRobot(name, result.device.address, result.rssi)
                 event("scan_result", tr("BLE robot detected", "Robot BLE détecté"), mapOf("name" to name, "address" to device.address,
                     "rssiDbm" to result.rssi, "advertisedServiceUuids" to result.scanRecord?.serviceUuids?.map { it.toString() }))
@@ -1490,7 +1495,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val paired = adapter.bondedDevices.mapNotNull { device ->
                 val name = device.name ?: return@mapNotNull null
                 event("bonded_device", tr("Paired device", "Appareil appairé"), mapOf("name" to name, "address" to device.address, "type" to device.type))
-                if (name.startsWith("Luba", true)) SeenRobot(name, device.address, null) else null
+                if (fr.luba.poc.protocol.ModelSupport.isMower(name)) SeenRobot(name, device.address, null) else null
             }
             update { it.copy(scanning = true, devices = if (gatewayPhone) emptyList() else paired,
                 status = if (gatewayPhone) tr("Gateway: Bluetooth search for the robot (range check)…", "Passerelle : recherche Bluetooth du robot (vérification de portée)…") else tr("BLE search; ${paired.size} paired LUBA available", "Recherche BLE ; ${paired.size} LUBA appairé(s) disponible(s)")) }
@@ -2007,6 +2012,17 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     private fun send(payload: ByteArray, label: String, nativeReturn: Boolean = false, periodic: Boolean = false) {
         check(ExternalNavigationPolicy.allows(payload, nativeReturn)) { tr("Firmware navigation forbidden: use the local BLE route", "Navigation firmware interdite : utiliser le trajet BLE local") }
         if (gatt == null) return
+        // Read-only mode (docs/features/supported-models.md): a model that is not validated only receives read and
+        // stop commands. Last barrier, whatever the screen or the activity that built the command.
+        val robotName = state.value.selected?.name
+        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(robotName) && !fr.luba.poc.protocol.ReadOnlyPolicy.allows(payload)) {
+            readOnlyRefused++
+            event("read_only_refused", tr("Command refused: robot model in read-only mode", "Commande refusée : modèle de robot en lecture seule"),
+                mapOf("label" to label, "robotName" to robotName, "model" to fr.luba.poc.ui.RobotModel.detect(robotName).name,
+                    "totalRefused" to readOnlyRefused, "payloadHex" to payload.hex()))
+            fr.luba.poc.protocol.ModelSupport.refusal(robotName)?.let { status(it) }
+            return
+        }
         // Autonomous tracking: the gateway alone writes to the robot (link keep-alive included). Every stop order is
         // preceded by stopping the tracking (cancelRobotRoute), which lifts this hold.
         if (remoteLegActive) return
@@ -2485,6 +2501,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         try {
             RobotRoute.requireExecutable(engine.preview)
             check(!state.value.silenceTest.running) { tr("Finish the command cutoff test first", "Terminer l'essai de coupure des commandes") }
+            // Read-only mode: no route (mowing, survey, move, return or base exit) on a model that is not validated.
+            fr.luba.poc.protocol.ModelSupport.refusal(state.value.selected?.name)?.let { error(it) }
             val robotId = requireNotNull(state.value.selected?.address) { tr("No robot selected", "Robot non sélectionné") }
             val engineFingerprint = if (intent == RouteIntent.FOLLOW) MissionProgress.fingerprint(engine.edges) else ""
             if (saved != null) {
@@ -3608,7 +3626,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (stopPending) return
         stopPending = true
         // The TX sequence is assigned in pump(), after the purge, without creating a gap.
-        if (bumperManualMode || bladeMayBeOn || (state.value.selected?.name?.startsWith("Luba-VS", true) == true && state.value.telemetry.sensorStatus?.let { ((it shr 9) and 7) != 0 } == true)) {
+        if (bumperManualMode || bladeMayBeOn || (fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name) && state.value.telemetry.sensorStatus?.let { ((it shr 9) and 7) != 0 } == true)) {
             val offBatch = ++batchCounter
             blufi.fragment(commands.manualBlades(false, bladeHeightRequest), state.value.mtu).forEach { queue.addLast(Operation.Write(it, "BLADES_OFF", offBatch)) }
         }
@@ -3946,7 +3964,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (state.value.mowing.active) return
         if (heightTarget != null) { update { it.copy(bladeStatus = tr("Height pending: cancel the wait or wait for its result before checking OFF", "Hauteur en attente : annuler l’attente ou attendre son résultat avant de vérifier OFF")) }; return }
         if (!state.value.ready || closing || state.value.teach.running || state.value.campaign.running || state.value.bladeTestActive || state.value.navTest.running || heightTarget != null) return
-        if (state.value.selected?.name?.startsWith("Luba-VS", true) != true) return
+        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name)) return
         bladeHeightRequest = heightMm.coerceIn(25, 70)
         bladeStopVerified = false; bladeOffWrittenAt = 0; bladeOffPending = true; bladeMayBeOn = true
         update { it.copy(bladeStatus = tr("Blade stop check: OFF requested", "Vérification arrêt lames : OFF demandé")) }
@@ -4157,7 +4175,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 !state.value.navTest.running && !state.value.teach.running && !state.value.borderFrontal.running && !state.value.campaign.running &&
                 !state.value.bladeTestActive && !state.value.mapLoading && heightTarget == null &&
                 !bladeMayBeOn && !bladeOffPending) { tr("Finish the mission or test in progress", "Terminer la mission ou l'essai en cours") }
-            check(state.value.selected?.name?.startsWith("Luba-VS", true) == true) { tr("LUBA 2 required", "LUBA 2 requis") }
+            check(fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name)) { tr("LUBA 2 required", "LUBA 2 requis") }
             check(t.robotState in if (state.value.manualActive) listOf(11,20) else listOf(11)) { tr("Robot not ready", "Robot non prêt") }
             val failure = TeachSafety.tickFailure(if (devicePrevious == 0L) null else SystemClock.elapsedRealtime()-devicePrevious,
                 t.battery,t.sensorStatus,30)

@@ -15,7 +15,7 @@ object BladeSafety {
     /** All preconditions, in [requireReady] order: the first failing one is the refusal reason. */
     fun checks(name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
                sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int): List<BladeCheck> = listOf(
-        BladeCheck("Robot LUBA 2", name?.startsWith("Luba-VS", ignoreCase = true) == true, tr("Test reserved for a LUBA 2 identified as Luba-VS", "Test réservé au LUBA 2 identifié Luba-VS")),
+        BladeCheck("Robot LUBA 2", fr.luba.poc.protocol.ModelSupport.motionValidated(name), tr("Test reserved for a LUBA 2 identified as Luba-VS", "Test réservé au LUBA 2 identifié Luba-VS")),
         BladeCheck(tr("BLE diagnostics stopped", "Diagnostic BLE arrêté"), !campaignRunning, tr("Stop the BLE campaign before this test", "Arrêter la campagne BLE avant ce test")),
         BladeCheck(tr("Height 25–70 mm", "Hauteur 25–70 mm"), heightMm in 25..70, tr("Height outside the 25–70 mm range", "Hauteur hors plage 25–70 mm")),
         BladeCheck(tr("Fresh robot state (≤ 2 s)", "État robot frais (≤ 2 s)"), stateAgeMs != null && stateAgeMs in 0..2000, tr("Robot state missing or older than 2 s", "État robot absent ou âgé de plus de 2 s")),

@@ -6,7 +6,7 @@ everything can be interrupted with STOP. This page summarizes these protections 
 | | |
 |---|---|
 | **Status** | Implemented and covered by JVM tests; partial physical validation (see each section) |
-| **Code** | `ble/RobotBle.kt` (`stop`, `requestStop`, `unlockAfterStop`), `protocol/` (`TelemetryWatchdog.kt`, `SelfCheck.kt`, `StopUnlock.kt`, `CollisionLatch.kt`, `RobotErrorCatalog.kt`, `RobotErrorMonitor.kt`, `ExternalNavigationPolicy.kt`, `NativeTaskStop.kt`), `simulation/ProtectionPause.kt`, `diagnostics/` (`LiftGuard.kt`, `MotionProgressGuard.kt`, `BladeSafety.kt`, `CommandSilenceProbe.kt`), `map/MapScreen.kt` (protection panels) |
+| **Code** | `ble/RobotBle.kt` (`stop`, `requestStop`, `unlockAfterStop`), `protocol/` (`TelemetryWatchdog.kt`, `SelfCheck.kt`, `StopUnlock.kt`, `CollisionLatch.kt`, `RobotErrorCatalog.kt`, `RobotErrorMonitor.kt`, `ExternalNavigationPolicy.kt`, `ModelSupport.kt`, `NativeTaskStop.kt`), `simulation/ProtectionPause.kt`, `diagnostics/` (`LiftGuard.kt`, `MotionProgressGuard.kt`, `BladeSafety.kt`, `CommandSilenceProbe.kt`), `map/MapScreen.kt` (protection panels) |
 | **References** | [Lift detection](../LIFT_DETECTION.md) · [Robot error codes](../ROBOT_ERROR_CODES.md) · [Command cutoff](../MOTOR_WATCHDOG.md) · [Bypass after a contact](../OBSTACLE_BYPASS.md) |
 
 > [!WARNING]
@@ -17,6 +17,12 @@ everything can be interrupted with STOP. This page summarizes these protections 
   <img src="../images/command-cutoff.png" width="200" alt="Command cutoff">
   <img src="../images/robot-locked.png" width="200" alt="Robot locked after STOP">
 </p>
+
+## Read-only mode for the models that are not validated
+
+Motion and blade commands are reserved for the validated model, the LUBA 2 AWD (`Luba-VS…`). Every other Mammotion
+mower is in read-only mode: the Bluetooth send lets through only read and stop commands, routes and the native
+return are refused before they start. See [supported models](supported-models.md).
 
 ## Global STOP
 

@@ -67,7 +67,7 @@ class GatewayAutonomyTest {
      * Pilot phone: authenticated TCP session, PING every 250 ms, tracking frames handed to [RemoteLegs].
      * [connect] opens a new session (after a Wi-Fi outage, the client and its tracking in progress are kept).
      */
-    private inner class Pilot(val announceLegs: Boolean = true) {
+    private inner class Pilot(val announceLegs: Boolean = true, val robotName: String = "Luba-VS123") {
         @Volatile var channel: GatewayChannel = GatewayChannel.open("127.0.0.1", server.localPort, code)
         val client = RemoteLegs(LegTransport { type, payload -> val c = channel; runCatching { synchronized(c) { c.send(type, payload) } }.isSuccess })
         val ready = LinkedBlockingQueue<Int>()
@@ -99,7 +99,7 @@ class GatewayAutonomyTest {
             }.apply { isDaemon = true }.start()
             synchronized(opened) {
                 if (announceLegs) opened.send(LegFrames.LEG_HELLO)
-                opened.send(GatewayProtocol.OPEN, GatewayProtocol.open(address, "Luba-VS123"))
+                opened.send(GatewayProtocol.OPEN, GatewayProtocol.open(address, robotName))
             }
             assertNotNull("robot link ready", ready.poll(8, TimeUnit.SECONDS))
         }
@@ -181,6 +181,16 @@ class GatewayAutonomyTest {
         assertEquals("stop", link.trace.last { it == "stop" || it == "move" })
         assertFalse("no blade turned", link.trace.contains("blades-on"))
         assertEquals("tracking ends on the Redmi", false, robot!!.autonomy.running)
+    }
+
+    @Test(timeout = 120_000) fun aRobotModelInReadOnlyModeNeverGetsAnAutonomousLeg() = runBlocking {
+        serve(); val pilot = Pilot(robotName = "Yuka-MNDEMO01"); val link = links.take()
+        val route = pilot.client.ensureRoute(path()); val guard = pilot.client.ensureGuard(wideSurface())
+        val leg = pilot.client.start(spec(pilot, route, guard, cutting = true), Recorder())
+        val failure = runCatching { withTimeout(30_000) { leg.result.await() } }.exceptionOrNull()
+        assertTrue("leg refused: $failure", failure is fr.luba.poc.autonomy.RemoteLegs.RefusedLeg && failure.message!!.contains("lecture seule"))
+        assertFalse("the robot never moved: ${link.trace}", link.trace.contains("move") || link.trace.contains("blades-on"))
+        assertEquals(false, robot!!.autonomy.running)
     }
 
     @Test(timeout = 120_000) fun wifiLostMidLegTheRobotKeepsGoingWithoutEmergencyStopThenResultIsDelivered() = runBlocking {

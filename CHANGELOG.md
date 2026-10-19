@@ -301,3 +301,16 @@ photos of the five named models (LUBA AWD, LUBA 2 AWD, LUBA 3 AWD, LUBA mini AWD
 the home screen and at the top of the Service tab of the GitHub APK, instead of the project illustration, and the
 documentation screenshots show them. They remain Mammotion's property (THIRD_PARTY.md) and stay until a removal
 request; the illustration is still used for unknown models and would replace the photos if they were removed.
+
+Version 1.1.0: **every Mammotion mower recognized, read-only mode for the models that are not validated**. The scan
+(direct Bluetooth, Android gateway) and the Mammotion account now list every Mammotion mower (`Luba…`, `Yuka…`,
+`Ezy-…`, `Kumar…`, `Maston…`; pool cleaners and RTK stations excluded), and the Yuka family is recognized. Only the
+LUBA 2 AWD (`Luba-VS…`) is validated for control: any other model connects in **read-only mode**. A last barrier in
+the Bluetooth send (`ReadOnlyPolicy`) lets through only an explicit list of read and stop commands (zero speed,
+blades off, telemetry, map, error and self-check queries, camera) and drops everything else, logged as
+`read_only_refused`; routes, autonomous tracking (also refused by the Android gateway for a known name that is not
+validated), the native return and the firmware update through the account are refused before they start, and the Service tab shows a *Read-only mode* note under the robot card. The existing `Luba-VS` checks of the
+tests and mowing now share `ModelSupport`. New page [supported models](docs/features/supported-models.md) with the
+compatibility table, a *Model compatibility report* issue form, and README, CONTRIBUTING and legal mentions updated
+(Mammotion, LUBA and Yuka trademarks, independent project). The ESP32 gateway firmware is unchanged and still lists
+only `Luba…` names.

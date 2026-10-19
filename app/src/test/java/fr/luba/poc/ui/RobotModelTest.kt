@@ -35,10 +35,17 @@ class RobotModelTest {
         assertEquals(RobotModel.LUBA_2, RobotModel.detect("Luba-VS1", "a1Ce85210Be"))
     }
 
+    @Test fun yukaFamilyIsRecognizedWithoutPhoto() {
+        listOf("Yuka-DEMO01", "Yuka-MN123", "Yuka-YM123", "Yuka-VP123", "Ezy-VT123", "Ezy-LD123")
+            .forEach { assertEquals(it, RobotModel.YUKA, RobotModel.detect(it)) }
+        assertEquals(RobotModel.YUKA, RobotModel.detect(null, "a1BqmEWMRbX"))
+        assertFalse(RobotModel.YUKA.named)
+    }
+
     @Test fun unknownRobotKeepsIllustration() {
         assertEquals(RobotModel.UNKNOWN, RobotModel.detect(null))
         assertEquals(RobotModel.UNKNOWN, RobotModel.detect(""))
-        assertEquals(RobotModel.UNKNOWN, RobotModel.detect("Yuka-MN123"))
+        assertEquals(RobotModel.UNKNOWN, RobotModel.detect("Spino-S1DEMO"))
         assertFalse(RobotModel.UNKNOWN.named)
         assertEquals(5, RobotModel.entries.count { it.named })
     }

@@ -1,0 +1,71 @@
+name: Model compatibility report
+description: Report how DumbyLuba behaves with your Mammotion mower (LUBA 1, LUBA 2 X, LUBA 3, LUBA mini, Yuka…), in read-only mode.
+title: "[Model] <model name> — compatibility report"
+labels: ["model-support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping support more Mammotion mowers. Models other than the LUBA 2 AWD (`Luba-VS…`) are in
+        **read-only mode**: the app never sends motion or blade commands to them. Please do not try to bypass it.
+        Steps: [supported models](https://github.com/cleborgne-pro/DumbyLuba/blob/main/docs/features/supported-models.md).
+
+        **Before attaching anything, remove personal data**: robot serial number, account credentials, garden
+        address or GPS coordinates, IMEI, Wi-Fi network names.
+  - type: input
+    id: model
+    attributes:
+      label: Robot model
+      description: Trade name as sold, for example "LUBA mini 2 AWD 800" or "Yuka mini".
+    validations:
+      required: true
+  - type: input
+    id: ble-prefix
+    attributes:
+      label: Bluetooth name prefix
+      description: The first letters of the name shown by the scan, without the serial part (for example `Luba-MB` or `Yuka-MN`).
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Robot firmware version
+      description: Shown in the Mammotion app or in DumbyLuba (Service → Bluetooth connection, **Firmware** row).
+  - type: input
+    id: app-version
+    attributes:
+      label: DumbyLuba version and phone
+      description: Me → About → Version, phone model and Android version.
+    validations:
+      required: true
+  - type: dropdown
+    id: link
+    attributes:
+      label: Link used
+      options:
+        - Direct Bluetooth (phone next to the robot)
+        - Android gateway on the robot
+        - ESP32 gateway on the robot
+    validations:
+      required: true
+  - type: checkboxes
+    id: results
+    attributes:
+      label: What works
+      options:
+        - label: The robot appears in the scan with the right model
+        - label: The connection succeeds and the read-only banner is shown
+        - label: Telemetry is received (battery, state, position)
+        - label: The map is read over Bluetooth (zones and no-go zones look right)
+        - label: The camera video works (Mammotion account)
+        - label: STOP is accepted without error
+  - type: textarea
+    id: details
+    attributes:
+      label: Observations
+      description: Anything wrong or missing, messages shown, differences with the Mammotion app.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostics
+      description: Attach the ZIP from Service → Logs → Export all (ZIP), after removing personal data.
