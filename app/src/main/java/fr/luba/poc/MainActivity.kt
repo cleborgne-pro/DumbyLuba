@@ -207,6 +207,12 @@ private fun RobotScreen(
     // Account map: only before the first robot link (or on request). Once the robot is linked, a gateway
     // dropout or reconnection keeps the Bluetooth map, its heatmap and its framing.
     LaunchedEffect(state.ready) { if (state.ready) useCloudMap = false }
+    // Connected robot without any known map (new installation, cache cleared): its map is read over BLE by itself,
+    // once per connection, instead of an empty map that the account map cannot fill while the robot is linked.
+    val receiving = state.connection == fr.luba.poc.ble.ConnectionState.Receiving
+    LaunchedEffect(receiving, state.selected?.address, state.mammotionMap.shapes.isEmpty()) {
+        if (receiving && state.mammotionMap.shapes.isEmpty()) robot.autoFetchMap()
+    }
     var tab by rememberSaveable { mutableStateOf(Tab.Appareil) }
     var page by rememberSaveable { mutableStateOf(DevicePage.HOME) }
     var accountPage by rememberSaveable { mutableStateOf(false) }

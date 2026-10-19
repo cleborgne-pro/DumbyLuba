@@ -34,6 +34,11 @@ flagged by a "Demo map" note above the bottom bar.
 Complete maps are cached on the phone (one per geometry, atomic write) and reloaded at startup. Reading is bounded
 (4096 frames, 100,000 points, 1024 shapes) to reject an abnormal map.
 
+**Automatic reading** (1.1.1): when the connected robot (Bluetooth or gateway) has no known map (new installation,
+cleared cache, robot never read), its map is read over BLE by itself as soon as telemetry is received, once per
+connection. It is skipped silently while a route, a mission, manual control or a test is running; **Read the robot
+map** stays available. The account map is only shown without a robot link, so it cannot fill this gap.
+
 ## Screen
 
 - **Header**: **Back** and a status pill — link (Bluetooth icon, or a router when the robot is connected through the

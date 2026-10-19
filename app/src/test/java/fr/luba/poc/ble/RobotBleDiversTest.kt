@@ -201,6 +201,42 @@ class RobotBleDiversTest {
         bench.ble.stopManual()
     }
 
+    @Test fun `robot without known map, BLE map read automatically once per connection`() {
+        bench.connect()
+        assertTrue(bench.state.mammotionMap.shapes.isEmpty())
+        val mark = bench.mark()
+        assertTrue(bench.ble.autoFetchMap())
+        assertTrue(bench.state.mapLoading)
+        // A single attempt per connection, even after the timeout.
+        bench.until(70_000, "read timeout") { !bench.state.mapLoading }
+        assertFalse(bench.ble.autoFetchMap())
+        assertFalse(bench.state.mapLoading)
+        assertTrue(bench.labelsAfter(mark).none { it.startsWith("move") || it == "blades-on" })
+    }
+
+    @Test fun `cached map or disconnected robot, no automatic map read`() {
+        connectedInZone()
+        assertTrue(bench.state.mammotionMap.complete)
+        assertFalse(bench.ble.autoFetchMap())
+        assertFalse(bench.state.mapLoading)
+        bench.ble.disconnect()
+        bench.until(3000, "disconnected") { bench.state.connection == ConnectionState.Disconnected }
+        assertFalse("Not connected", bench.ble.autoFetchMap())
+    }
+
+    @Test fun `robot without map under manual control, automatic read silent and kept for later`() {
+        bench.connect()
+        bench.ble.beginManualGesture(); bench.ble.manualInput(100, 0)
+        val status = bench.state.status
+        assertFalse(bench.ble.autoFetchMap())
+        assertFalse(bench.state.mapLoading)
+        assertEquals("No refusal message for an automatic read", status, bench.state.status)
+        bench.ble.stopManual()
+        bench.until(5000, "joystick released") { !bench.state.manualActive }
+        assertTrue(bench.ble.autoFetchMap())
+        assertTrue(bench.state.mapLoading)
+    }
+
     @Test fun `scan through the gateway, Bluetooth off on the gateway, reason shown without direct fallback`() {
         val code = "123456"
         val server = java.net.ServerSocket(0, 4, java.net.InetAddress.getLoopbackAddress())

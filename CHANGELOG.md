@@ -314,3 +314,10 @@ tests and mowing now share `ModelSupport`. New page [supported models](docs/feat
 compatibility table, a *Model compatibility report* issue form, and README, CONTRIBUTING and legal mentions updated
 (Mammotion, LUBA and Yuka trademarks, independent project). The ESP32 gateway firmware is unchanged and still lists
 only `Luba…` names.
+
+Version 1.1.1 (162): **map read by itself when the connected robot has none**. After a new installation (GitHub APK
+next to the development build) or a cleared cache, the robot connected through Bluetooth or the gateway had no map:
+the Mammotion account map, read successfully, stayed hidden because the account map is only shown without a robot
+link, and the map remained empty. Once telemetry is received, a robot without any known map now has its map read over
+BLE automatically, once per connection (`map_auto_read` event), silently skipped while a route, a mission, manual
+control or a test is running; *Read the robot map* stays available.
