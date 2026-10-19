@@ -354,3 +354,13 @@ ahead added in 1.1.4 was only used by the manual "Resume" (which did leave from 
 The automatic resume after a trajectory exit or a protection (`DriftRecovery`, Fold, and the obstacle simulation)
 now falls back on that straight escape ahead when no back-off along the trail brings the chassis back inside; the
 link must start with the escape, which is only accepted if it moves the chassis away from the border.
+
+Version 1.2.0 (167): **route tracking quality in the task history**, to validate autonomous tracking by the gateway on
+the robot. Each task records how its route was tracked (pilot phone over direct Bluetooth, pilot phone through the
+gateway relay, or gateway on the robot) at the start and at each resume, and how many route trackings were handed to
+the gateway. The task detail gets a **Route tracking** section: deviation of the positions recorded with the blades
+running from the cutting stripes prepared at start (median, 95 %, max), positions beyond the 30 cm tracking limit,
+and holes of more than 15 s in the received positions (Wi-Fi or link lost). A mowing tracked by the gateway can thus
+be compared with the same zone tracked from the Fold. Simulated reference mowing: median 1 cm, 95 % 12 cm, max 29 cm.
+See [mowing history](docs/features/mowing-history.md#route-tracking-quality-since-120) and
+[autonomous gateway](docs/AUTONOMOUS_GATEWAY.md#to-validate-on-the-robot).

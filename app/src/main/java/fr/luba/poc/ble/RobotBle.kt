@@ -224,6 +224,13 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** How routes are tracked right now, recorded in the task history to compare field runs. */
+    private fun trackingLink(): fr.luba.poc.history.TrackingLink = when {
+        autonomousLegsAvailable() -> fr.luba.poc.history.TrackingLink.GATEWAY
+        gatt is fr.luba.poc.gateway.GatewayLink -> fr.luba.poc.history.TrackingLink.RELAY
+        else -> fr.luba.poc.history.TrackingLink.BLUETOOTH
+    }
+
     /** Routes are tracked by the gateway (Redmi) if it advertises it and the setting is not turned off. */
     private fun autonomousLegsAvailable(): Boolean =
         (gatt as? fr.luba.poc.gateway.GatewayLink)?.supportsLegs == true && fr.luba.poc.autonomy.AutonomySettings.enabled(getApplication()) &&
@@ -280,6 +287,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             if (started.result.isCompleted) { legs.release(started); leg = null; started.result.await() }
             link.holdUntil = Long.MAX_VALUE
             if (spec.cutting && (spec.from until path.size).any { path[it].bladesOn }) bladeMayBeOn = true
+            // Task history: one more tracking handed to the gateway (compared with tracking from the pilot).
+            if (shown) update { s -> s.mowingRecord?.let { r -> s.copy(mowingRecord = r.copy(gatewayLegs = r.gatewayLegs + 1,
+                links = r.links + fr.luba.poc.history.TrackingLink.GATEWAY)) } ?: s }
             event("gateway_leg_start", tr("Tracking handed to the gateway", "Suivi confié à la passerelle"), mapOf("leg" to spec.legId, "from" to spec.from, "edges" to path.size, "shown" to shown,
                 "cutting" to spec.cutting, "sampling" to spec.sampling, "obstacles" to spec.obstacles.size))
             var sentObstacles = spec.obstacles
@@ -2315,8 +2325,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         val startedAt = checkpoint?.startedAt ?: System.currentTimeMillis()
         val id = "$robotId-$startedAt"
         val history = state.value.mowingHistory
-        val record = if (resumed && checkpoint != null) history.firstOrNull { it.id == id }?.copy(outcome = fr.luba.poc.history.MowingOutcome.RUNNING,
-            reason = null, endedAt = null, resumes = checkpoint.resumes, heightMm = checkpoint.heightMm, doneMeters = checkpoint.doneMeters) ?: return
+        val record = if (resumed && checkpoint != null) history.firstOrNull { it.id == id }?.let { r -> r.copy(outcome = fr.luba.poc.history.MowingOutcome.RUNNING,
+            reason = null, endedAt = null, resumes = checkpoint.resumes, heightMm = checkpoint.heightMm, doneMeters = checkpoint.doneMeters,
+            links = r.links + trackingLink()) } ?: return
         else {
             val c = engine.config
             val zones = engine.map.shapes.filter { it.kind == ShapeKind.ZONE && it.id in engine.preview.zoneIds }
@@ -2330,7 +2341,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 heightMm = heightMm, speedMps = c.speedMps, returnPercent = checkpoint?.returnPercent ?: c.returnPercent.toInt(),
                 resumePercent = checkpoint?.resumePercent ?: c.resumePercent.toInt(),
                 plannedMeters = engine.preview.meters, cuttingMeters = checkpoint?.totalMeters ?: engine.preview.meters,
-                doneMeters = checkpoint?.doneMeters ?: 0.0, forecast = forecast, batteryStart = battery, batteryEnd = battery, kind = kind)
+                doneMeters = checkpoint?.doneMeters ?: 0.0, forecast = forecast, batteryStart = battery, batteryEnd = battery, kind = kind,
+                links = setOf(trackingLink()))
         }
         trackBegin(id, engine)
         historyTracker = fr.luba.poc.history.MowingTracker(record.totals)
@@ -2341,7 +2353,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         event("mowing_history_start", if (resumed) tr("Mowing measurement resumed", "Reprise de la mesure de tonte") else tr("Mowing measurement started", "Mesure de tonte démarrée"),
             mapOf("id" to id, "forecastSeconds" to record.forecast.totalSeconds, "forecastRecharges" to record.forecast.recharges,
                 "timeFactor" to record.forecast.timeFactor, "autonomyMinutes" to record.forecast.autonomyMinutes,
-                "chargeMinutes" to record.forecast.chargeMinutes, "calibratedFrom" to record.forecast.calibratedFrom) + wetnessFields())
+                "chargeMinutes" to record.forecast.chargeMinutes, "calibratedFrom" to record.forecast.calibratedFrom,
+                "trackingLink" to trackingLink().name) + wetnessFields())
         historyJob = viewModelScope.launch { while (true) { historySample(); delay(2000) } }
     }
 
@@ -2466,7 +2479,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 "expectedRecharges" to comparison.expectedRecharges, "actualRecharges" to comparison.actualRecharges,
                 "batteryUsed" to final.totals.batteryUsed, "batteryCharged" to final.totals.batteryCharged,
                 "observedTimeFactor" to comparison.observedTimeFactor, "observedAutonomyMinutes" to comparison.observedAutonomyMinutes,
-                "observedChargeMinutes" to comparison.observedChargeMinutes) + wetnessFields())
+                "observedChargeMinutes" to comparison.observedChargeMinutes, "trackingLinks" to final.links.joinToString(",") { it.name },
+                "gatewayLegs" to final.gatewayLegs) + wetnessFields())
         if (done && mowing) alert(AlertKind.MOWING_REPORT, Severity.INFO, "${final.zoneNames.joinToString(", ").ifBlank { tr("Mowing", "Tonte") }} · ${comparison.durationVerdict}")
     }
 

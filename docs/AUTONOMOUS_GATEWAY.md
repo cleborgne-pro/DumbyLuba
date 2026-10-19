@@ -161,6 +161,13 @@ Known difference from tracking on the Fold: the signal survey sample is taken wi
 
 ### To validate on the robot
 
+Measurement (since 1.2.0): open each task in the history, section **Route tracking**
+([mowing history](features/mowing-history.md#route-tracking-quality-since-120)). **Tracked by** must read
+"Gateway on the robot, autonomous tracking" with at least one tracking handed to the gateway; compare **Deviation from
+the stripes** (median, 95 %, max) with the same zone mowed from the Fold over direct Bluetooth, and read the Wi-Fi
+outage in **Position holes over 15 s**. Reference in simulation (`RobotBleTonteTest`, direct Bluetooth): median 1 cm,
+95 % 12 cm, max 29 cm, no hole. Write the figures in a dated report in `docs/`.
+
 1. Short mowing then a big-loop signal survey, good Wi-Fi: same trajectories as with tracking on the Fold (compare the deviation from the route).
 2. Cut the router's Wi-Fi during a big loop: the robot must carry on, the Fold must show "Wi-Fi lost… carries on by itself", and the
    map must fill in on return (hole in the robot's Wi-Fi layer, continuous Bluetooth / RTK samples).

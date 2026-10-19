@@ -77,6 +77,13 @@ class RobotBleTonteTest {
         assertTrue(bench.state.robotRoute.trail.size > 20)
         // Task track readable from history; task can be excluded from estimate calibration.
         bench.awaitReal(5000, "track saved") { kotlinx.coroutines.runBlocking { bench.ble.loadTaskTrack(report.id) }?.samples?.isNotEmpty() == true }
+        // Route tracking recorded for the field comparison: pilot over Bluetooth, nothing handed to a gateway, and the
+        // recorded positions stay on the prepared stripes.
+        assertEquals(setOf(fr.luba.poc.history.TrackingLink.BLUETOOTH), report.links)
+        assertEquals(0, report.gatewayLegs)
+        val tracking = requireNotNull(fr.luba.poc.history.RouteDeviation.of(requireNotNull(kotlinx.coroutines.runBlocking { bench.ble.loadTaskTrack(report.id) })))
+        println("Recorded track: $tracking")
+        assertTrue("$tracking", tracking.samples > 20 && tracking.medianM < 0.10 && tracking.offRoute == 0 && tracking.gaps == 0)
         bench.ble.showMowingReport(report.id)
         bench.ble.setMowingExcluded(report.id, true)
         assertTrue(bench.state.mowingHistory.first { it.id == report.id }.excluded)

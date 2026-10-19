@@ -169,6 +169,7 @@ fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMa
             MowingOutcome.RUNNING -> tr("${record.kind.label} in progress", "${record.kind.label} en cours")
         }, when (record.outcome) { MowingOutcome.COMPLETE -> NoteTone.SUCCESS; MowingOutcome.INTERRUPTED -> NoteTone.WARNING; else -> NoteTone.INFO })
         TaskReplay(record, track, loading, fallbackMap)
+        if (!loading) TrackingQuality(record, track)
         if (record.kind == TaskKind.MOW) {
             val comparison = remember(record) { MowingComparison.of(record) }
             val calibration = remember(history, record.robotId) { MowingCalibration.from(history, record.robotId) }
@@ -274,6 +275,49 @@ private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean
             }
         }
     }
+}
+
+/**
+ * Route tracking: who tracked the route (pilot phone or gateway) and the deviation of the positions recorded while
+ * mowing from the prepared stripes, to compare a mowing tracked by the gateway with one tracked by the pilot phone.
+ */
+@Composable
+private fun TrackingQuality(record: MowingRecord, track: TaskTrack?) {
+    val deviation = remember(track) { track?.let(RouteDeviation::of) }
+    if (record.links.isEmpty() && deviation == null) return
+    SettingsGroup(tr("Route tracking", "Suivi du trajet")) {
+        TrackingText.links(record)?.let { KeyValueRow(tr("Tracked by", "Suivi par"), it) }
+        if (deviation == null) {
+            InfoNote(tr("No position recorded with the blades running: deviation not measured.", "Aucune position relevée lames en marche : écart non mesuré."))
+            return@SettingsGroup
+        }
+        KeyValueRow(tr("Deviation from the stripes · median · 95 % · max", "Écart aux bandes · médian · 95 % · max"), TrackingText.deviation(deviation))
+        KeyValueRow(tr("Positions beyond 30 cm", "Positions au-delà de 30 cm"), TrackingText.beyond(deviation))
+        KeyValueRow(tr("Position holes over 15 s", "Trous de positions de plus de 15 s"), TrackingText.gaps(deviation))
+        InfoNote(tr("Measured on the positions received while mowing, against the stripes prepared at start: a bypass or a repaired route counts as a deviation. A hole means positions not received (Wi-Fi or link lost).",
+            "Mesuré sur les positions reçues pendant la tonte, par rapport aux bandes préparées au lancement : un contournement ou un trajet réparé compte comme un écart. Un trou signale des positions non reçues (Wi-Fi ou liaison perdus)."))
+    }
+}
+
+/** Labels of the route tracking section. */
+object TrackingText {
+    private fun cm(m: Double) = "${MowingForecaster.num(m * 100, 0)} cm"
+
+    fun links(r: MowingRecord): String? {
+        if (r.links.isEmpty()) return null
+        val names = TrackingLink.entries.filter { it in r.links }.joinToString(" + ") { it.label }
+        return if (r.gatewayLegs > 0) tr("$names · ${r.gatewayLegs} run${if (r.gatewayLegs > 1) "s" else ""} handed to the gateway",
+            "$names · ${r.gatewayLegs} suivi${if (r.gatewayLegs > 1) "s" else ""} confié${if (r.gatewayLegs > 1) "s" else ""} à la passerelle") else names
+    }
+
+    fun deviation(d: RouteDeviation): String =
+        "${cm(d.medianM)} · ${cm(d.p95M)} · ${if (d.offRoute > 0) "≥ " else ""}${cm(d.maxM)}"
+
+    fun beyond(d: RouteDeviation): String =
+        tr("${d.over30} of ${d.samples} (${MowingText.percent(100.0 * d.over30 / d.samples)})", "${d.over30} sur ${d.samples} (${MowingText.percent(100.0 * d.over30 / d.samples)})")
+
+    fun gaps(d: RouteDeviation): String =
+        if (d.gaps == 0) tr("None", "Aucun") else tr("${d.gaps} · longest ${TaskText.elapsed(d.longestGapMs)}", "${d.gaps} · le plus long ${TaskText.elapsed(d.longestGapMs)}")
 }
 
 @Composable

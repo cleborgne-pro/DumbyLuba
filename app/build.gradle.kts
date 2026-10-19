@@ -18,8 +18,8 @@ android {
         applicationId = "fr.luba.poc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 166
-        versionName = "1.1.5"
+        versionCode = 167
+        versionName = "1.2.0"
         testInstrumentationRunner = "fr.luba.poc.planning.PlannerDeviceBenchmark"
     }
     buildFeatures { compose = true; buildConfig = true }

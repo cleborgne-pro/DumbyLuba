@@ -65,6 +65,10 @@ data class MowingRecord(
     /** Excluded by the user from estimate calibration (test, abnormal mowing). */
     val excluded: Boolean = false,
     val kind: TaskKind = TaskKind.MOW,
+    /** How the route was tracked, at each start or resume (empty for tasks recorded before 1.2.0). */
+    val links: Set<TrackingLink> = emptySet(),
+    /** Route trackings handed to the gateway on the robot (autonomous tracking). */
+    val gatewayLegs: Int = 0,
 ) {
     val progress: Double get() = if (cuttingMeters <= 0) 0.0 else (doneMeters / cuttingMeters).coerceIn(0.0, 1.0)
     val finished: Boolean get() = outcome != MowingOutcome.RUNNING
@@ -305,6 +309,7 @@ object MowingHistoryJson {
         .put("recharges", r.recharges).put("resumes", r.resumes).put("obstacles", r.obstacles)
         .put("batteryStart", r.batteryStart ?: JSONObject.NULL).put("batteryEnd", r.batteryEnd ?: JSONObject.NULL)
         .put("excluded", r.excluded).put("kind", r.kind.name)
+        .put("links", JSONArray(r.links.map { it.name })).put("gatewayLegs", r.gatewayLegs)
 
     fun decode(j: JSONObject): MowingRecord {
         fun optLong(key: String) = if (j.isNull(key)) null else j.getLong(key)
@@ -321,6 +326,8 @@ object MowingHistoryJson {
             MowingTotals(t.getDouble("activeSeconds"), t.getDouble("chargingSeconds"), t.getDouble("batteryUsed"), t.getDouble("batteryCharged")),
             j.getInt("recharges"), j.getInt("resumes"), j.getInt("obstacles"), optInt("batteryStart"), optInt("batteryEnd"),
             j.optBoolean("excluded", false),
-            runCatching { TaskKind.valueOf(j.optString("kind", TaskKind.MOW.name)) }.getOrDefault(TaskKind.MOW))
+            runCatching { TaskKind.valueOf(j.optString("kind", TaskKind.MOW.name)) }.getOrDefault(TaskKind.MOW),
+            j.optJSONArray("links")?.let { a -> (0 until a.length()).mapNotNull { i -> runCatching { TrackingLink.valueOf(a.getString(i)) }.getOrNull() }.toSet() }.orEmpty(),
+            j.optInt("gatewayLegs", 0))
     }
 }

@@ -8,7 +8,7 @@ observed deviations correct the following estimates.
 | | |
 |---|---|
 | **Access** | Map → **History** (latest tasks); Service → Garden and history → **Task history**; report shown at the end of mowing |
-| **Status** | Implemented and covered by JVM tests (`MowingHistoryTest`, `TaskTrackTest`, `TaskHistoryTextTest`, `HistoryComposeTest`, `MowingEstimateTest`, `FinishPolicyTest`; screenshots `UiShotsHistoriqueTest`); replay to be validated on long real mowings |
+| **Status** | Implemented and covered by JVM tests (`MowingHistoryTest`, `TaskTrackTest`, `TaskHistoryTextTest`, `RouteDeviationTest`, `HistoryComposeTest`, `MowingEstimateTest`, `FinishPolicyTest`; screenshots `UiShotsHistoriqueTest`); replay to be validated on long real mowings |
 | **Code** | `history/MowingHistory.kt` (measurement, comparison, calibration, storage), `history/TaskTrack.kt` (timestamped track, sorting, storage), `history/TaskHistoryUi.kt` (latest tasks sheet, detail, replay), `history/MowingHistoryUi.kt` (report, Task history page), `ble/RobotBle.kt` (`historyBegin`, `trackBegin`, `historyEnd`) |
 
 ## What is recorded
@@ -162,6 +162,24 @@ Recording (track):
 
 A task recorded before version 0.53.0 has no track: the detail says "Positions not recorded: replay covers tasks
 started since version 0.53.0." and only shows the robot's current map.
+
+## Route tracking quality (since 1.2.0)
+
+Under the replay, the **Route tracking** section measures how well the route was followed, so that a mowing tracked by
+the gateway on the robot can be compared with one tracked by the pilot phone
+([validation of autonomous tracking](../AUTONOMOUS_GATEWAY.md#to-validate-on-the-robot)):
+
+| Row | Meaning |
+|---|---|
+| **Tracked by** | **Pilot phone, direct Bluetooth**, **Pilot phone through the gateway relay** or **Gateway on the robot, autonomous tracking**, as decided at the start and at each resume (several if they differ), with the number of route trackings actually handed to the gateway |
+| **Deviation from the stripes · median · 95 % · max** | distance from each position recorded **with the blades running** to the nearest cutting stripe prepared at start; a position more than 3 m from every stripe counts as 3 m and the maximum is then shown "≥ 300 cm" |
+| **Positions beyond 30 cm** | positions past the tracking limit (the tracking stops the robot beyond it), out of the positions measured |
+| **Position holes over 15 s** | holes between two positions off charge (stationary positions are kept every 10 s): Wi-Fi of the gateway or link lost; number and longest |
+
+The deviation is computed against the route frozen at the start: an obstacle bypass or a route repaired after a contact
+counts as a deviation. Tasks recorded before 1.2.0 show the deviation (their track has the prepared route) but not
+the tracking link. The start and end-of-task log events carry the link (`trackingLink`, `trackingLinks`) and the
+number of trackings handed to the gateway (`gatewayLegs`).
 
 ## Limitations
 
