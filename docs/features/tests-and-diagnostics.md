@@ -71,22 +71,24 @@ to over local Wi-Fi.
 
 ## Cutting height and blade test
 
-- Service → Robot → **Cutting height**: **Requested height** slider 25 to 70 mm in 1 mm steps (shortcuts 25, 30, 40,
-  50, 60, 70; current height by default, otherwise 60 mm), then **Apply X mm**: the robot briefly switches to manual
+- Service → Robot → **Cutting height**: **Requested height** slider over the range of the connected model in 1 mm steps
+  (25 to 70 mm on a LUBA 2, 55 to 100 mm on an H version, see [heights by model](supported-models.md#cutting-heights-by-model-version-1130);
+  shortcuts: both ends and the tens, 25, 30, 40, 50, 60, 70 on a LUBA 2; current height by default, otherwise 60 mm;
+  a note gives the range and the model code), then **Apply X mm**: the robot briefly switches to manual
   mowing with blades OFF, the height is awaited from the robot's feedback (30 s; within a sequence 20 s + 1 s per mm, 30 to 90 s),
   then it returns to ready. **Cancel waiting (setting not confirmed)**. *Automatic sequences*: **Round trip** (±10 mm and
-  back) and **Full travel** (25 ↔ 70 mm and back), each setpoint confirmed before the next, **Cancel the sequence**.
+  back) and **Full travel** (minimum ↔ maximum of the model, 25 ↔ 70 mm on a LUBA 2, and back), each setpoint confirmed before the next, **Cancel the sequence**.
   *On-site observation*: "Did the deck move?" **Yes** / **No** (recorded separately), with the driver and work
   report values. Live status: height, blades, rpm, height adjustment, robot mode, battery, blade status.
 - Service → Supervised tests → **Blade test**, two tabs:
   - **Robot stationary**: **Check that the blades are stopped** first (OFF sent, fresh OFF state awaited), tick
     **I am supervising on site**, then **Hold to spin the discs (10 s max)** (manual mowing, state 20, at the chosen
     height); **Stop the blades** stays available. Option **Alternative SysKnifeControl command** (LUBA 1 / joystick
-    variant). Preconditions shown live: LUBA 2, no diagnostics, height 25–70 mm, fresh state, battery > 30 %, ready
+    variant). Preconditions shown live: LUBA 2, no diagnostics, height within the model's range (25–70 mm, H version 55–100 mm), fresh state, battery > 30 %, ready
     (11), no protection, bumper free and blades OFF. If the stop is not confirmed within 5 s: STOP and the link is
     closed.
   - **Moving**: **Start the cutting test · X mm**: reported height, manual mowing, then three stripes and a border
-    with blades running (links blades stopped) around the start. **Cutting height** 25–70 mm, **Travel speed**
+    with blades running (links blades stopped) around the start. **Cutting height** (model's range), **Travel speed**
     10–100 %, **Radius around the start** 2 to 8 m in 0.5 m steps (4 m by default), **Maximum duration** 2, 5
     (default) or 10 min. Start more than 0.95 m from boundaries and no-go zones. Deviation > 30 cm, obstacle,
     contact, unexpected state, leaving the screen or STOP: robot and blades stop, with no bypass ("Cutting test
@@ -149,7 +151,7 @@ the map.
 - **Paint / Erase / Move** with a finger (**Brush size** Ø 0.6 to 4 m, Ø 1.2 m by default), **Undo**, **Clear all**;
   one finger paints, two fingers pan and zoom; only paint inside existing zones is kept, no-go zones excluded
   (retained area shown).
-- **Cutting height** 25–70 mm, **Pass spacing** 15 to 35 cm in 5 cm steps (25 cm by default), **Forward speed**
+- **Cutting height** (model's range, 25–70 mm on a LUBA 2), **Pass spacing** 15 to 35 cm in 5 cm steps (25 cm by default), **Forward speed**
   10–100 %, **Border of the painted zone** (one lap of the retained outline before the passes, on by default).
 - **Compute** (target area, planned coverage, cutting and link meters), then **Mow · X mm** (blades running; links
   blades stopped, return to base). Mowing continues if you leave the page; STOP stays available here and on the map.

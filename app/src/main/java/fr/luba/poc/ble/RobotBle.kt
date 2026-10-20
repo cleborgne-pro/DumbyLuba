@@ -118,6 +118,8 @@ fun RobotUi.withMammotionMap(raw: RobotMap, corrections: List<MapCorrection> = m
     /** Direct Bluetooth: a gateway was announced on the Wi-Fi during the last search (its address), to offer to use it. */
     val gatewaySeen: String? = null,
     val selected: SeenRobot? = null, val rssi: Int? = null,
+    /** Internal model code of the selected robot remembered from a previous connection (H version or not). */
+    val productType: String? = null,
     val telemetry: Telemetry = Telemetry(), val ageMs: Long? = null,
     val timeoutSeconds: Int = 10, val commandsSent: Long = 0,
     val interruptions: Int = 0, val status: String = tr("Ready — STOP always available", "Prêt — STOP toujours accessible"),
@@ -163,6 +165,10 @@ fun RobotUi.withMammotionMap(raw: RobotMap, corrections: List<MapCorrection> = m
     /** Gateway phone fallen off the robot, detected by the gateway from its Bluetooth signal: where to pick it up. */
     val gatewayDrop: GatewayDrop? = null,
 ) {
+    /** Cutting heights of the connected robot, from its model code (H versions: 55–100 mm, [fr.luba.poc.protocol.CutHeightRange]). */
+    val cutHeights: fr.luba.poc.protocol.CutHeightRange get() =
+        fr.luba.poc.protocol.CutHeightRange.forRobot(selected?.name ?: lastKnown?.robotName, telemetry.productType ?: productType, telemetry.bladeHeightMm)
+
     /** Obstacles taken into account by route preparation: saved ones, plus presumed obstacles when the option is on. */
     val planningObstacles: List<LocalObstacle> get() =
         if (difficulties.avoidPresumed && difficulties.presumed.isNotEmpty()) obstacles + difficulties.presumed else obstacles
@@ -282,7 +288,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val routeId = legs.ensureRoute(exitPath)
             val guardId = legs.ensureGuard(routes.physicalSurface)
             val spec = fr.luba.poc.autonomy.LegSpec(legs.nextLegId(), routeId, 0, false, false, false, true, null,
-                heightMm.coerceIn(25, 70), state.value.trajectorySpeedPercent.coerceIn(10, 100), returnPercent.coerceIn(10, 80), approach, guardId, -1,
+                state.value.cutHeights.clamp(heightMm), state.value.trajectorySpeedPercent.coerceIn(10, 100), returnPercent.coerceIn(10, 80), approach, guardId, -1,
                 savedCalibration(), obstacles().map { o -> fr.luba.poc.autonomy.LegObstacle(o.id, o.x, o.y, o.radiusM, o.exclusionRadiusM, true) },
                 sampling = false, dockExit = true)
             // Exit lost by the gateway (Wi-Fi outage at the start) or refused (route forgotten): sent again, the exit
@@ -557,11 +563,14 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         id?.let { watchdogPreferences.getString(it, null) }?.let(MotorWatchdogResult::fromJson)?.takeIf { it.robotId == id }
     /** Route travel speed (%), kept between launches (10–100, 30 by default). */
     private val speedPreferences = app.getSharedPreferences("trajectory_speed", 0)
+    /** Internal model code per robot ([Telemetry.productType]): cutting heights known as soon as it reconnects. */
+    private val productPreferences = app.getSharedPreferences("robot_product_type", 0)
+    private fun storedProductType(id: String?): String? = id?.let { productPreferences.getString(it, null) }
     /** Local map corrections: phone overlay, never sent to the robot nor written to the Mammotion cache. */
     private val correctionStore = MapCorrectionStore(app.filesDir)
     private val mutable = MutableStateFlow(RobotUi(signalSurvey = restoredId?.let(surveyStore::read) ?: SignalSurvey(), lastKnown = restoredPosition,
         missionCheckpoint = restoredId?.let(checkpointStore::read), pointResume = restoredId?.let(pointResumeStore::read),
-        motorWatchdog = watchdogResult(restoredId),
+        motorWatchdog = watchdogResult(restoredId), productType = storedProductType(restoredId),
         trajectorySpeedPercent = speedPreferences.getInt("percent", 30).coerceIn(10, 100))
         .withMammotionMap(restoredId?.let(mapCache::read) ?: RobotMap(), correctionStore.load()))
     val state = mutable.asStateFlow()
@@ -1777,7 +1786,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         lastTelemetry = 0L; closing = false; stopPending = false; closeAfterStop = false
         positionPreferences.edit().putString("id", device.address).apply()
         flushSurveys(); liveMap = null; liveLast = null
-        update { it.copy(signalSurvey = surveyStore.read(device.address) ?: SignalSurvey(), surveySaveError = false, lastKnown = positionStore.read(device.address), positionSaveError = false, selected = device, missionCheckpoint = it.missionCheckpoint?.takeIf { cp -> cp.robotId == device.address } ?: checkpointStore.read(device.address), pointResume = it.pointResume?.takeIf { p -> p.robotId == device.address } ?: pointResumeStore.read(device.address), motorWatchdog = watchdogResult(device.address), rssi = device.rssi, connection = ConnectionState.Connecting, telemetry = Telemetry(), ageMs = null, ready = false, mtu = 23).withMammotionMap(mapCache.read(device.address) ?: RobotMap()) }
+        update { it.copy(signalSurvey = surveyStore.read(device.address) ?: SignalSurvey(), surveySaveError = false, lastKnown = positionStore.read(device.address), positionSaveError = false, selected = device, productType = storedProductType(device.address), missionCheckpoint = it.missionCheckpoint?.takeIf { cp -> cp.robotId == device.address } ?: checkpointStore.read(device.address), pointResume = it.pointResume?.takeIf { p -> p.robotId == device.address } ?: pointResumeStore.read(device.address), motorWatchdog = watchdogResult(device.address), rssi = device.rssi, connection = ConnectionState.Connecting, telemetry = Telemetry(), ageMs = null, ready = false, mtu = 23).withMammotionMap(mapCache.read(device.address) ?: RobotMap()) }
         stationReader = fr.luba.poc.map.StationReader(state.value.robotMap.station)
         event("connect", tr("Connecting ${device.name} ${device.address}", "Connexion ${device.name} ${device.address}"))
         try {
@@ -1870,7 +1879,11 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             send(commands.sync(), "sync(2)")
             send(reportsCommand(false), "RPT_START")
             send(commands.errorQuery(), "ERROR_BASELINE")
+            // Internal model code: tells the H versions (high cut) apart, asked again until answered (3 times at most).
+            send(commands.productModel(), "PRODUCT_MODEL")
             periodic = viewModelScope.launch {
+                var productAsks = 1
+                var nextProduct = started + 10_000
                 var nextSync = started + 5000
                 var nextKeep = started + 8000
                 var nextRssi = started + 5000
@@ -1888,6 +1901,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     if (!state.value.gatewayOutage && watchdog.expired(now, state.value.timeoutSeconds * 1000L)) { fail(tr("FAILED — valid telemetry timeout", "FAILED — timeout télémétrie valide")); break }
                     // Gateway Wi-Fi cut held (autonomous tracking, recharging): keep-alive suspended, resumed on reconnection.
                     val outage = state.value.gatewayOutage
+                    if (!outage && now >= nextProduct && productAsks < 3 && reducer.value.productType == null) { send(commands.productModel(), "PRODUCT_MODEL"); productAsks++; nextProduct = now + 10_000 }
                     if (!outage && now >= nextSync) { send(commands.sync(), "sync(2)"); nextSync = now + if (state.value.mapLoading) 1500 else 5000 }
                     if (!outage && now >= nextKeep) { send(reportsCommand(lastTelemetry != 0L, periodMs = reportPeriodMs()), if (lastTelemetry != 0L) "RPT_KEEP" else "RPT_START"); nextKeep = now + 8000 }
                     if (!outage && now >= nextRssi) {
@@ -2062,6 +2076,13 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 // A single IO writer; on a burst, keep the most recent snapshot.
                 positionWrites.trySend(known)
             }
+        }
+        reducer.value.productType?.takeIf { it != state.value.productType }?.let { code ->
+            state.value.selected?.address?.let { id -> productPreferences.edit().putString(id, code).apply() }
+            update { it.copy(productType = code) }
+            event("robot_product_type", tr("Robot model: $code (${reducer.value.productName ?: "?"}), cutting height ${state.value.cutHeights.label}",
+                "Modèle du robot : $code (${reducer.value.productName ?: "?"}), hauteur de coupe ${state.value.cutHeights.label}"),
+                mapOf("productType" to code, "productName" to reducer.value.productName, "cutMinMm" to state.value.cutHeights.minMm, "cutMaxMm" to state.value.cutHeights.maxMm))
         }
         update { it.copy(telemetry = reducer.value) }
         if(message.hasSys() && message.sys.hasToappReportData() && message.sys.toappReportData.hasRtk()) alertRtkAt = SystemClock.elapsedRealtime()
@@ -2675,7 +2696,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val resume = saved?.let { MissionProgress.skipped(it, engine.edges, skipTo) }
             val skippedNow = if (saved != null && resume != null) resume.skippedMeters - saved.skippedMeters else 0.0
             if (resume != null) check(!MissionProgress.mowingDone(engine.edges, resume.edge, resume.point)) { tr("Mowing already finished: use return to base", "Tonte déjà terminée : utiliser le retour à la base") }
-            require(heightMm in 25..70) { tr("Height out of range", "Hauteur hors plage") }
+            state.value.cutHeights.refusal(heightMm)?.let { throw IllegalArgumentException(it) }
             // Working hours: neither mowing nor leaving the base outside them; return to base remains allowed.
             if (intent != RouteIntent.RETURN_TO_BASE) fr.luba.poc.mowing.WorkWindowSetting.value.refusal(java.time.LocalTime.now())?.let { error(it) }
             val recharge = RouteRecharge(engine.config.returnPercent.toInt(), engine.config.resumePercent.toInt())
@@ -2696,7 +2717,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             check(engine.map == state.value.robotMap && engine.map.complete) { tr("The route must use the connected robot's map", "Le trajet doit utiliser la carte du robot connecté") }
             NavSafety.startFailure(state.value.selected?.name, SystemClock.elapsedRealtime()-devicePrevious,
                 t.battery,if (initiallyDocked && t.robotState in setOf(11,15,39)) 11 else t.robotState,t.sensorStatus,t.selfCheck,state.value.campaign.running,
-                state.value.bladeTestActive,state.value.mapLoading,heightMm,if(initiallyDocked) -1 else RouteRecharge.RESERVE_PERCENT)?.let { error(it) }
+                state.value.bladeTestActive,state.value.mapLoading,heightMm,if(initiallyDocked) -1 else RouteRecharge.RESERVE_PERCENT,heights = state.value.cutHeights)?.let { error(it) }
             NavSafety.automaticPositionFailure(SystemClock.elapsedRealtime()-positionPrevious,t.x,t.y)?.let { error(it) }
             // Physical geometry (obstacles at their real radius, no margin): possible clearance at the start.
             val physicalRoutes = fr.luba.poc.planning.RoutePlanning.physical(engine.map, state.value.planningObstacles,
@@ -2716,7 +2737,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val edges = missionPlan?.edges ?: RobotRoute.actionEdges(engine,routeStart,requireNotNull(t.heading),intent,physicalRoutes)
             // Resume during a second pass, for example: the first remaining mowing edge gives the starting height.
             if (cutting) edges.firstNotNullOfOrNull { it.heightMm }?.let { heightMm = it }
-            require(heightMm in 25..70) { tr("Height out of range", "Hauteur hors plage") }
+            state.value.cutHeights.refusal(heightMm)?.let { throw IllegalArgumentException(it) }
             engine.routes.baseSafety?.let { (station, approach, radius) ->
                 event("robot_route_base_zone", tr("Base safety zone applied to the route", "Zone de sécurité de la base appliquée au trajet"), mapOf("baseX" to station.x, "baseY" to station.y,
                     "approachX" to approach.x, "approachY" to approach.y, "radiusM" to radius,
@@ -3989,7 +4010,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         val t = state.value.telemetry
         BladeSafety.requireReady(state.value.selected?.name,
             if (bladeDeviceAt == 0L) null else SystemClock.elapsedRealtime() - bladeDeviceAt,
-            t.battery, t.robotState, t.sensorStatus, t.selfCheck, state.value.campaign.running, heightMm)
+            t.battery, t.robotState, t.sensorStatus, t.selfCheck, state.value.campaign.running, heightMm, state.value.cutHeights)
     }
     /**
      * Height adjustment outside a mission. Firmware 1.30.29.26 (logs of 10-10): `todev_knife_height_set` alone
@@ -4088,7 +4109,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (heightTarget != null) { update { it.copy(bladeStatus = tr("Height pending: cancel the wait or wait for its result before checking OFF", "Hauteur en attente : annuler l’attente ou attendre son résultat avant de vérifier OFF")) }; return }
         if (!state.value.ready || closing || state.value.teach.running || state.value.campaign.running || state.value.bladeTestActive || state.value.navTest.running || heightTarget != null) return
         if (!fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name)) return
-        bladeHeightRequest = heightMm.coerceIn(25, 70)
+        bladeHeightRequest = state.value.cutHeights.clamp(heightMm)
         bladeStopVerified = false; bladeOffWrittenAt = 0; bladeOffPending = true; bladeMayBeOn = true
         update { it.copy(bladeStatus = tr("Blade stop check: OFF requested", "Vérification arrêt lames : OFF demandé")) }
         queueBladeOff(tr("OFF check before the test", "Vérification OFF avant essai"))
@@ -4226,7 +4247,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     fun startHeightSequence(targets: List<Int>) {
         if (state.value.heightSequence.running || heightSequenceJob?.isActive == true) return
         try {
-            require(targets.isNotEmpty() && targets.size <= 6 && targets.all { it in HeightSequence.MIN_MM..HeightSequence.MAX_MM }) { tr("Invalid height sequence", "Séquence de hauteur invalide") }
+            require(targets.isNotEmpty() && targets.size <= 6 && targets.all { it in state.value.cutHeights }) { tr("Invalid height sequence", "Séquence de hauteur invalide") }
             check(heightTarget == null && !state.value.bladeHeightPending) { tr("Height adjustment already pending", "Réglage de hauteur déjà en attente") }
             bladeGuard(targets.first())
             val startMm = state.value.telemetry.bladeHeightMm
@@ -5484,7 +5505,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 if (devicePrevious == 0L) null else SystemClock.elapsedRealtime() - devicePrevious,
                 t.battery, if (charging && t.robotState in setOf(11,15,39)) 11 else t.robotState, t.sensorStatus, t.selfCheck,
                 state.value.campaign.running, state.value.bladeTestActive, state.value.mapLoading,
-                config.heightMm, config.batteryFloor, ignoreOffMapLatch = config.pointDestination && !config.tonte && offMapLatchIgnored(t))
+                config.heightMm, config.batteryFloor, ignoreOffMapLatch = config.pointDestination && !config.tonte && offMapLatchIgnored(t),
+                heights = state.value.cutHeights)
             if (failure != null) throw IllegalArgumentException(failure)
             check(!state.value.taskStopPending && gatt != null && state.value.ready && !closing && log.healthy) { tr("BLE / log not ready", "BLE / journal non prêt") }
             check(!state.value.teach.running && heightTarget == null && !bladeMayBeOn && !bladeOffPending) { tr("Finish the obstacle / height / blade-stop test first", "Terminer le test obstacle / hauteur / arrêt lames") }
@@ -5947,7 +5969,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 val routeId = legs.ensureRoute(path)
                 val guardId = legs.ensureGuard(routes.physicalSurface)
                 val spec = fr.luba.poc.autonomy.LegSpec(legs.nextLegId(), routeId, fromPoint - 1, cutting = false, shown = true,
-                    watchBattery = false, departure = false, lastArrivalM = null, heightMm = navConfig.heightMm.coerceIn(25, 70),
+                    watchBattery = false, departure = false, lastArrivalM = null, heightMm = state.value.cutHeights.clamp(navConfig.heightMm),
                     speedPercent = state.value.trajectorySpeedPercent.coerceIn(10, 100), returnPercent = RouteRecharge.RESERVE_PERCENT.coerceIn(10, 80),
                     baseApproach = null, guardId = guardId, physicalGuardId = guardId, calibration = savedCalibration(),
                     obstacles = state.value.obstacles.map { o -> fr.luba.poc.autonomy.LegObstacle(o.id, o.x, o.y, o.radiusM, o.exclusionRadiusM, o.id in planned) },

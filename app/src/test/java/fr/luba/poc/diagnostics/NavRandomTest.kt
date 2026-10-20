@@ -151,7 +151,7 @@ class NavRandomTest {
             { NavConfig(segments = 2) }, { NavConfig(segments = 21) },
             { NavConfig(linearSpeed = 0) }, { NavConfig(linearSpeed = Commands.MAX_LINEAR_SPEED + 1) },
             { NavConfig(angularSpeed = 0) }, { NavConfig(angularSpeed = -Commands.MAX_ANGULAR_SPEED) },
-            { NavConfig(heightMm = 24) }, { NavConfig(heightMm = 71) },
+            { NavConfig(heightMm = 19) }, { NavConfig(heightMm = 101) },
             { NavConfig(maxDurationMs = 9_999) }, { NavConfig(maxDurationMs = 600_001) },
             { NavConfig(maxRadiusM = 0.5) }, { NavConfig(maxRadiusM = 20.5) },
             { NavConfig(batteryFloor = 9) }, { NavConfig(batteryFloor = 81) },
@@ -161,6 +161,10 @@ class NavRandomTest {
 
     @Test fun `start refuses unknown robot stale state low battery protection and blades`() {
         assertNull(NavSafety.startFailure("Luba-VS-test", 100, 72, 11, 0, 0, false, false, false, 60))
+        // 85 mm: refused on a standard LUBA 2, accepted on an H version (55–100 mm).
+        assertEquals("Hauteur hors plage 25–70 mm", NavSafety.startFailure("Luba-VS-test", 100, 72, 11, 0, 0, false, false, false, 85))
+        assertNull(NavSafety.startFailure("Luba-VS-test", 100, 72, 11, 0, 0, false, false, false, 85, heights = fr.luba.poc.protocol.CutHeightRange.HIGH))
+        assertEquals("Hauteur hors plage 55–100 mm", NavSafety.startFailure("Luba-VS-test", 100, 72, 11, 0, 0, false, false, false, 40, heights = fr.luba.poc.protocol.CutHeightRange.HIGH))
         val scenarios = listOf<Pair<String, String?>>(
             "nom" to NavSafety.startFailure("Luba", 100, 72, 11, 0, 0, false, false, false, 60),
             "etat stale" to NavSafety.startFailure("Luba-VS", 2001, 72, 11, 0, 0, false, false, false, 60),

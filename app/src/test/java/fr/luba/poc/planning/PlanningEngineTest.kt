@@ -11,6 +11,12 @@ internal fun request(points: List<Point> = rectangle(),holes: List<List<Point>> 
     PlanningRequest(RobotMap(listOf(MapShape(1,0,points))+holes.mapIndexed { i,p -> MapShape(i+2L,1,p) },true,"test"),
         listOf(1),Point(1.0,1.0),config=config)
 class PlanningEngineTest {
+    @Test fun visionZonesRefuseThePlanningInsteadOfBeingIgnored() {
+        val base=request()
+        val r=base.copy(map=base.map.copy(shapes=base.map.shapes+MapShape(9,25,rectangle(4.0,3.0,1.0,1.0))))
+        val error=assertThrows(IllegalArgumentException::class.java) { PlanningTerrain(r) }
+        assertTrue(error.message, error.message!!.contains("vision"))
+    }
     @Test fun baselineIsPreservedAndMetricsIncludeReturn() {
         val r=request()
         val result=CoverageEngine.plan(r)

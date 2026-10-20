@@ -24,7 +24,7 @@ class MapTransfer(private val syncType:Int = 2, initialStation: MapStation? = nu
             if (roots.values.none { f.hash in it.dataCoupleList }) return out
             require(f.result==0 && f.totalFrame in 1..4096 && f.currentFrame in 1..f.totalFrame && f.dataCoupleCount<=10000) { tr("Invalid map frame", "Trame carte invalide") }
             require(f.dataCoupleList.all { it.x.isFinite() && it.y.isFinite() })
-            if(f.type !in listOf(0,1,2)) unsupported=true
+            if(f.type !in ShapeKind.SUPPORTED_TYPES) unsupported=true
             val bucket=frames.getOrPut(f.hash){mutableMapOf()}
             require(bucket.values.all { it.totalFrame==f.totalFrame && it.type==f.type }) { tr("Inconsistent boundary metadata", "Métadonnées de contour incohérentes") }
             require(frames.values.sumOf { values -> values.values.sumOf { it.dataCoupleCount } } + f.dataCoupleCount <= 100000) { tr("Map too large", "Carte trop volumineuse") }

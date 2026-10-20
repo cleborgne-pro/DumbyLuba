@@ -77,7 +77,7 @@ data class LegSpec(
 ) {
     init {
         // Decoded on the gateway: the messages go back to the pilot in the refusal, in the gateway phone's language.
-        require(heightMm in 25..70) { tr("Height out of range", "Hauteur hors plage") }
+        require(heightMm in fr.luba.poc.protocol.CutHeightRange.ANY) { tr("Height out of range", "Hauteur hors plage") }
         require(speedPercent in 10..100) { tr("Speed out of range", "Vitesse hors plage") }
         require(returnPercent in 10..80) { tr("Return threshold out of range", "Seuil de retour hors plage") }
         require(from >= 0)

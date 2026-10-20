@@ -62,7 +62,9 @@ internal fun BladesPage(robot: RobotBle, state: RobotUi, back: () -> Unit, expor
     }
     var bench by rememberSaveable { mutableStateOf(benches.first()) }
     if (bench !in benches) bench = benches.first()
-    var height by rememberSaveable { mutableIntStateOf(state.telemetry.bladeHeightMm ?: 60) }
+    var height by rememberSaveable { mutableIntStateOf(state.telemetry.bladeHeightMm ?: state.cutHeights.defaultMm) }
+    // Range of the connected model (higher on the H versions): a height chosen for another robot is brought back into it.
+    LaunchedEffect(state.cutHeights) { height = state.cutHeights.clamp(height) }
     var supervised by rememberSaveable { mutableStateOf(false) }
     var knifeAlt by rememberSaveable { mutableStateOf(false) }
     var radius by rememberSaveable { mutableFloatStateOf(4f) }
@@ -133,9 +135,14 @@ private fun HeightBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
     val sequence = state.heightSequence
     val locked = state.bladeHeightPending || sequence.running || !state.bladeIdle()
     SettingsGroup(tr("Setpoint", "Consigne")) {
-        SliderRow(tr("Requested height", "Hauteur demandée"), height.toFloat(), { onHeight(it.toInt()) }, HeightSequence.MIN_MM.toFloat()..HeightSequence.MAX_MM.toFloat(),
-            valueLabel = "$height mm", steps = HeightSequence.MAX_MM - HeightSequence.MIN_MM - 1, enabled = !locked)
-        ChipChoice(listOf(25, 30, 40, 50, 60, 70).map { it to "$it" }, height, onHeight, enabled = !locked)
+        SliderRow(tr("Requested height", "Hauteur demandée"), height.toFloat(), { onHeight(it.toInt()) }, state.cutHeights.floatRange(),
+            valueLabel = "$height mm", steps = state.cutHeights.sliderSteps, enabled = !locked)
+        ChipChoice(state.cutHeights.presets.map { it to "$it" }, height, onHeight, enabled = !locked)
+        val heights = state.cutHeights
+        InfoNote(when {
+            heights.high -> tr("H version (high cut): ${heights.label}.", "Version H (coupe haute) : ${heights.label}.")
+            else -> tr("Range of this model: ${heights.label}.", "Plage de ce modèle : ${heights.label}.")
+        } + (state.telemetry.productType ?: state.productType)?.let { tr(" Model code $it.", " Code modèle $it.") }.orEmpty())
         if (state.bladeHeightPending) {
             val target = if (sequence.running) sequence.targets.getOrNull(sequence.index) ?: height else height
             val from = sequence.startMm ?: t.bladeHeightMm
@@ -146,12 +153,13 @@ private fun HeightBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
         }
     }
     SettingsGroup(tr("Automatic sequences", "Séquences automatiques")) {
-        val current = t.bladeHeightMm
+        val heights = state.cutHeights
+        val current = t.bladeHeightMm?.takeIf { it in heights }
         val enabled = current != null && !locked
-        SecondaryPillButton(current?.let { tr("Round trip: ${HeightSequence.roundTrip(it).joinToString(" → ")} mm", "Aller-retour : ${HeightSequence.roundTrip(it).joinToString(" → ")} mm") } ?: tr("Round trip ±10 mm", "Aller-retour ±10 mm"),
-            { current?.let { robot.startHeightSequence(HeightSequence.roundTrip(it)) } }, Modifier.fillMaxWidth(), enabled = enabled)
-        SecondaryPillButton(current?.let { tr("Full travel: ${HeightSequence.extremes(it).joinToString(" → ")} mm", "Course complète : ${HeightSequence.extremes(it).joinToString(" → ")} mm") } ?: tr("Full travel 25 ↔ 70 mm", "Course complète 25 ↔ 70 mm"),
-            { current?.let { robot.startHeightSequence(HeightSequence.extremes(it)) } }, Modifier.fillMaxWidth(), enabled = enabled)
+        SecondaryPillButton(current?.let { tr("Round trip: ${HeightSequence.roundTrip(it, heights).joinToString(" → ")} mm", "Aller-retour : ${HeightSequence.roundTrip(it, heights).joinToString(" → ")} mm") } ?: tr("Round trip ±10 mm", "Aller-retour ±10 mm"),
+            { current?.let { robot.startHeightSequence(HeightSequence.roundTrip(it, heights)) } }, Modifier.fillMaxWidth(), enabled = enabled)
+        SecondaryPillButton(current?.let { tr("Full travel: ${HeightSequence.extremes(it, heights).joinToString(" → ")} mm", "Course complète : ${HeightSequence.extremes(it, heights).joinToString(" → ")} mm") } ?: tr("Full travel ${heights.minMm} ↔ ${heights.maxMm} mm", "Course complète ${heights.minMm} ↔ ${heights.maxMm} mm"),
+            { current?.let { robot.startHeightSequence(HeightSequence.extremes(it, heights)) } }, Modifier.fillMaxWidth(), enabled = enabled)
         if (current == null) InfoNote(tr("Current height unknown: apply a single setpoint first.", "Hauteur actuelle inconnue : appliquez d'abord une consigne simple."))
         else InfoNote(tr("Each setpoint must be reported by the robot before the next one; stops at the first fault.", "Chaque consigne doit être rapportée par le robot avant la suivante ; arrêt au premier défaut."))
         if (sequence.targets.isNotEmpty()) {
@@ -198,7 +206,7 @@ private fun StaticBench(robot: RobotBle, state: RobotUi, height: Int, knifeAlt: 
     val t = state.telemetry
     SettingsGroup(tr("Preconditions", "Préconditions")) {
         PreconditionList(BladeSafety.checks(state.selected?.name, state.ageMs, t.battery, if (state.bladeTestActive) 11 else t.robotState,
-            if (state.bladeTestActive) 0 else t.sensorStatus, t.selfCheck, state.campaign.running, height).map { it.label to it.ok })
+            if (state.bladeTestActive) 0 else t.sensorStatus, t.selfCheck, state.campaign.running, height, state.cutHeights).map { it.label to it.ok })
     }
     SettingsGroup(tr("Procedure", "Déroulé")) {
         StepLine(1, tr("Check that the blades are stopped", "Vérifier l'arrêt des lames"), tr("OFF sent, then a fresh OFF state is awaited.", "OFF envoyé, puis état OFF frais attendu."))
@@ -292,8 +300,8 @@ private fun MovingBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
         KeyValueRow(tr("Planned with blades running", "Prévu lames en marche"), "${Format.num(nav.plannedCutMeters, 1)} m")
     }
     SettingsGroup(tr("Test settings", "Réglages de l'essai")) {
-        SliderRow(tr("Cutting height", "Hauteur de coupe"), height.toFloat(), { onHeight(it.toInt()) }, HeightSequence.MIN_MM.toFloat()..HeightSequence.MAX_MM.toFloat(),
-            valueLabel = "$height mm", steps = HeightSequence.MAX_MM - HeightSequence.MIN_MM - 1, enabled = !running)
+        SliderRow(tr("Cutting height", "Hauteur de coupe"), height.toFloat(), { onHeight(it.toInt()) }, state.cutHeights.floatRange(),
+            valueLabel = "$height mm", steps = state.cutHeights.sliderSteps, enabled = !running)
         SliderRow(tr("Travel speed", "Vitesse d'avance"), state.trajectorySpeedPercent.toFloat(), { robot.setTrajectorySpeed(it.toInt()) }, 10f..100f,
             valueLabel = "${state.trajectorySpeedPercent} %", enabled = !running)
         SliderRow(tr("Radius around the start", "Rayon autour du départ"), radius, onRadius, 2f..8f, valueLabel = "${Format.num(radius.toDouble())} m", steps = 11, enabled = !running)

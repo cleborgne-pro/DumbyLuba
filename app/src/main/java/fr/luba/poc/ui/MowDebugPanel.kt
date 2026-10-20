@@ -15,7 +15,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
-import fr.luba.poc.diagnostics.HeightSequence
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.MapLive
 import fr.luba.poc.map.MapPaintInput
@@ -70,7 +69,9 @@ private fun PaintDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, he
     val accesses = remember(map) { store.accesses() }
     var tool by rememberSaveable { mutableStateOf(PaintTool.PAINT) }
     var brush by rememberSaveable { mutableFloatStateOf(0.6f) }
-    var height by rememberSaveable { mutableIntStateOf(state.telemetry.bladeHeightMm ?: 60) }
+    var height by rememberSaveable { mutableIntStateOf(state.telemetry.bladeHeightMm ?: state.cutHeights.defaultMm) }
+    // Range of the connected model (higher on the H versions): a height chosen for another robot is brought back into it.
+    LaunchedEffect(state.cutHeights) { height = state.cutHeights.clamp(height) }
     var spacing by rememberSaveable { mutableFloatStateOf(0.25f) }
     var borders by rememberSaveable { mutableStateOf(true) }
     var supervised by rememberSaveable { mutableStateOf(false) }
@@ -191,8 +192,8 @@ private fun MowDebugMap(state: RobotUi, paint: List<PaintStroke>, pieces: List<L
 private fun MowDebugSettings(robot: RobotBle, state: RobotUi, height: Int, onHeight: (Int) -> Unit, spacing: Float, onSpacing: (Float) -> Unit,
                              borders: Boolean, onBorders: (Boolean) -> Unit, supervised: Boolean, onSupervised: (Boolean) -> Unit, locked: Boolean) {
     SettingsGroup(tr("Mowing settings", "Réglages de la tonte")) {
-        SliderRow(tr("Cutting height", "Hauteur de coupe"), height.toFloat(), { onHeight(it.toInt()) }, HeightSequence.MIN_MM.toFloat()..HeightSequence.MAX_MM.toFloat(),
-            valueLabel = "$height mm", steps = HeightSequence.MAX_MM - HeightSequence.MIN_MM - 1, enabled = !locked)
+        SliderRow(tr("Cutting height", "Hauteur de coupe"), height.toFloat(), { onHeight(it.toInt()) }, state.cutHeights.floatRange(),
+            valueLabel = "$height mm", steps = state.cutHeights.sliderSteps, enabled = !locked)
         SliderRow(tr("Pass spacing", "Espacement des passes"), spacing, { onSpacing((it * 20).let(Math::round) / 20f) }, 0.15f..0.35f,
             valueLabel = "${(spacing * 100).toInt()} cm", steps = 3, enabled = !locked)
         SliderRow(tr("Forward speed", "Vitesse d'avance"), state.trajectorySpeedPercent.toFloat(), { robot.setTrajectorySpeed(it.toInt()) }, 10f..100f,

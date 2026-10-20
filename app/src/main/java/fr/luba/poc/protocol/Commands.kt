@@ -55,7 +55,7 @@ class Commands(private val userAccount: Int = 0) {
     }
 
     fun bladeHeight(mm: Int, now: Long = System.currentTimeMillis()): ByteArray {
-        require(mm in 25..70)
+        require(mm in CutHeightRange.ANY)
         return envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_DRIVER, MsgDevice.DEV_MAINCTL, now)
             .setDriver(MctlDriver.newBuilder().setTodevKnifeHeightSet(DrvKnifeHeight.newBuilder().setKnifeHeight(mm)))
             .build().toByteArray()
@@ -72,7 +72,7 @@ class Commands(private val userAccount: Int = 0) {
     fun manualMow(mainCtrl: Int, cutKnifeCtrl: Int, heightMm: Int, now: Long = System.currentTimeMillis()): ByteArray {
         require(mainCtrl in 0..1) { tr("main_ctrl outside 0..1", "main_ctrl hors 0..1") }
         require(cutKnifeCtrl in 0..1) { tr("cut_knife_ctrl outside 0..1", "cut_knife_ctrl hors 0..1") }
-        require(heightMm in 25..70) { tr("Height outside 25–70 mm", "Hauteur hors plage 25–70 mm") }
+        require(heightMm in CutHeightRange.ANY) { CutHeightRange.ANY.refusal(heightMm)!! }
         return envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_DRIVER, MsgDevice.DEV_MAINCTL, now)
             .setDriver(MctlDriver.newBuilder().setMowCtrlByHand(DrvMowCtrlByHand.newBuilder()
                 .setMainCtrl(mainCtrl).setCutKnifeCtrl(cutKnifeCtrl)
@@ -185,6 +185,15 @@ class Commands(private val userAccount: Int = 0) {
     fun debugEnable(on: Boolean, now: Long = System.currentTimeMillis()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
             .setSys(MctlSys.newBuilder().setDebugEnable(debug_enable_t.newBuilder().setEnbale(if (on) 1 else 0)))
+            .build().toByteArray()
+
+    /**
+     * Robot model (PyMammotion `get_device_product_model`): reply `device_product_type_info` with the internal model
+     * code (`sub_product_type`), which tells the H versions (high cut) apart. Read-only query.
+     */
+    fun productModel(now: Long = System.currentTimeMillis()): ByteArray =
+        envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
+            .setSys(MctlSys.newBuilder().setDeviceProductTypeInfo(device_product_type_info_t.newBuilder().setResult(1)))
             .build().toByteArray()
 
     /** Robot network information (APK `getDeviceNetWorkInfo`): reply `toapp_networkinfo_rsp` (SSID, IP, mask). */

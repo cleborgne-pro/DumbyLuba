@@ -14,7 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
-import fr.luba.poc.diagnostics.HeightSequence
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.BorderChoice
 import fr.luba.poc.map.BorderFollow
@@ -95,7 +94,9 @@ internal fun BorderDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, 
             System.currentTimeMillis(), BorderValidation.fingerprint(m.choice.shape), border.firstOrNull(), border.getOrNull(border.size / 2)))
     }
     val offset = BorderDraft.offsetM
-    var height by rememberSaveable { mutableIntStateOf(state.telemetry.bladeHeightMm ?: 60) }
+    var height by rememberSaveable { mutableIntStateOf(state.telemetry.bladeHeightMm ?: state.cutHeights.defaultMm) }
+    // Range of the connected model (higher on the H versions): a height chosen for another robot is brought back into it.
+    LaunchedEffect(state.cutHeights) { height = state.cutHeights.clamp(height) }
     var supervised by rememberSaveable { mutableStateOf(false) }
     var mission by remember { mutableStateOf<BorderMission?>(null) }
     var computing by remember { mutableStateOf(false) }
@@ -324,8 +325,8 @@ private fun BorderDebugSettings(robot: RobotBle, state: RobotUi, selected: Borde
         ToggleRow(tr("Blades running", "Lames en marche"), BorderDraft.blades, { BorderDraft.blades = it }, enabled = !locked,
             subtitle = if (BorderDraft.blades) tr("The loop mows the border; links and return with the blades stopped", "Le tour tond la bordure ; raccords et retour lames arrêtées")
                 else tr("Following only, blades stopped along the whole route", "Suivi seul, lames arrêtées sur tout le trajet"))
-        if (BorderDraft.blades) SliderRow(tr("Cutting height", "Hauteur de coupe"), height.toFloat(), { onHeight(it.toInt()) }, HeightSequence.MIN_MM.toFloat()..HeightSequence.MAX_MM.toFloat(),
-            valueLabel = "$height mm", steps = HeightSequence.MAX_MM - HeightSequence.MIN_MM - 1, enabled = !locked)
+        if (BorderDraft.blades) SliderRow(tr("Cutting height", "Hauteur de coupe"), height.toFloat(), { onHeight(it.toInt()) }, state.cutHeights.floatRange(),
+            valueLabel = "$height mm", steps = state.cutHeights.sliderSteps, enabled = !locked)
         SliderRow(tr("Travel speed", "Vitesse d'avance"), state.trajectorySpeedPercent.toFloat(), { robot.setTrajectorySpeed(it.toInt()) }, 10f..100f,
             valueLabel = "${state.trajectorySpeedPercent} %", enabled = !locked)
         LubaCheckRow(tr("I am supervising on site, area cleared", "Je supervise sur place, zone dégagée"), supervised, onSupervised, enabled = !state.robotRoute.running)

@@ -76,7 +76,7 @@ private enum class Tab(private val labelEn: String, private val labelFr: String,
 }
 
 /** Pages pushed from the Device tab (tab bar hidden, back arrow). */
-private enum class DevicePage { HOME, MAP, MANUAL }
+private enum class DevicePage { HOME, MAP, MANUAL, RECORD }
 
 class MainActivity : ComponentActivity() {
     private var alertOpenToken by mutableStateOf(0)
@@ -231,6 +231,8 @@ private fun RobotScreen(
     }
     var tab by rememberSaveable { mutableStateOf(Tab.Appareil) }
     var page by rememberSaveable { mutableStateOf(DevicePage.HOME) }
+    // Page the "record by driving" page returns to (map or manual control).
+    var recordFrom by rememberSaveable { mutableStateOf(DevicePage.MAP) }
     var accountPage by rememberSaveable { mutableStateOf(false) }
     var openMowing by remember { mutableStateOf(false) }
     var openSurvey by remember { mutableStateOf(false) }
@@ -421,6 +423,7 @@ private fun RobotScreen(
                         onOpenAccount = { tab = Tab.Moi; accountPage = true },
                         onBack = { page = DevicePage.HOME },
                         onOpenManual = { page = DevicePage.MANUAL },
+                        onOpenDrivenRecord = { recordFrom = DevicePage.MAP; page = DevicePage.RECORD },
                         cloud = displayCloud,
                         apiPosition = cloudState.telemetry.takeIf { matchingCloudRobot },
                         apiKnown = cloudState.lastKnown.takeIf { matchingCloudRobot },
@@ -453,7 +456,9 @@ private fun RobotScreen(
                         onStop = robot::stop,
                         startDemo = demoMap,
                     )
-                    DevicePage.MANUAL -> fr.luba.poc.ui.ManualPage(robot, state, back = { page = DevicePage.HOME })
+                    DevicePage.MANUAL -> fr.luba.poc.ui.ManualPage(robot, state, back = { page = DevicePage.HOME },
+                        onOpenRecord = { recordFrom = DevicePage.MANUAL; page = DevicePage.RECORD })
+                    DevicePage.RECORD -> fr.luba.poc.manual.DrivenRecordPage(robot, state, back = { page = recordFrom })
                 }
                 Tab.Service -> RobotPanel(
                     robot = robot,

@@ -65,9 +65,9 @@ boundary is driven") or **Grid** (merged boundary and crossed grid), **Grid spac
 
 | Setting | Range | Default |
 |---|---|---|
-| *Mowing* · Cutting height | 25 to 70 mm, 1 mm steps | 60 mm |
+| *Mowing* · Cutting height | range of the connected model, 1 mm steps: 25 to 70 mm (LUBA 2), 55 to 100 mm on an H version ([heights by model](supported-models.md#cutting-heights-by-model-version-1130)) | 60 mm |
 | *Mowing* · Cutting passes | 1 to 3 passes, at least 5 mm apart | 1 pass |
-| *Mowing* · First pass height (2 passes or more) | from cutting height + 5 mm per pass up to 70 mm | 70 mm |
+| *Mowing* · First pass height (2 passes or more) | from cutting height + 5 mm per pass up to the model's maximum (70 mm, 100 mm on an H version) | 70 mm |
 | *Mowing* · Task speed | 0.2 to 0.6 m/s | 0.3 m/s |
 | *Mowing* · Outer margin | 5 to 100 cm between the robot's side and the boundary, in 5 cm steps ("5 cm from the edge"); disabled with 0 perimeter loops | 5 cm |
 | *Working hours* · Limit mowing hours | off / on, window in 15 min steps ([working hours](real-mowing.md#working-hours)) | off |
@@ -82,7 +82,7 @@ The *Advanced settings* group is collapsed; its header summarizes spacing and lo
 battery range recalls "Mowing stops at 20 % to recharge, then resumes at the interrupted point at 90 %." With 2 or 3
 cutting passes, a note gives the heights ("Tall grass: 70 → 55 → 40 mm. Every other pass is driven in reverse;
 duration multiplied by 3."); a cutting height too high for several passes shows "Cutting height too high for several
-passes (at least 5 mm apart, 70 mm at most)."
+passes (at least 5 mm apart, 70 mm at most)." (100 mm on an H version)
 
 The footer gives the area and a first duration estimate ("412 m² · ≈ 1 h 05 (estimate before computation)"), then
 the **Route preview** button.
@@ -95,7 +95,7 @@ grass is cut in the other direction. Between two passes, the robot stops, sets t
 reports it before resuming cutting. Duration and distance are multiplied by the number of passes (estimate,
 recharges and progress included). The preview shows "3 passes 70 → 55 → 40 mm" in its settings. A cutting height
 that is too high limits the number of passes (at least 5 mm apart, 70 mm at most: 66 mm and above only allows one
-pass).
+pass; on an H version up to 100 mm, so 96 mm and above).
 
 **Last settings reused** (since 0.39.1): all these settings (height passes included since 0.45.0), and the route mode (Zigzag, Optimized,
 Checkerboard), are kept from one task to the next and after an app restart; the default value is only used the

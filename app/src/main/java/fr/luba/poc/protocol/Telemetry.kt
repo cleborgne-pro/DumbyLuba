@@ -33,6 +33,9 @@ import fr.luba.poc.proto.LubaMsgProto.LubaMsg
     /** Latitude/longitude published by the robot (RTK station or position), for the garden weather. */
     val geoLat: Double? = null, val geoLon: Double? = null, val geoSource: String? = null,
     val firmware: String? = null,
+    /** Internal model code (`device_product_type_info.sub_product_type`, e.g. HM060100LBVAWD50OMNIH or "62"): gives the
+     * cutting heights ([CutHeightRange.forProductType]); [productName] is the trade name (`main_product_type`). */
+    val productType: String? = null, val productName: String? = null,
     val lastReportAt: Long? = null,
     val lastPositionAt: Long? = null,
     val lastDeviceAt: Long? = null,
@@ -68,13 +71,13 @@ class TelemetryReducer {
         }
         if (message.hasDriver() && message.driver.hasBidireKnifeHeightReport()) {
             val height = message.driver.bidireKnifeHeightReport.knifeHeight
-            require(height in 25..70) { tr("Reported height out of range", "Hauteur rapportée hors plage") }
+            require(height in CutHeightRange.ANY) { tr("Reported height out of range", "Hauteur rapportée hors plage") }
             value = value.copy(bladeHeightMm = height, lastBladeHeightAt = wallTime, driverHeightMm = height, lastDriverHeightAt = wallTime)
         }
         if (message.hasDriver() && message.driver.hasToappKnifeStatusChange()) {
             val change = message.driver.toappKnifeStatusChange
             value = value.copy(heightMoving = change.isStart != 0, heightTargetMm = change.endHeight)
-            if (change.curHeight in 25..70) value = value.copy(
+            if (change.curHeight in CutHeightRange.ANY) value = value.copy(
                 bladeHeightMm = change.curHeight, lastBladeHeightAt = wallTime,
                 driverHeightMm = change.curHeight, lastDriverHeightAt = wallTime)
         }
@@ -87,6 +90,11 @@ class TelemetryReducer {
                 cutterRpm = if (cutter.currentCutterRpm != 0) cutter.currentCutterRpm else value.cutterRpm,
                 lastCutterRpmAt = if (cutter.currentCutterRpm != 0) wallTime else value.lastCutterRpmAt)
         }
+        if (message.hasSys() && message.sys.hasDeviceProductTypeInfo()) message.sys.deviceProductTypeInfo.let { info ->
+            val sub = info.subProductType.trim().take(64).ifEmpty { null }
+            val main = info.mainProductType.trim().take(64).ifEmpty { null }
+            if (sub != null || main != null) value = value.copy(productType = sub ?: value.productType, productName = main ?: value.productName)
+        }
         if (!message.hasSys() || !message.sys.hasToappReportData()) return false
         val report = message.sys.toappReportData
         if (report.hasConnect()) {
@@ -96,7 +104,7 @@ class TelemetryReducer {
                 mobileRssi=rssi(connection.mnetRssi), lastConnectAt=wallTime)
         }
         if (report.hasWork()) value = value.copy(workProgress = report.work.progress)
-        if (report.hasWork() && report.work.knifeHeight in 25..70) {
+        if (report.hasWork() && report.work.knifeHeight in CutHeightRange.ANY) {
             value = value.copy(bladeHeightMm = report.work.knifeHeight, lastBladeHeightAt = wallTime, workHeightMm = report.work.knifeHeight, lastWorkHeightAt = wallTime)
             // The firmware does not always send the end of movement: reaching the target ends it.
             if (value.heightMoving == true && value.heightTargetMm == report.work.knifeHeight) value = value.copy(heightMoving = false)

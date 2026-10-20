@@ -52,4 +52,21 @@ class MapTest {
         t.accept(msg(MctlNav.newBuilder().setToappGetCommondataAck(NavGetCommDataAck.newBuilder().setHash(42).setType(23).setTotalFrame(1).setCurrentFrame(1)).build()),c)
         assertFalse(t.snapshot().complete)
     }
+    @Test fun `vision zones of a Luba 2 AWD X complete the map`() {
+        // Issue DumbyLuba#1 (Luba-VP, firmware 1.30.31.19): 4 zones, 3 no-go, 4 passages and 11 rectangles of type 25.
+        val t=MapTransfer();val c=Commands()
+        t.accept(msg(MctlNav.newBuilder().setToappGethashAck(NavGetHashListAck.newBuilder().setTotalFrame(1).setCurrentFrame(1).addDataCouple(41).addDataCouple(42).addDataCouple(43)).build()),c)
+        fun pt(x:Float,y:Float)=CommDataCouple.newBuilder().setX(x).setY(y)
+        fun frame(hash:Long,type:Int)=NavGetCommDataAck.newBuilder().setHash(hash).setType(type).setAction(8).setTotalFrame(1).setCurrentFrame(1)
+            .addDataCouple(pt(0f,0f)).addDataCouple(pt(1f,0f)).addDataCouple(pt(1f,1f)).addDataCouple(pt(0f,1f)).addDataCouple(pt(0f,0f)).build()
+        t.accept(msg(MctlNav.newBuilder().setToappGetCommondataAck(frame(41,0)).build()),c)
+        t.accept(msg(MctlNav.newBuilder().setToappGetCommondataAck(frame(42,25)).build()),c)
+        assertFalse(t.snapshot().complete)
+        t.accept(msg(MctlNav.newBuilder().setToappGetCommondataAck(frame(43,26)).build()),c)
+        val map=t.snapshot()
+        assertTrue(map.complete)
+        assertFalse(map.source.contains("unsupported"))
+        assertEquals(listOf(ShapeKind.ZONE,ShapeKind.VISION_ZONE,ShapeKind.VISION_ZONE),map.shapes.sortedBy { it.id }.map { it.kind })
+        assertFalse(ShapeKind.VISION_ZONE.isContour)
+    }
 }

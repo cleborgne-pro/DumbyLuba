@@ -156,6 +156,8 @@ fun MapScreen(
     onStop: () -> Unit = {},
     onBack: (() -> Unit)? = null,
     onOpenManual: () -> Unit = {},
+    /** Dedicated "record by driving" page (zone, passage or no-go driven with the joysticks). */
+    onOpenDrivenRecord: () -> Unit = onOpenManual,
     /** Detail of a history task (replay of the real route) and full history (Service). */
     onOpenTask: (String) -> Unit = {},
     onOpenAllTasks: () -> Unit = {},
@@ -265,7 +267,11 @@ fun MapScreen(
     // Tall grass: successive passes lower and lower down to the cutting height ([CutPasses]).
     var heightPasses by rememberSaveable { mutableStateOf(savedTask.heightPasses) }
     var firstPassHeight by rememberSaveable { mutableStateOf(savedTask.firstPassHeightMm) }
-    val passHeights = CutPasses.heights(mowingHeight.roundToInt(), firstPassHeight.roundToInt(), heightPasses)
+    // Cutting heights of the connected robot (higher on the H versions). The saved height is kept as chosen and
+    // brought into the range where it is used: the model code may arrive a few seconds after the connection.
+    val cutHeights = state.cutHeights
+    val passHeights = CutPasses.heights(mowingHeight.roundToInt(), firstPassHeight.roundToInt(), heightPasses, cutHeights)
+    val cuttingHeight = passHeights.last()
     var mowingSpeed by rememberSaveable { mutableStateOf(savedTask.speedMps) }
     var mowingStep by rememberSaveable { mutableStateOf(0) }
     var estimate by remember { mutableStateOf<MowingEstimate?>(null) }
@@ -326,11 +332,9 @@ fun MapScreen(
     var bordersFirst by rememberSaveable { mutableStateOf(savedTask.bordersFirst) }
     var nearbyNoGo by rememberSaveable { mutableStateOf(savedTask.nearbyNoGo) }
     LaunchedEffect(mode) { if (!mode.isSurvey) mowingMode = mode }
-    LaunchedEffect(mowingHeight, mowingSpeed, mowingMode, spacing, borderPasses, noGoPasses, bordersFirst, nearbyNoGo, chargeLow, chargeHigh,
-        heightPasses, firstPassHeight) {
-        mowingTaskStore.write(MowingTaskSettings(mowingHeight, mowingSpeed, mowingMode, spacing, borderPasses, noGoPasses,
-            bordersFirst, nearbyNoGo, chargeLow, chargeHigh, heightPasses, firstPassHeight))
-    }
+    // Saved in its own composable: a 12-key effect here counted against the MapScreen Dalvik register limit.
+    SaveMowingTask(mowingTaskStore, MowingTaskSettings(mowingHeight, mowingSpeed, mowingMode, spacing, borderPasses, noGoPasses,
+        bordersFirst, nearbyNoGo, chargeLow, chargeHigh, heightPasses, firstPassHeight))
     var camera by remember(map.originalShapes) { mutableStateOf(MapCamera()) }
     // Robot following: view centered on it, zoom and rotation kept; a one-finger drag stops it.
     val follow = rememberRobotFollow()
@@ -1187,9 +1191,9 @@ fun MapScreen(
             // The simulated route can be handed to the real robot (same route, same checks).
             if (sim.engine != null && sim.engine?.preview?.localOnly != true && !demo && !cloud && !state.robotRoute.running) SettingsGroup(tr("Run this route", "Exécuter ce trajet")) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
-                    SecondaryPillButton(tr("Follow, blades stopped", "Suivre, lames arrêtées"), { simulation.pause(); onStartRobotRoute(sim.engine!!, false, sim.engine!!.preview.cutHeights.firstOrNull() ?: mowingHeight.toInt()) }, Modifier.weight(1f), enabled = state.ready)
+                    SecondaryPillButton(tr("Follow, blades stopped", "Suivre, lames arrêtées"), { simulation.pause(); onStartRobotRoute(sim.engine!!, false, sim.engine!!.preview.cutHeights.firstOrNull() ?: cuttingHeight) }, Modifier.weight(1f), enabled = state.ready)
                     if (sim.engine?.preview?.mode?.isSurvey != true)
-                        PrimaryPillButton(tr("Mow", "Tondre"), { simulation.pause(); onStartRobotRoute(sim.engine!!, true, sim.engine!!.preview.cutHeights.firstOrNull() ?: mowingHeight.toInt()) }, Modifier.weight(1f), enabled = state.ready, icon = Icons.Rounded.PlayArrow)
+                        PrimaryPillButton(tr("Mow", "Tondre"), { simulation.pause(); onStartRobotRoute(sim.engine!!, true, sim.engine!!.preview.cutHeights.firstOrNull() ?: cuttingHeight) }, Modifier.weight(1f), enabled = state.ready, icon = Icons.Rounded.PlayArrow)
                 }
                 if (!state.ready) InfoNote(tr("Connect the robot to run this route.", "Connectez le robot pour exécuter ce trajet."))
             }
@@ -1250,7 +1254,7 @@ fun MapScreen(
             correctionsEnabled = !demo && sim.engine == null && !state.robotRoute.running && !state.mowing.active && state.mammotionMap.complete,
             onCorrections = { mapActions = false; correcting = true },
             recordEnabled = state.ready && !demo && !cloud && sim.engine == null && !state.robotRoute.running && !state.mowing.active && state.mammotionMap.complete,
-            onRecord = { mapActions = false; onOpenManual() })
+            onRecord = { mapActions = false; onOpenDrivenRecord() })
         if (correcting) androidx.compose.ui.window.Dialog(onDismissRequest = { correcting = false },
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
                 dismissOnBackPress = false, dismissOnClickOutside = false)) {
@@ -1342,15 +1346,15 @@ fun MapScreen(
                     }
                     if (!mode.isSurvey) {
                         SettingsGroup(tr("Mowing", "Tonte")) {
-                            SliderRow(tr("Cutting height", "Hauteur de coupe"), mowingHeight, { mowingHeight = it }, 25f..70f,
-                                valueLabel = "${mowingHeight.toInt()} mm", steps = 44, enabled = !computing)
+                            SliderRow(tr("Cutting height", "Hauteur de coupe"), cuttingHeight.toFloat(), { mowingHeight = it }, cutHeights.floatRange(),
+                                valueLabel = "$cuttingHeight mm", steps = cutHeights.sliderSteps, enabled = !computing)
                             // Tall grass: several passes lower and lower, the last one at the cutting height.
-                            val maxPasses = CutPasses.maxPasses(mowingHeight.roundToInt())
+                            val maxPasses = CutPasses.maxPasses(cuttingHeight, cutHeights)
                             SliderRow(tr("Cutting passes", "Passes de hauteur"), passHeights.size.toFloat(), { heightPasses = it.roundToInt() }, 1f..CutPasses.MAX_PASSES.toFloat(),
                                 valueLabel = if (passHeights.size == 1) tr("1 pass", "1 passe") else "${passHeights.size} passes", steps = CutPasses.MAX_PASSES - 2,
                                 enabled = !computing && maxPasses > 1)
                             if (passHeights.size > 1) {
-                                val firstRange = CutPasses.firstRange(mowingHeight.roundToInt(), passHeights.size)
+                                val firstRange = CutPasses.firstRange(cuttingHeight, passHeights.size, cutHeights)
                                 if (firstRange.first < firstRange.last)
                                     SliderRow(tr("First pass height", "Hauteur de la première passe"), passHeights.first().toFloat(), { firstPassHeight = it.roundToInt().toFloat() },
                                         firstRange.first.toFloat()..firstRange.last.toFloat(), valueLabel = "${passHeights.first()} mm",
@@ -1360,7 +1364,7 @@ fun MapScreen(
                                     "Herbe haute : ${CutPasses.label(passHeights)}. Une passe sur deux est parcourue en sens inverse ; " +
                                     "durée multipliée par ${passHeights.size}."))
                             } else if (maxPasses == 1 && heightPasses > 1)
-                                InfoNote(tr("Cutting height too high for several passes (at least 5 mm apart, 70 mm at most).", "Hauteur de coupe trop haute pour plusieurs passes (5 mm d'écart au moins, 70 mm au plus)."))
+                                InfoNote(tr("Cutting height too high for several passes (at least 5 mm apart, ${cutHeights.maxMm} mm at most).", "Hauteur de coupe trop haute pour plusieurs passes (5 mm d'écart au moins, ${cutHeights.maxMm} mm au plus)."))
                             SliderRow(tr("Task speed", "Vitesse de la tâche"), mowingSpeed, { mowingSpeed = it }, 0.2f..0.6f,
                                 valueLabel = "${Format.num(mowingSpeed.toDouble(), 2)} m/s", enabled = !computing)
                             // Perimeter offset (5 cm to 1 m) with the height and the speed; settings kept.
@@ -1416,7 +1420,7 @@ fun MapScreen(
                                 try {
                                     val engine = requireNotNull(preparedSimulation).withConfig(simulationConfig(requireNotNull(mapBase)))
                                     simulation.pause()
-                                    if (onStartRobotRoute(engine, !engine.preview.mode.isSurvey, engine.preview.cutHeights.firstOrNull() ?: mowingHeight.toInt())) {
+                                    if (onStartRobotRoute(engine, !engine.preview.mode.isSurvey, engine.preview.cutHeights.firstOrNull() ?: cuttingHeight)) {
                                         error = ""
                                         mowingDialog = false
                                     }
@@ -1450,7 +1454,7 @@ fun MapScreen(
                     SettingsGroup(tr("Route", "Trajet")) {
                         KeyValueRow("Zones", zoneLine)
                         KeyValueRow(tr("Settings", "Réglages"), if (mode.isSurvey) "${mode.label}${if (mode == CoverageMode.SURVEY_GRID) tr(" · grid ${signalGridSpacing.toInt()} m", " · maille ${signalGridSpacing.toInt()} m") else ""} · ${tr("blades stopped", "lames arrêtées")} · ${Format.num(mowingSpeed.toDouble(), 2)} m/s"
-                            else "${when (mode) { CoverageMode.CHECKERBOARD -> tr("Checkerboard", "Damier"); CoverageMode.OPTIMIZED -> tr("Optimized", "Optimisé"); else -> "Zigzag" }} · ${preview?.cutHeights?.takeIf { it.size > 1 }?.let { "${it.size} passes " + CutPasses.label(it) } ?: "${mowingHeight.toInt()} mm"} · ${(spacing * 100).roundToInt()} cm · ${Format.num(mowingSpeed.toDouble(), 2)} m/s")
+                            else "${when (mode) { CoverageMode.CHECKERBOARD -> tr("Checkerboard", "Damier"); CoverageMode.OPTIMIZED -> tr("Optimized", "Optimisé"); else -> "Zigzag" }} · ${preview?.cutHeights?.takeIf { it.size > 1 }?.let { "${it.size} passes " + CutPasses.label(it) } ?: "$cuttingHeight mm"} · ${(spacing * 100).roundToInt()} cm · ${Format.num(mowingSpeed.toDouble(), 2)} m/s")
                         if (estimateError.isNotBlank()) InfoNote(estimateError)
                     }
                     if (!mode.isSurvey) fr.luba.poc.weather.MowingRainWarning(estimate?.totalSeconds)
@@ -1488,6 +1492,12 @@ fun MapScreen(
             onLeave = { baseAction(true) }, onRecharge = { baseAction(false) },
             onStopMammotionTask = onStopMammotionTask, onDismiss = { baseDialog = false })
     }
+}
+
+/** Mowing task settings written whenever one of them changes (kept from one task to the next, [MowingTaskStore]). */
+@Composable
+private fun SaveMowingTask(store: MowingTaskStore, settings: MowingTaskSettings) {
+    LaunchedEffect(settings) { store.write(settings) }
 }
 
 /** Recharges of the task: current or done over the total planned at start ("1 / ≈ 2"), or just the number done. */

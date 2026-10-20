@@ -51,7 +51,7 @@ object ModelSupport {
  * list of read and stop commands, everything else is refused (unknown or new commands included).
  *
  * Allowed: zero-speed motion (STOP), blades off (manual mowing 0/0, knife off), BLE sync, network information,
- * report subscription, read-only system query (`rw = 1`), self-check details, cutter mode query, map and route reads
+ * report subscription, read-only system query (`rw = 1`), self-check details, model query (`device_product_type_info`), cutter mode query, map and route reads
  * (hashes, data, acknowledgements), task pause / stop / cancel return (actions 2, 4, 12), camera video and encoder.
  */
 object ReadOnlyPolicy {
@@ -78,7 +78,8 @@ object ReadOnlyPolicy {
             LubaMsg.LubaSubMsgCase.SYS -> {
                 val sys = message.sys
                 when (sys.subSysMsgCase) {
-                    MctlSys.SubSysMsgCase.TODEV_REPORT_CFG, MctlSys.SubSysMsgCase.TO_DEV_SELF_CHECK_INFO_REQ -> true
+                    MctlSys.SubSysMsgCase.TODEV_REPORT_CFG, MctlSys.SubSysMsgCase.TO_DEV_SELF_CHECK_INFO_REQ,
+                    MctlSys.SubSysMsgCase.DEVICE_PRODUCT_TYPE_INFO -> true
                     MctlSys.SubSysMsgCase.BIDIRE_COMM_CMD -> sys.bidireCommCmd.rw == 1
                     MctlSys.SubSysMsgCase.TODEV_KNIFE_CTRL -> sys.todevKnifeCtrl.knifeStatus == 0
                     else -> false

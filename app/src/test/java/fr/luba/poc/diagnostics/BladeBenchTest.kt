@@ -1,6 +1,7 @@
 package fr.luba.poc.diagnostics
 
 import fr.luba.poc.map.Point
+import fr.luba.poc.protocol.CutHeightRange
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -30,6 +31,19 @@ class BladeBenchTest {
             }
         }
         assertThrows(IllegalArgumentException::class.java) { HeightSequence.roundTrip(24) }
+    }
+
+    @Test fun `height sequences follow the range of an H version`() {
+        val high = CutHeightRange.HIGH
+        assertEquals(listOf(90, 80), HeightSequence.roundTrip(80, high))
+        assertEquals(listOf(90, 100), HeightSequence.roundTrip(100, high))
+        assertEquals(listOf(high.maxMm, high.minMm, 80), HeightSequence.extremes(80, high))
+        assertThrows(IllegalArgumentException::class.java) { HeightSequence.extremes(80) }
+        assertThrows(IllegalArgumentException::class.java) { HeightSequence.roundTrip(high.minMm - 1, high) }
+        // Preconditions: 85 mm refused on a standard LUBA, accepted on an H version.
+        val standard = BladeSafety.checks("Luba-VS-x", 100, 72, 11, 0, 0, false, 85)
+        assertEquals(listOf("Hauteur 25–70 mm"), standard.filterNot { it.ok }.map { it.label })
+        assertTrue(BladeSafety.checks("Luba-VS-x", 100, 72, 11, 0, 0, false, 85, high).all { it.ok })
     }
 
     @Test fun `height timeout proportional to the travel`() {

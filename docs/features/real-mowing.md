@@ -57,7 +57,7 @@ these conditions is missing:
 - map identical to that of the connected robot; base known with its docking axis;
 - blades confirmed stopped, no bumper alert;
 - battery above the 5 % reserve (off the station);
-- height between 25 and 70 mm;
+- height within the range of the connected model (25 to 70 mm on a LUBA 2, 55 to 100 mm on an H version);
 - no other activity in progress (manual control, test, Mammotion task, back-off, unlock, command cutoff test:
   "Finish the current activity first"), Bluetooth send queue not saturated;
 - on the base: charging observed within 25 cm of the configured base;

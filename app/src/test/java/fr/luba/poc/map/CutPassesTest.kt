@@ -1,5 +1,6 @@
 package fr.luba.poc.map
 
+import fr.luba.poc.protocol.CutHeightRange
 import fr.luba.poc.simulation.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -23,11 +24,25 @@ class CutPassesTest {
 
     @Test fun settingsKeepConsistentPasses() {
         val chosen = MowingTaskSettings(heightMm = 40f, heightPasses = 3, firstPassHeightMm = 70f).sanitized()
-        assertEquals(listOf(70, 55, 40), chosen.passHeights)
+        assertEquals(listOf(70, 55, 40), chosen.passHeights())
+        // Saved settings accept every model (H versions up to 100 mm); the passes follow the robot's own range.
         val wild = MowingTaskSettings(heightMm = 68f, heightPasses = 9, firstPassHeightMm = 10f).sanitized()
-        assertEquals(1, wild.heightPasses)
-        assertEquals(listOf(68), wild.passHeights)
-        assertEquals(listOf(60), MowingTaskSettings().passHeights)
+        assertEquals(3, wild.heightPasses)
+        assertEquals(listOf(68), wild.passHeights())
+        assertEquals(listOf(78, 73, 68), wild.passHeights(CutHeightRange.HIGH))
+        assertEquals(100f, MowingTaskSettings(heightMm = 140f).sanitized().heightMm)
+        assertEquals(20f, MowingTaskSettings(heightMm = 3f).sanitized().heightMm)
+        assertEquals(listOf(60), MowingTaskSettings().passHeights())
+    }
+
+    @Test fun highCutVersionsGetPassesUpTo100Millimetres() {
+        val high = CutHeightRange.HIGH
+        assertEquals(listOf(100, 85, 70), CutPasses.heights(70, 100, 3, high))
+        assertEquals(3, CutPasses.maxPasses(90, high))
+        assertEquals(1, CutPasses.maxPasses(70))
+        assertEquals(80..100, CutPasses.firstRange(70, 3, high))
+        // Below the H minimum: the final height is raised to it.
+        assertEquals(listOf(high.minMm), CutPasses.heights(30, 30, 1, high))
     }
 
     private val map = RobotMap(listOf(MapShape(1, 0, listOf(Point(0.0, 0.0), Point(12.0, 0.0), Point(12.0, 12.0), Point(0.0, 12.0)))), true)

@@ -123,7 +123,7 @@ fun DrawScope.drawLawn(
                 drawPath(line, Color.White.copy(alpha = 0.95f), style = Stroke(1.5f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
                     pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f * unit, 3f * unit))))
             }
-            ShapeKind.OBSTACLE -> {
+            ShapeKind.OBSTACLE, ShapeKind.VISION_ZONE -> {
                 val outline = path(shape.points, true)
                 drawPath(outline, colors.ObstacleFill)
                 drawPath(outline, colors.ObstacleStroke, style = Stroke(1.25f * unit, join = StrokeJoin.Round))

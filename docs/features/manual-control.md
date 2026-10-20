@@ -8,7 +8,7 @@ Two on-screen joysticks to drive the robot, with no map and no RTK. The blades s
 |---|---|
 | **Access** | Service → Robot → **Manual control**; Map → **Manual**; Home → gamepad icon (same page everywhere) |
 | **Status** | Implemented and used on the real robot; bumper reception and stopping after a real BLE loss still to be validated |
-| **Code** | `manual/Joystick.kt`, `manual/JoystickPanel.kt`, `manual/ManualSpeed.kt`, `manual/DrivenRecordPanel.kt`, `map/DrivenRecording.kt`, `ui/RobotPanel.kt` (`ManualPage`), `ble/RobotBle.kt` (`manualInput`, `stopManual`, `stopMammotionTask`, `startDrivenRecording`) |
+| **Code** | `manual/Joystick.kt` (response curve, notches), `manual/DriveJoystick.kt` (joysticks and deck), `manual/ManualDrive.kt` (shared control loop), `manual/JoystickPanel.kt`, `manual/ManualSpeed.kt`, `manual/DrivenRecordPage.kt` and `manual/DrivenView.kt` (record by driving page), `map/DrivenRecording.kt`, `ui/RobotPanel.kt` (`ManualPage`), `ble/RobotBle.kt` (`manualInput`, `stopManual`, `stopMammotionTask`, `startDrivenRecording`) |
 
 <p align="center">
   <img src="../images/manual-control.png" width="200" alt="Manual control">
@@ -21,10 +21,28 @@ Two on-screen joysticks to drive the robot, with no map and no RTK. The blades s
    value is kept from one opening and one launch to the next.
 3. Left joystick **Forward / reverse**, right joystick **Turn**. Both can be used at the same time; releasing an
    axis returns it to zero. The status reads "Control active — release to stop".
-4. Releasing both joysticks, **Stop the robot**, cancelling or leaving the page sends STOP and purges pending
-   movements.
+4. Releasing both joysticks, the round **STOP** between them, cancelling or leaving the page sends STOP and purges
+   pending movements.
 
 The checkbox and the speed are locked while a joystick is held.
+
+### Joysticks (version 1.12.0)
+
+Each joystick is a capsule along its single axis (vertical for forward / reverse, horizontal for turning), so the
+direction it drives is visible at a glance:
+
+- the finger is captured **anywhere on the pad**, not only on the knob; each pad keeps its own finger, so both can be
+  held together;
+- the knob follows the finger and springs back to the centre on release (display only: the axis command returns to
+  zero at once); a green fill grows from the centre to the knob and the arrow (▲ ▼, ⟲ ⟳) of the driven side turns
+  green;
+- the **response is progressive**: zero in the 12 % dead zone, then rising from zero (no jump when leaving the dead
+  zone) along a curve that gives fine control at low speed and the full chosen speed at the end stop — half the
+  travel gives about a quarter of the maximum speed;
+- a **haptic tick** is felt at each third of the travel and a stronger one at the end stop, marked by dots on the
+  track, so the speed can be dosed without looking at the screen;
+- under each pad, its live output ("Forward 18 %", "Left 9 %"), as a share of the maximum speed;
+- locked (grey knob, padlock) until the supervision is confirmed or while the robot cannot be driven.
 
 ## Settings and commands
 
@@ -32,6 +50,8 @@ The checkbox and the speed are locked while a joystick is held.
 |---|---|
 | Command rate | 5 Hz (every 200 ms) |
 | Dead zone | 12 % |
+| Response | progressive beyond the dead zone (exponent 1.6): half travel ≈ 26 % of the maximum speed, end stop 100 % |
+| Haptic notches | each third of the travel beyond the dead zone, stronger at the end stop |
 | 100 % | 1000 units forward, 450 in rotation (≈ 1 m/s, ≈ 45°/s; speeds above 0.5 m/s estimated, not measured) |
 | Axes | independent: turning does not reduce the forward speed |
 | Blades | always stopped |
@@ -64,21 +84,41 @@ arrives with a slight delay: keep the speed moderate.
 As in the Mammotion app, a new shape is recorded by driving the robot along it with the joysticks (with the camera
 view through the gateway). Unlike the Mammotion app, **nothing is written to the robot**: the shape is saved on the
 phone as a [local correction](map.md#mammotion-zones-and-dumbyluba-zones) and joins the map used everywhere in the app
-(1.4.0). Access: the **Record by driving** group of this page, between the camera and the joysticks, or Map →
-**Map** sheet → *Local corrections* → **Record by driving**.
+(1.4.0).
 
-1. Choose **Zone**, **Passage** or **No-go**, then **Start recording** (robot connected, robot map read, no route in
-   progress). Reports go to 200 ms while recording.
-2. Drive the robot. The map above the joysticks shows the zones around, the trace (blue line), its starting point with
-   the closing circle (1 m) and the robot. Only fresh **RTK FIX** positions are recorded, one point every 15 cm; without
-   FIX, "No RTK FIX: positions are not recorded until it comes back (straight join)".
-   - **Pause** / **Resume**: move the robot without recording; the trace resumes in a straight line from its last
-     point.
-   - **Erase 1 m**: removes the last meter of the trace, to redo a badly driven piece.
+<p align="center">
+  <img src="../images/record-by-driving.png" width="200" alt="Record by driving">
+</p>
+
+Since 1.12.0, recording has its **own page**, laid out for a folded Fold: the map fills the screen in the background,
+the live camera sits at the top and the joysticks at the bottom. Access: manual control → **Record by driving**
+(shows the recording in progress, "Zone · 12.4 m", to resume it), or Map → **Map** sheet → *Local corrections* →
+**Record by driving**. Back returns to the page it was opened from.
+
+| Area | Content |
+|---|---|
+| Header | back, title, red **REC** badge with the recorded length (grey when paused), bin to **cancel the recording** (confirmation) |
+| Top | live camera view, 16:9, full width (can be hidden; "Show camera" brings it back) |
+| Map (background) | zoomed in (≈ 11 m across) and **centred on the robot, which it follows** while it moves (position glided between two readings); the robot to scale, the zones, the trace (blue), its start with the 1 m closing circle, a dashed line from the last recorded point to the robot, a 1 m grid and a scale bar |
+| Map buttons | **Follow the robot** (green while following; dragging the map suspends it, the button resumes it), **north up / heading up** (the map turns so the robot's nose points up, like the camera), zoom **+** / **−** (pinching works too) |
+| Notes on the map | refusal before starting, no RTK FIX, pause, distance left to close the outline, outline closed, control refusal, robot position unknown, saved result; before starting, what the chosen kind records |
+| Bottom | recording bar, then the joystick deck: forward / reverse, maximum speed (− / +, by 10 %, with the estimated m/s) and round **STOP**, turn |
+
+The joysticks stay locked under a "I am supervising the robot" card until it is tapped (blades stopped, area clear,
+physical stop within reach). Leaving the page stops the robot but keeps the recording.
+
+1. Choose **Zone**, **Passage** or **No-go**, then **Start** (robot connected, robot map read, no route in progress).
+   Reports go to 200 ms while recording.
+2. Drive the robot while watching the camera and the map. Only fresh **RTK FIX** positions are recorded, one point
+   every 15 cm; without FIX, "No RTK FIX: positions are not recorded until it comes back (straight join)".
+   - **Pause** / **Resume** (round button): move the robot without recording; the trace resumes in a straight line
+     from its last point.
+   - **Erase 1 m** (undo arrow): removes the last meter of the trace, to redo a badly driven piece.
 3. **Finish**: for a zone or a no-go, once the outline is closed ("Outline closed: you can finish", at least 4 m and
    back within 1 m of the start; otherwise "Bring the robot back to the starting point (2.4 m left, 1.0 m max)"); for a
    passage, after at least 1 m.
-4. Review the result, drawn dashed on the map, then **Save**, **Back to the recording** or **Cancel the recording**.
+4. The map frames the result, drawn dashed, and the bottom panel shows it: **Save** or **Back** (to the recording);
+   the bin of the header cancels it.
 
 | Shape | What is kept | Checks |
 |---|---|---|

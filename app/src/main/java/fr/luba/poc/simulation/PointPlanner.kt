@@ -118,7 +118,7 @@ object PointPlanner {
             RobotEnvelope.LUBA2.halfWidthM + 0.05, holes(map, obstacles), accesses, base = base, recordedBoundary = true)
 
     private fun holes(map: RobotMap, obstacles: List<LocalObstacle>): List<List<Point>> =
-        map.shapes.filter { it.kind == ShapeKind.NO_GO || it.kind == ShapeKind.OBSTACLE }.map { it.points }.filter { it.size >= 3 } +
+        map.shapes.filter { it.kind == ShapeKind.NO_GO || it.kind == ShapeKind.OBSTACLE || it.kind == ShapeKind.VISION_ZONE }.map { it.points }.filter { it.size >= 3 } +
             obstacles.map { obstacle ->
                 val r = obstacle.exclusionRadiusM / cos(Math.PI / 64)
                 (0 until 64).map { i -> Point(obstacle.x + r * cos(i * 2 * Math.PI / 64), obstacle.y + r * sin(i * 2 * Math.PI / 64)) }

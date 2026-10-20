@@ -51,7 +51,7 @@ data class MissionCheckpoint(
     val base: MapBase? = null,
 ) {
     init {
-        require(edge in 0..edgeCount && heightMm in 25..70 && totalMeters >= 0 && doneMeters >= 0 && skippedMeters >= 0)
+        require(edge in 0..edgeCount && heightMm in fr.luba.poc.protocol.CutHeightRange.ANY && totalMeters >= 0 && doneMeters >= 0 && skippedMeters >= 0)
         require(point == null || (point.x.isFinite() && point.y.isFinite()))
         require(bladeZones == null || bladeZones.all { zone -> zone.all { it.x.isFinite() && it.y.isFinite() } })
     }
@@ -321,7 +321,7 @@ object PreviewJson {
         fun ints(key: String) = j.getJSONArray(key).let { a -> (0 until a.length()).map { a.getInt(it) } }
         fun nullablePaths(key: String) = if (j.isNull(key)) null else readPaths(j.getJSONArray(key))
         // Height passes missing from an older save: a single pass.
-        fun optionalHeights(key: String) = j.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getInt(it).also { h -> require(h in 25..70) } } }.orEmpty()
+        fun optionalHeights(key: String) = j.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getInt(it).also { h -> require(h in fr.luba.poc.protocol.CutHeightRange.ANY) } } }.orEmpty()
         return Preview(readPaths(j.getJSONArray("runs")), j.getDouble("meters"), j.getInt("angle"), j.getInt("connectors"),
             CoverageMode.valueOf(j.getString("mode")), readPaths(j.getJSONArray("borders")), j.getInt("outerLoops"), j.getInt("noGoLoops"),
             longs("zoneIds"), ints("zoneAngles"), readPaths(j.getJSONArray("passes")), j.getInt("skippedBorderLoops"),

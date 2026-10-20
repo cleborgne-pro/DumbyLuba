@@ -121,6 +121,7 @@ Then [CoordinateConverter](https://github.com/mikey0000/PyMammotion/blob/0bf120b
 | GATT FFFF/FF01/FF02 | Upstream reference; presence and characteristics checked on connection |
 | BLE sync subtype 0 / value 2 | Acceptance and persistence to be tested on real firmware |
 | START/KEEP reports | Effective rate and renewal to be measured |
+| Model query `MctlSys.device_product_type_info` (field 36, `result = 1`) | Reply `main_product_type` (trade name) / `sub_product_type` (internal model code, H versions distinguished) per PyMammotion; not yet observed on the LUBA 2 firmware ([cutting heights by model](features/supported-models.md#cutting-heights-by-model-version-1130)) |
 | Position and heading | Availability, frame and quality depend on firmware reports |
 | DrvMotionCtrl movement | Format identified; units, manual mode entry, ACK and duration not validated |
 | Stop after loss/crash | Motor watchdog to be demonstrated by the Service → Command cutoff test ([MOTOR_WATCHDOG.md](MOTOR_WATCHDOG.md)); no software guarantee possible without a link |

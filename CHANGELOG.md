@@ -484,3 +484,31 @@ moves (joystick, move to a point tracked from the Fold or by the gateway), 25 is
 the zones (or less than 35 cm inside them) with bumper and lift clear; the "Robot stuck" panel gives way to a note. A
 real contact (bumper, code -1014) is still handled; inside the zones and while mowing, 25 stays the collision lock.
 See [self-check 25 beyond the mapped zones](docs/features/safety.md#self-check-25-beyond-the-mapped-zones-version-1110).
+
+Version 1.12.0 (179): **record by driving on its own page, redesigned joysticks**. Recording a zone, a passage or a
+no-go zone by driving leaves the manual control page for a dedicated page laid out for a folded Fold: the map fills the
+screen, zoomed in and centred on the robot, which it follows (heading up on demand, zoom, dragging suspends the
+following), the live camera at the top and the joysticks at the bottom with the recording bar (start, pause, erase 1 m,
+finish); the result is framed on the map and reviewed in the bottom panel. Opened from manual control or from the map
+sheet. The joysticks become single-axis capsules captured anywhere on the pad, with a progressive response beyond the
+dead zone (half travel ≈ 26 % of the maximum speed instead of 50 %), haptic notches at each third of the travel and at
+the end stop, a knob springing back to the centre, the live output under each pad and a round STOP between them. The
+robot guards are unchanged. See [recording by driving](docs/features/manual-control.md#recording-a-zone-a-passage-or-a-no-go-zone-by-driving)
+and [joysticks](docs/features/manual-control.md#joysticks-version-1120).
+
+Version 1.12.1 (180): **map of a Luba 2 AWD X (Luba-VP) read to the end**. Its map carries, besides zones, no-go zones
+and passages, rectangles of type 25 (vision zones, PyMammotion `VISUAL_SAFETY_ZONE`; 26 is their obstacle sibling):
+the reading received all 22 elements in 8 s, then waited for the 60 s timeout ("unsupported types"), was never cached
+and started again at each connection, cloud reading included (issue DumbyLuba#1). Types 25 and 26 are now recognized:
+the map is complete and cached, the vision zones are drawn like obstacles and avoided by the moves; their meaning is
+not confirmed, so the mowing computation stays refused on such a map. Cloud failures now show the MQTT reason
+(disconnection, full queue) instead of `IllegalStateException`.
+
+Version 1.13.0 (181): **cutting heights by model, H versions included**. The "H" versions of the LUBA (high cut) go
+up to 100 mm: the heights offered and accepted now follow the connected model, 25–70 mm on a LUBA 2 or LUBA 3,
+55–100 mm on their H version, 30–70 mm on a LUBA 1 (60–100 mm H), 20–65 mm on a LUBA mini (55–100 mm H). At
+connection the app asks the robot for its internal model code (`device_product_type_info`, read-only), the only way
+to tell an H version apart (same Bluetooth name and product key), and remembers it per robot; a reported height above
+the standard maximum also identifies it. Height sliders, shortcuts, round trip and full travel, height passes, blade
+test, walk and routes use that range; the protocol accepts 20–100 mm. Not verified on an H robot yet. See
+[cutting heights by model](docs/features/supported-models.md#cutting-heights-by-model-version-1130).

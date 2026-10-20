@@ -32,10 +32,10 @@ class GatewaySafety(private val luba2: Boolean = true) {
         if (message.hasDriver() && message.driver.hasMowCtrlByHand()) {
             val hand = message.driver.mowCtrlByHand
             commandedBlades = hand.cutKnifeCtrl == 1
-            if (hand.cutKnifeHeight in 25..70) commandedHeightMm = hand.cutKnifeHeight
+            if (hand.cutKnifeHeight in fr.luba.poc.protocol.CutHeightRange.ANY) commandedHeightMm = hand.cutKnifeHeight
         }
         if (message.hasDriver() && message.driver.hasTodevKnifeHeightSet()) {
-            message.driver.todevKnifeHeightSet.knifeHeight.takeIf { it in 25..70 }?.let { commandedHeightMm = it }
+            message.driver.todevKnifeHeightSet.knifeHeight.takeIf { it in fr.luba.poc.protocol.CutHeightRange.ANY }?.let { commandedHeightMm = it }
         }
         if (message.hasSys() && message.sys.hasTodevKnifeCtrl()) commandedBlades = message.sys.todevKnifeCtrl.knifeStatus == 1
     }
@@ -67,7 +67,7 @@ class GatewaySafety(private val luba2: Boolean = true) {
         if (midMessage || corrupted) return null
         val commands = Commands()
         return buildList {
-            if (bladesMayTurn) add(commands.manualBlades(false, commandedHeightMm ?: reducer.value.bladeHeightMm?.takeIf { it in 25..70 } ?: 60, now))
+            if (bladesMayTurn) add(commands.manualBlades(false, commandedHeightMm ?: reducer.value.bladeHeightMm?.takeIf { it in fr.luba.poc.protocol.CutHeightRange.ANY } ?: 60, now))
             add(commands.stop(now))
         }
     }

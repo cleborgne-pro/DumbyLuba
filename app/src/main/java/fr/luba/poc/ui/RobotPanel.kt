@@ -56,6 +56,7 @@ enum class ServicePage(val key: String, private val titleEn: String, private val
     HOME_SERVER("Serveur", "Home server", "Serveur maison"),
     // Robot
     MANUAL("Pilotage", "Manual control", "Pilotage manuel"),
+    DRIVEN_RECORD("EnregistrementPilote", "Record by driving", "Enregistrer en pilotant", parent = "Pilotage"),
     HEIGHT("Hauteur", "Cutting height", "Hauteur de coupe"),
     CAMERA("Camera", "Camera", "Caméra"),
     // Garden and history
@@ -158,7 +159,8 @@ fun RobotPanel(
             fr.luba.poc.gateway.GatewayPanel(linkIdle = state.connection == ConnectionState.Disconnected, disconnect = robot::disconnect)
         }
         ServicePage.HOME_SERVER -> PushedPage(page.title, back, modifier) { fr.luba.poc.relay.RelayPanel() }
-        ServicePage.MANUAL -> ManualPage(robot, state, back, modifier)
+        ServicePage.MANUAL -> ManualPage(robot, state, back, modifier) { onTabChange(ServicePage.DRIVEN_RECORD.key) }
+        ServicePage.DRIVEN_RECORD -> fr.luba.poc.manual.DrivenRecordPage(robot, state, back, modifier)
         ServicePage.HEIGHT -> BladesPage(robot, state, back, exportArchive, listOf(BladeBench.HEIGHT), page.title) { requirements() }
         ServicePage.CAMERA -> if (cloud != null) fr.luba.poc.camera.CameraPage(robot, state, cloud, cloudState, back)
             else PushedPage(page.title, back, modifier) { InfoNote(tr("Mammotion account unavailable on this screen.", "Compte Mammotion indisponible sur cet écran.")) }
@@ -199,14 +201,23 @@ fun RobotPanel(
 
 /**
  * Manual control, page shared by the Device tab (shortcut from the home screen and the map) and Service:
- * joysticks, then stopping a task started from the Mammotion app.
+ * joysticks, entry to the dedicated "record by driving" page ([onOpenRecord]), then stopping a task started from the
+ * Mammotion app.
  */
 @Composable
-fun ManualPage(robot: RobotBle, state: RobotUi, back: () -> Unit, modifier: Modifier = Modifier) {
+fun ManualPage(robot: RobotBle, state: RobotUi, back: () -> Unit, modifier: Modifier = Modifier, onOpenRecord: () -> Unit = {}) {
     PushedPage(ServicePage.MANUAL.title, back, modifier) {
         if (!state.ready) StatusNote(tr("Robot not connected: control unlocks as soon as it is (gateway or direct Bluetooth).", "Robot non connecté : le pilotage se débloque dès qu'il l'est (passerelle ou Bluetooth direct)."), NoteTone.WARNING)
-        // Recording by driving between the camera and the joysticks: map of the trace in sight while driving.
-        fr.luba.poc.manual.JoystickPanel(robot, state) { fr.luba.poc.manual.DrivenRecordGroup(robot, state) }
+        fr.luba.poc.manual.JoystickPanel(robot, state) {
+            SettingsGroup(tr("Record by driving", "Enregistrer en pilotant")) {
+                val trace = state.driven
+                NavRow(if (trace != null) tr("Resume the recording", "Reprendre l'enregistrement") else tr("Record a zone, passage or no-go", "Enregistrer une zone, un passage ou une no-go"),
+                    icon = Icons.Rounded.Gamepad,
+                    subtitle = tr("Dedicated page: map following the robot, camera and joysticks; kept on this phone only",
+                        "Page dédiée : carte qui suit le robot, caméra et joysticks ; gardé sur ce téléphone uniquement"),
+                    value = trace?.let { "${it.kind.label} · ${fr.luba.poc.map.MapCorrections.meters(it.lengthM)} m" }, onClick = onOpenRecord)
+            }
+        }
         SettingsGroup(tr("Mammotion task", "Tâche Mammotion")) {
             SecondaryPillButton(tr("Stop the Mammotion task", "Arrêter la tâche Mammotion"), robot::stopMammotionTask, Modifier.fillMaxWidth(),
                 enabled = state.ready && !state.taskStopPending && !state.manualActive && !state.robotRoute.running && !state.navTest.running)

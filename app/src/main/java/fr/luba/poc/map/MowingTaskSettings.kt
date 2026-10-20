@@ -1,6 +1,7 @@
 package fr.luba.poc.map
 
 import android.content.Context
+import fr.luba.poc.protocol.CutHeightRange
 import kotlin.math.roundToInt
 
 /**
@@ -25,8 +26,9 @@ data class MowingTaskSettings(
     val heightPasses: Int = 1,
     val firstPassHeightMm: Float = 70f,
 ) {
-    /** Pass heights, from the first to the last ([heightMm]). */
-    val passHeights: List<Int> get() = CutPasses.heights(heightMm.roundToInt(), firstPassHeightMm.roundToInt(), heightPasses)
+    /** Pass heights, from the first to the last ([heightMm]), within the cutting heights of the robot. */
+    fun passHeights(range: CutHeightRange = CutHeightRange.STANDARD): List<Int> =
+        CutPasses.heights(heightMm.roundToInt(), firstPassHeightMm.roundToInt(), heightPasses, range)
 
     fun sanitized(): MowingTaskSettings {
         val default = MowingTaskSettings()
@@ -35,12 +37,12 @@ data class MowingTaskSettings(
         val high = chargeHigh.within(CHARGE_RANGE, default.chargeHigh).roundToInt().toFloat()
         val chargeValid = high - low >= MIN_CHARGE_GAP
         val height = heightMm.within(HEIGHT_RANGE, default.heightMm).roundToInt()
-        val passes = heightPasses.coerceIn(1, CutPasses.maxPasses(height))
+        val passes = heightPasses.coerceIn(1, CutPasses.maxPasses(height, CutHeightRange.ANY))
         return copy(
             heightMm = height.toFloat(),
             heightPasses = passes,
             firstPassHeightMm = firstPassHeightMm.within(HEIGHT_RANGE, default.firstPassHeightMm).roundToInt()
-                .coerceIn(CutPasses.firstRange(height, passes)).toFloat(),
+                .coerceIn(CutPasses.firstRange(height, passes, CutHeightRange.ANY)).toFloat(),
             speedMps = (speedMps.within(SPEED_RANGE, default.speedMps) * 100).roundToInt() / 100f,
             mode = if (mode in MOWING_MODES) mode else default.mode,
             spacingM = (spacingM.within(SPACING_RANGE, default.spacingM) * 100).roundToInt() / 100f,
@@ -52,7 +54,8 @@ data class MowingTaskSettings(
     }
 
     companion object {
-        val HEIGHT_RANGE = 25f..70f
+        /** Every model (H versions included): the screen then brings the heights back into the connected robot's range. */
+        val HEIGHT_RANGE = CutHeightRange.ANY.floatRange()
         val SPEED_RANGE = 0.2f..0.6f
         val SPACING_RANGE = 0.05f..0.35f
         /** Recharge thresholds: same bounds as the slider (return ≤ 80 %, at least 5 points apart). */

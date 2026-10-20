@@ -1,6 +1,7 @@
 package fr.luba.poc.diagnostics
 
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.protocol.CutHeightRange
 import fr.luba.poc.protocol.Telemetry
 
 /** Precondition of a cutting test, shown live in the Blades panel. */
@@ -14,10 +15,11 @@ object BladeSafety {
 
     /** All preconditions, in [requireReady] order: the first failing one is the refusal reason. */
     fun checks(name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
-               sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int): List<BladeCheck> = listOf(
+               sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int,
+               heights: CutHeightRange = CutHeightRange.forRobot(name)): List<BladeCheck> = listOf(
         BladeCheck("Robot LUBA 2", fr.luba.poc.protocol.ModelSupport.motionValidated(name), tr("Test reserved for a LUBA 2 identified as Luba-VS", "Test réservé au LUBA 2 identifié Luba-VS")),
         BladeCheck(tr("BLE diagnostics stopped", "Diagnostic BLE arrêté"), !campaignRunning, tr("Stop the BLE campaign before this test", "Arrêter la campagne BLE avant ce test")),
-        BladeCheck(tr("Height 25–70 mm", "Hauteur 25–70 mm"), heightMm in 25..70, tr("Height outside the 25–70 mm range", "Hauteur hors plage 25–70 mm")),
+        BladeCheck(tr("Height ${heights.label}", "Hauteur ${heights.label}"), heightMm in heights, heights.refusal(heightMm) ?: ""),
         BladeCheck(tr("Fresh robot state (≤ 2 s)", "État robot frais (≤ 2 s)"), stateAgeMs != null && stateAgeMs in 0..2000, tr("Robot state missing or older than 2 s", "État robot absent ou âgé de plus de 2 s")),
         BladeCheck(tr("Battery > 30 %", "Batterie > 30 %"), battery != null && battery > 30, tr("Battery unknown or ≤30 %", "Batterie inconnue ou ≤30 %")),
         BladeCheck(tr("Robot ready (state 11)", "Robot prêt (état 11)"), robotState == 11, tr("Robot not ready (MODE_READY=11 expected)", "Robot non prêt (MODE_READY=11 attendu)")),
@@ -26,28 +28,26 @@ object BladeSafety {
     )
 
     fun requireReady(name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
-        sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int) {
-        checks(name, stateAgeMs, battery, robotState, sensors, selfCheck, campaignRunning, heightMm)
+        sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int, heights: CutHeightRange = CutHeightRange.forRobot(name)) {
+        checks(name, stateAgeMs, battery, robotState, sensors, selfCheck, campaignRunning, heightMm, heights)
             .firstOrNull { !it.ok }?.let { throw IllegalArgumentException(it.detail) }
     }
 }
 
 /** Height adjustment test sequences: a chain of setpoints, each confirmed by the robot. */
 object HeightSequence {
-    const val MIN_MM = 25
-    const val MAX_MM = 70
-
-    /** Round trip of [deltaMm] from the current height (downwards if going up leaves the range). */
-    fun roundTrip(currentMm: Int, deltaMm: Int = 10): List<Int> {
-        require(currentMm in MIN_MM..MAX_MM && deltaMm in 1..(MAX_MM - MIN_MM))
-        val away = if (currentMm + deltaMm <= MAX_MM) currentMm + deltaMm else currentMm - deltaMm
-        return listOf(away.coerceIn(MIN_MM, MAX_MM), currentMm)
+    /** Round trip of [deltaMm] from the current height (downwards if going up leaves the [heights] range). */
+    fun roundTrip(currentMm: Int, heights: CutHeightRange = CutHeightRange.STANDARD, deltaMm: Int = 10): List<Int> {
+        require(currentMm in heights && deltaMm in 1..(heights.maxMm - heights.minMm))
+        val away = if (currentMm + deltaMm <= heights.maxMm) currentMm + deltaMm else currentMm - deltaMm
+        return listOf(heights.clamp(away), currentMm)
     }
 
-    /** Full travel: minimum, maximum, then back to the starting height. */
-    fun extremes(currentMm: Int): List<Int> {
-        require(currentMm in MIN_MM..MAX_MM)
-        val order = if (currentMm - MIN_MM <= MAX_MM - currentMm) listOf(MIN_MM, MAX_MM) else listOf(MAX_MM, MIN_MM)
+    /** Full travel of the [heights] range: minimum, maximum, then back to the starting height. */
+    fun extremes(currentMm: Int, heights: CutHeightRange = CutHeightRange.STANDARD): List<Int> {
+        require(currentMm in heights)
+        val (min, max) = heights.minMm to heights.maxMm
+        val order = if (currentMm - min <= max - currentMm) listOf(min, max) else listOf(max, min)
         return (order + currentMm).fold(mutableListOf<Int>()) { out, mm -> if (out.lastOrNull() != mm) out.add(mm); out }
             .let { if (it.first() == currentMm) it.drop(1) else it }
     }

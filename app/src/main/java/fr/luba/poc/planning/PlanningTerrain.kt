@@ -47,6 +47,7 @@ internal class PlanningTerrain(val request: PlanningRequest) {
     init {
         require(zones.isNotEmpty() && request.zoneIds.distinct().size == zones.size) { tr("Empty or repeated selection", "Sélection vide ou répétée") }
         require(request.map.shapes.none { it.kind == ShapeKind.OBSTACLE }) { tr("Map obstacle type not interpreted", "Type d’obstacle cartographique non interprété") }
+        require(request.map.shapes.none { it.kind == ShapeKind.VISION_ZONE }) { tr("Map with vision zones (Luba 2 AWD X): meaning not confirmed, planning disabled", "Carte avec zones vision (Luba 2 AWD X) : sens non confirmé, calcul désactivé") }
         require(request.map.shapes.map { it.id }.distinct().size == request.map.shapes.size) { tr("Ambiguous identifiers", "Identifiants ambigus") }
         require(request.start.x.isFinite() && request.start.y.isFinite() && (request.startHeading == null || request.startHeading.isFinite()))
         require(config.boundary != BoundaryMeaning.UNKNOWN) { tr("Unknown boundary semantics", "Sémantique des frontières inconnue") }

@@ -89,6 +89,39 @@ A model moves from read-only to validated through a code change reviewed like an
    the joystick at low speed, then the blade test;
 3. the prefix is added to `ModelSupport.VALIDATED_PREFIXES`, with the tests and this table updated.
 
+## Cutting heights by model (version 1.13.0)
+
+The "H" versions of the LUBA (high cut, sold in North America) raise the blade disc higher than the standard
+versions. The heights offered (sliders, shortcuts, sequences, height passes) and accepted (blade test, walk, routes,
+mowing) follow the connected model:
+
+| Model | Standard version | H version |
+|---|---|---|
+| LUBA 2 AWD (and X series), LUBA 3 AWD | 25–70 mm | 55–100 mm |
+| LUBA AWD (LUBA 1) | 30–70 mm | 60–100 mm |
+| LUBA mini AWD, LUBA mini 2 AWD | 20–65 mm | 55–100 mm |
+
+Sources: [LUBA 2 AWD specifications](https://support.mammotion.com/portal/en/kb/articles/luba-2-awd-series-specifications)
+("25-70mm (Standard Version) 55-100mm (H Version)"), Mammotion LUBA 3 and LUBA mini pages, and the Mammotion app table
+reproduced by PyMammotion (`pymammotion/data/model/device_capabilities.py`, `blade_height_min` / `blade_height_max`).
+
+**Detection.** The H and standard versions share the Bluetooth name prefix and the account product key. At each
+connection the app asks the robot for its model (`MctlSys.device_product_type_info`, `result = 1`, PyMammotion
+`get_device_product_model`, allowed in read-only mode, asked up to 3 times): the reply's `sub_product_type` is the
+internal model code (`HM060100LBVAWD50OMNIH` = LUBA 2 AWD 5000H, or a numeric identifier such as `62` = LUBA 3 AWD
+1500H), looked up in the table (`protocol/CutHeight.kt`, `CutHeightRange`). An unlisted Luba code ending with "H" is
+an H version of the family. The code is remembered per robot (`robot_product_type` preferences), so the range is
+known as soon as it reconnects, and logged (`robot_product_type` event). Without a code, the range of the family
+deduced from the name applies, raised to the H range when the robot reports a height above the standard maximum.
+
+The Height page (Service → Robot → Cutting height) shows the range and the model code ("H version (high cut):
+55–100 mm. Model code …"). The mowing settings keep the height chosen and bring it into the range of the connected
+robot where it is used; the protocol itself accepts 20–100 mm (every model).
+
+**Not verified on a robot:** no H version has been connected to the app yet (the validated LUBA 2 is a standard
+version); the model reply of the LUBA 2 firmware has not been observed either. The H ranges come from the
+manufacturer's specifications and the Mammotion app table.
+
 ## Limitations
 
 - A Bluetooth name proves neither the exact model nor its firmware; the product key is only known with the account.

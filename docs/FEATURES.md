@@ -38,7 +38,7 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 | [Mowing history](features/mowing-history.md) | task history (History button on the map), replay of the actual route, end-of-mowing report, duration and recharges compared with the estimate, adjusted estimates |
 | [Obstacles](features/obstacles.md) | back-off and bypass after a contact, encountered and presumed obstacles, difficulties heatmap, saved obstacles, obstacle tests (including the frontal border test), obstacle simulation |
 | [Station and moves](features/station-and-moves.md) | charging station dialog: leave the base, recharge, stop the Mammotion return; move to a point |
-| [Manual control](features/manual-control.md) | two joysticks, maximum speed 10 to 100 %, blades stopped, camera thumbnail, recording a zone, passage or no-go zone by driving |
+| [Manual control](features/manual-control.md) | two single-axis joysticks (progressive response, haptic notches), maximum speed 10 to 100 %, blades stopped, camera view, recording a zone, passage or no-go zone by driving on a dedicated page (map following the robot, camera at the top, joysticks at the bottom) |
 
 ## Safety and monitoring
 

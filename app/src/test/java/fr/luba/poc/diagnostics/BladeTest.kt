@@ -28,8 +28,11 @@ class BladeTest {
         assertTrue(msg.driver.hasTodevKnifeHeightSet())
         assertEquals(45, msg.driver.todevKnifeHeightSet.knifeHeight)
         assertFalse(msg.driver.hasMowCtrlByHand())
-        assertThrows(IllegalArgumentException::class.java) { Commands().bladeHeight(24) }
-        assertThrows(IllegalArgumentException::class.java) { Commands().bladeHeight(71) }
+        // Protocol bound: every model (LUBA mini from 20 mm, H versions up to 100 mm); the model's own range is checked upstream.
+        assertThrows(IllegalArgumentException::class.java) { Commands().bladeHeight(19) }
+        assertEquals(100, LubaMsg.parseFrom(Commands().bladeHeight(100, 1)).driver.todevKnifeHeightSet.knifeHeight)
+        assertThrows(IllegalArgumentException::class.java) { Commands().bladeHeight(101) }
+        assertThrows(IllegalArgumentException::class.java) { Commands().manualBlades(false, 101) }
     }
     @Test fun `Luba2 ON OFF identical to upstream parameters without travel speed`() {
         for (enabled in listOf(false, true)) {
@@ -78,7 +81,7 @@ class BladeTest {
         assertEquals(1, disc.driver.mowCtrlByHand.cutKnifeCtrl)
         assertThrows(IllegalArgumentException::class.java) { Commands().manualMow(2, 1, 60) }
         assertThrows(IllegalArgumentException::class.java) { Commands().manualMow(1, -1, 60) }
-        assertThrows(IllegalArgumentException::class.java) { Commands().manualMow(1, 1, 24) }
+        assertThrows(IllegalArgumentException::class.java) { Commands().manualMow(1, 1, 19) }
     }
 
     @Test fun `alternative SysKnifeControl command matches upstream with no other field`() {

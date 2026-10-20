@@ -94,7 +94,7 @@ class RobotDetailsReducer(initial: RobotDetails = RobotDetails()) {
         if (r.hasWork()) r.work.let { w ->
             v = v.copy(task = TaskProgress(percent = (w.area ushr 16).coerceIn(0, 100), areaM2 = w.area and 0xFFFF,
                 totalMinutes = w.progress and 0xFFFF, leftMinutes = w.progress ushr 16,
-                knifeHeightMm = w.knifeHeight.takeIf { it in 25..70 }, speedMps = w.manRunSpeed.takeIf { it > 0 }?.let { it / 100.0 }))
+                knifeHeightMm = w.knifeHeight.takeIf { it in fr.luba.poc.protocol.CutHeightRange.ANY }, speedMps = w.manRunSpeed.takeIf { it > 0 }?.let { it / 100.0 }))
         }
         if (r.hasRtk()) r.rtk.let { k ->
             val score = if (k.hasScoreInfo()) k.scoreInfo else null

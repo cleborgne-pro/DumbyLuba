@@ -8,18 +8,28 @@ data class Point(val x: Double, val y: Double) {
 }
 data class MapShape(val id: Long, val type: Int, val points: List<Point>, val name: String = "")
 
-/** Kind of a map boundary, from the upstream `type` code (0 = zone, 1 = no-go, 2 = passage). */
+/**
+ * Kind of a map boundary, from the upstream `type` code (0 = zone, 1 = no-go, 2 = passage, 25/26 = zones recorded by the
+ * vision of the Luba 2 AWD X / Vision models, PyMammotion `VISUAL_SAFETY_ZONE` / `VISUAL_OBSTACLE_ZONE`).
+ */
 enum class ShapeKind {
-    ZONE, NO_GO, PASSAGE, OBSTACLE;
+    ZONE, NO_GO, PASSAGE, OBSTACLE,
+    /** Vision zone (types 25 and 26): meaning not confirmed, avoided by the moves, planning refused. */
+    VISION_ZONE;
 
     /** Closed boundaries (zones and no-go) are filled; obstacles stay drawn as lines. */
     val isContour: Boolean get() = this == ZONE || this == NO_GO
 
     companion object {
+        /** Upstream types of the vision zones (seen: 25 on a Luba 2 AWD 3000X, firmware 1.30.31.19). */
+        val VISION_TYPES = setOf(25, 26)
+        /** Upstream types interpreted by the application; any other type leaves the map incomplete. */
+        val SUPPORTED_TYPES = setOf(0, 1, 2) + VISION_TYPES
         fun from(type: Int): ShapeKind = when (type) {
             0 -> ZONE
             1 -> NO_GO
             2 -> PASSAGE
+            in VISION_TYPES -> VISION_ZONE
             else -> OBSTACLE
         }
     }

@@ -10,6 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
 import fr.luba.poc.ble.ConnectionState
@@ -87,8 +89,17 @@ class UiShotsServiceTest {
     @Test fun connectionGateway() { role(GatewayRole.GATEWAY); page("service-connexion-passerelle", "Robot", state(false)) }
     @Config(qualifiers = "w412dp-h1600dp-xxhdpi")
     @Test fun manual() = page("service-pilotage", "Pilotage")
-    /** Manual control while recording a DumbyLuba zone by driving: map of the trace above the joysticks. */
-    @Config(qualifiers = "w412dp-h2400dp-xxhdpi")
+    /** Record by driving (folded Fold): map following the robot, camera at the top, joysticks at the bottom. */
+    @Config(qualifiers = "w412dp-h860dp-xxhdpi")
+    @Test fun drivenRecordStart() {
+        val lawn = fr.luba.poc.map.MapShape(1, 0, listOf(fr.luba.poc.map.Point(0.0, 0.0), fr.luba.poc.map.Point(10.0, 0.0),
+            fr.luba.poc.map.Point(10.0, 8.0), fr.luba.poc.map.Point(0.0, 8.0)), "Pelouse")
+        val map = fr.luba.poc.map.RobotMap(listOf(lawn), true, "test")
+        page("service-pilotage-enregistrement-depart", "EnregistrementPilote", state(true).copy(robotMap = map, mammotionMap = map,
+            telemetry = Telemetry(battery = 87, x = 9.0, y = 4.0, heading = 120.0, rtkStatus = 4, positioningLevel = 4, firmware = "1.12.4")))
+    }
+    /** Record by driving while a DumbyLuba zone is being driven: trace, closing circle and robot followed. */
+    @Config(qualifiers = "w412dp-h860dp-xxhdpi")
     @Test fun manualRecording() {
         val lawn = fr.luba.poc.map.MapShape(1, 0, listOf(fr.luba.poc.map.Point(0.0, 0.0), fr.luba.poc.map.Point(10.0, 0.0),
             fr.luba.poc.map.Point(10.0, 8.0), fr.luba.poc.map.Point(0.0, 8.0)), "Pelouse")
@@ -96,8 +107,13 @@ class UiShotsServiceTest {
         val corners = listOf(fr.luba.poc.map.Point(9.5, 0.5), fr.luba.poc.map.Point(16.0, 0.5), fr.luba.poc.map.Point(16.0, 7.5), fr.luba.poc.map.Point(10.5, 7.5))
         val trace = corners.zipWithNext().flatMap { (a, b) -> (0 until 20).map { i -> fr.luba.poc.map.Point(a.x + (b.x - a.x) * i / 20, a.y + (b.y - a.y) * i / 20) } }
         val driven = fr.luba.poc.map.DrivenTrace(fr.luba.poc.map.DrivenKind.ZONE, 1L, trace)
-        page("service-pilotage-enregistrement", "Pilotage", state(true).copy(robotMap = map, mammotionMap = map, driven = driven,
-            telemetry = Telemetry(battery = 87, x = trace.last().x, y = trace.last().y, heading = 180.0, rtkStatus = 4, positioningLevel = 4, firmware = "1.12.4")))
+        compose.setContent { LubaTheme(false) { Box(Modifier.fillMaxSize()) { RobotPanel(robot, state(true).copy(robotMap = map, mammotionMap = map, driven = driven,
+            telemetry = Telemetry(battery = 87, x = trace.last().x, y = trace.last().y, heading = 180.0, rtkStatus = 4, positioningLevel = 4, firmware = "1.12.4")),
+            "EnregistrementPilote", {}) } } }
+        // Supervision confirmed: joysticks unlocked.
+        compose.onNodeWithText(tr("I am supervising the robot", "Je supervise le robot")).performClick()
+        compose.waitForIdle()
+        compose.onRoot().captureRoboImage("$out/service-pilotage-enregistrement.png")
     }
     @Config(qualifiers = "w412dp-h2000dp-xxhdpi")
     @Test fun watchdog() {

@@ -1,11 +1,12 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.protocol.CutHeightRange
 import kotlin.math.roundToInt
 
 /**
  * Passes of decreasing height for tall grass: the same task is mowed several times, high first then lower and lower
- * down to the requested cutting height (for example 3 passes: 70, 55 then 40 mm).
+ * down to the requested cutting height (for example 3 passes: 70, 55 then 40 mm; up to 100 mm on an H version).
  *
  * The prepared route contains all the passes ([expand]): simulation, real mowing, recharges, resume and estimates use
  * the same plan, with one height per pass ([Preview.pathHeights]). Every other pass is driven in reverse: it starts
@@ -15,27 +16,28 @@ object CutPasses {
     const val MAX_PASSES = 3
     /** Minimum gap between two successive passes: below it, the intermediate pass cuts almost nothing. */
     const val MIN_STEP_MM = 5
-    val HEIGHT_RANGE = 25..70
 
-    /** Number of passes possible with this final height (at least [MIN_STEP_MM] between two passes, 70 mm at most). */
-    fun maxPasses(finalMm: Int): Int = (1 + (HEIGHT_RANGE.last - finalMm.coerceIn(HEIGHT_RANGE)) / MIN_STEP_MM).coerceIn(1, MAX_PASSES)
+    /** Number of passes possible with this final height (at least [MIN_STEP_MM] between two passes, up to the top of [range]). */
+    fun maxPasses(finalMm: Int, range: CutHeightRange = CutHeightRange.STANDARD): Int =
+        (1 + (range.maxMm - range.clamp(finalMm)) / MIN_STEP_MM).coerceIn(1, MAX_PASSES)
 
     /** First-pass height allowed for [count] passes down to [finalMm]. */
-    fun firstRange(finalMm: Int, count: Int): IntRange {
-        val final = finalMm.coerceIn(HEIGHT_RANGE)
-        val n = count.coerceIn(1, maxPasses(final))
-        return (final + MIN_STEP_MM * (n - 1)).coerceAtMost(HEIGHT_RANGE.last)..HEIGHT_RANGE.last
+    fun firstRange(finalMm: Int, count: Int, range: CutHeightRange = CutHeightRange.STANDARD): IntRange {
+        val final = range.clamp(finalMm)
+        val n = count.coerceIn(1, maxPasses(final, range))
+        return (final + MIN_STEP_MM * (n - 1)).coerceAtMost(range.maxMm)..range.maxMm
     }
 
     /**
-     * Pass heights, from the first to the last, evenly spread from [firstMm] to [finalMm].
+     * Pass heights, from the first to the last, evenly spread from [firstMm] to [finalMm] within the cutting heights
+     * of the robot ([range], higher on the H versions).
      * Clamped values: a single pass at [finalMm] if the gap does not allow several distinct passes.
      */
-    fun heights(finalMm: Int, firstMm: Int, count: Int): List<Int> {
-        val final = finalMm.coerceIn(HEIGHT_RANGE)
-        val n = count.coerceIn(1, maxPasses(final))
+    fun heights(finalMm: Int, firstMm: Int, count: Int, range: CutHeightRange = CutHeightRange.STANDARD): List<Int> {
+        val final = range.clamp(finalMm)
+        val n = count.coerceIn(1, maxPasses(final, range))
         if (n == 1) return listOf(final)
-        val first = firstMm.coerceIn(firstRange(final, n))
+        val first = firstMm.coerceIn(firstRange(final, n, range))
         return (0 until n).map { i -> (first - (first - final) * i.toDouble() / (n - 1)).roundToInt() }
     }
 

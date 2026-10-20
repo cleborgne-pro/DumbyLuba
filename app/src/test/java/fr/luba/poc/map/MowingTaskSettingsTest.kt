@@ -25,7 +25,8 @@ class MowingTaskSettingsTest {
     @Test fun storedValuesAreBoundedToTheSliders() {
         val wild = MowingTaskSettings(heightMm = 200f, speedMps = Float.NaN, mode = CoverageMode.TOUR, spacingM = 0.01f,
             borderPasses = 9, noGoPasses = -1, chargeLow = 50f, chargeHigh = 52f).sanitized()
-        assertEquals(70f, wild.heightMm)
+        // Every model (H versions up to 100 mm): the Map screen then brings it into the connected robot's range.
+        assertEquals(100f, wild.heightMm)
         assertEquals(0.3f, wild.speedMps)
         assertEquals(CoverageMode.LINES, wild.mode)
         assertEquals(0.05f, wild.spacingM)

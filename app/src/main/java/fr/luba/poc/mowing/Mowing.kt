@@ -12,7 +12,7 @@ data class MowConfig(val zones: List<Long>, val heightMm: Int = 60, val checkerb
         require(zones.isNotEmpty() && zones.size == zones.distinct().size && zones.none { it == 0L }) { tr("Invalid zones", "Zones invalides") }
         require(spacingCm in 5..35) { tr("Spacing out of range 5–35 cm", "Espacement hors plage 5–35 cm") }
         require(speedMps.isFinite() && speedMps in 0.2f..0.6f) { tr("Speed out of range 0.2–0.6 m/s", "Vitesse hors plage 0,2–0,6 m/s") }
-        require(heightMm in 25..70) { tr("Height out of range 25–70 mm", "Hauteur hors plage 25–70 mm") }
+        require(heightMm in fr.luba.poc.protocol.CutHeightRange.ANY) { fr.luba.poc.protocol.CutHeightRange.ANY.refusal(heightMm)!! }
     }
 }
 enum class MowPhase(private val labelEn: String, private val labelFr: String) {

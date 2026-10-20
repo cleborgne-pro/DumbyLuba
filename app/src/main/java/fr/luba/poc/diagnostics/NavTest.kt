@@ -18,7 +18,7 @@ data class NavConfig(
         require(segments in 3..20) { tr("Number of segments outside the 3–20 range", "Nombre de segments hors plage 3–20") }
         require(linearSpeed in 1..Commands.MAX_LINEAR_SPEED) { tr("Linear speed outside 1–${Commands.MAX_LINEAR_SPEED}", "Vitesse linéaire hors bornes 1–${Commands.MAX_LINEAR_SPEED}") }
         require(angularSpeed in 1..Commands.MAX_ANGULAR_SPEED) { tr("Angular speed outside 1–${Commands.MAX_ANGULAR_SPEED}", "Vitesse angulaire hors bornes 1–${Commands.MAX_ANGULAR_SPEED}") }
-        require(heightMm in 25..70) { tr("Height outside the 25–70 mm range", "Hauteur hors plage 25–70 mm") }
+        require(heightMm in fr.luba.poc.protocol.CutHeightRange.ANY) { fr.luba.poc.protocol.CutHeightRange.ANY.refusal(heightMm)!! }
         require(maxDurationMs in 10_000..MAX_DURATION_MS) { tr("Duration outside the 10–600 s range", "Durée hors plage 10–600 s") }
         require(maxRadiusM in 1.0..(if (pointDestination) 200.0 else 20.0)) { tr("Radius outside the 1–20 m range", "Rayon hors plage 1–20 m") }
         require(batteryFloor in 10..80) { tr("Battery floor outside the 10–80 % range", "Plancher batterie hors plage 10–80 %") }
@@ -78,12 +78,14 @@ object NavSafety {
         mapLoading: Boolean, heightMm: Int, batteryFloor: Int = 30,
         /** Move to a point beyond the mapped zones: self-check 25 ignored there ([fr.luba.poc.protocol.OffMapLatch]). */
         ignoreOffMapLatch: Boolean = false,
+        /** Cutting heights of the connected model. */
+        heights: fr.luba.poc.protocol.CutHeightRange = fr.luba.poc.protocol.CutHeightRange.forRobot(name),
     ): String? {
         if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Walk reserved for a LUBA 2 identified as Luba-VS", "Marche réservée au LUBA 2 identifié Luba-VS")
         if (campaignRunning) return tr("Stop the BLE campaign before the walk", "Arrêter la campagne BLE avant la marche")
         if (bladeTestRunning) return tr("Finish the cutting test before the walk", "Terminer l'essai de coupe avant la marche")
         if (mapLoading) return tr("Wait for the map to be read", "Attendre la lecture de carte")
-        if (heightMm !in 25..70) return tr("Height outside the 25–70 mm range", "Hauteur hors plage 25–70 mm")
+        heights.refusal(heightMm)?.let { return it }
         if (stateAgeMs == null || stateAgeMs !in 0..2000) return tr("Robot state missing or older than 2 s", "État robot absent ou âgé de plus de 2 s")
         if (battery == null || battery <= batteryFloor) return tr("Battery unknown or ≤$batteryFloor %", "Batterie inconnue ou ≤$batteryFloor %")
         if (robotState != 11) return tr("Robot not ready (MODE_READY=11 expected)", "Robot non prêt (MODE_READY=11 attendu)")
