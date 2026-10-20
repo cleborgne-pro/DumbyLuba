@@ -112,7 +112,7 @@ data class TiltCalibration(val reference: PhoneGravity, val angle: Double?, val 
 
         /** Reference from the readings received over a few seconds, or the reason for the refusal. */
         fun capture(readings: List<PhoneGravity>, angle: Double?, at: Long): Pair<TiltCalibration?, String?> {
-            if (readings.size < MIN_READINGS) return null to tr("Not enough readings received from the gateway (${readings.size}/$MIN_READINGS): check that the Fold is controlling through the Redmi mounted on the robot.", "Pas assez de mesures reçues de la passerelle (${readings.size}/$MIN_READINGS) : vérifier que le Fold pilote via le Redmi posé sur le robot.")
+            if (readings.size < MIN_READINGS) return null to tr("Not enough readings received from the gateway (${readings.size}/$MIN_READINGS): check that this phone is controlling through the gateway phone mounted on the robot.", "Pas assez de mesures reçues de la passerelle (${readings.size}/$MIN_READINGS) : vérifier que ce téléphone pilote via le téléphone passerelle posé sur le robot.")
             val mean = PhoneGravity(readings.sumOf { it.x } / readings.size, readings.sumOf { it.y } / readings.size, readings.sumOf { it.z } / readings.size)
             val spread = readings.maxOf { sqrt((it.x - mean.x).let { d -> d * d } + (it.y - mean.y).let { d -> d * d } + (it.z - mean.z).let { d -> d * d }) }
             if (spread > MAX_SPREAD) return null to tr("Unstable readings (%.2f m/s²): robot or phone moving. Try again with the robot stopped.", "Mesures instables (%.2f m/s²) : robot ou téléphone en mouvement. Recommencer robot arrêté.").format(spread)

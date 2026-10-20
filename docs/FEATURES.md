@@ -20,11 +20,12 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 
 | Page | In short |
 |---|---|
+| [Getting started and setup check](features/getting-started.md) | three setups, pairing the gateway, Service → Check the setup: Wi-Fi, gateway, robot, placement and safety, link by link |
 | [Interface and navigation](features/interface.md) | Device / Service / Me tabs, Service page groups, global STOP bar, light and dark theme, English or French |
 | [Supported models](features/supported-models.md) | LUBA 2 AWD validated; LUBA 1, LUBA 3, LUBA mini, Yuka… in read-only mode, how to test your model |
 | [Bluetooth connection](features/bluetooth-connection.md) | scanning, connection, link loss, link kept in the background, advanced settings |
 | [Mammotion account](features/mammotion-account.md) | optional: map and status through the cloud, camera, native return, firmware update |
-| [Map](features/map.md) | BLE or cloud reading, cache, map sheet (background, layers, legend, source), local corrections (zones, no-go zones, obstacles), base and manual accesses, device status, last known position |
+| [Map](features/map.md) | BLE or cloud reading, cache, map sheet (background, layers, legend, source), local corrections (zones, no-go zones, obstacles), DumbyLuba zones and passages recorded by driving, beyond the Mammotion boundaries hatched, base and manual accesses, device status, last known position |
 
 ## Mowing
 
@@ -37,7 +38,7 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 | [Mowing history](features/mowing-history.md) | task history (History button on the map), replay of the actual route, end-of-mowing report, duration and recharges compared with the estimate, adjusted estimates |
 | [Obstacles](features/obstacles.md) | back-off and bypass after a contact, encountered and presumed obstacles, difficulties heatmap, saved obstacles, obstacle tests (including the frontal border test), obstacle simulation |
 | [Station and moves](features/station-and-moves.md) | charging station dialog: leave the base, recharge, stop the Mammotion return; move to a point |
-| [Manual control](features/manual-control.md) | two joysticks, maximum speed 10 to 100 %, blades stopped, camera thumbnail |
+| [Manual control](features/manual-control.md) | two joysticks, maximum speed 10 to 100 %, blades stopped, camera thumbnail, recording a zone, passage or no-go zone by driving |
 
 ## Safety and monitoring
 

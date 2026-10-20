@@ -30,10 +30,30 @@ class GatewayConfigTest {
     }
 
     @Test fun `role, address and code read back after a restart, address trimmed`() {
-        GatewayConfig.save(context, GatewayConfig(GatewayRole.CLIENT, "  192.168.0.42 ", 9000, "123456"))
-        assertEquals(GatewayConfig(GatewayRole.CLIENT, "192.168.0.42", 9000, "123456"), GatewayConfig.read(context))
+        GatewayConfig.save(context, GatewayConfig(GatewayRole.CLIENT, "  192.168.0.42 ", 9000, "123456", "222333"))
+        assertEquals(GatewayConfig(GatewayRole.CLIENT, "192.168.0.42", 9000, "123456", "222333"), GatewayConfig.read(context))
         GatewayConfig.save(context, GatewayConfig(GatewayRole.GATEWAY, "", GatewayProtocol.PORT, "654321"))
         assertEquals(GatewayRole.GATEWAY, GatewayConfig.read(context).role)
+    }
+
+    @Test fun `pilot code kept apart from this phone's own gateway code`() {
+        val own = GatewayConfig.read(context).code
+        GatewayConfig.save(context, GatewayConfig.read(context).copy(role = GatewayRole.CLIENT, pilotCode = "424242"))
+        // Becoming a gateway later: the code shown is still this phone's own, not the one typed for the other gateway.
+        GatewayConfig.save(context, GatewayConfig.read(context).copy(role = GatewayRole.GATEWAY))
+        assertEquals(own, GatewayConfig.read(context).code)
+        assertEquals("424242", GatewayConfig.read(context).pilotCode)
+        assertTrue(GatewayConfig.read(context).paired)
+        assertFalse(GatewayConfig(pilotCode = "12345").paired)
+    }
+
+    @Test fun `pilot of an older version, its single code carried over as the pilot code once`() {
+        prefs.edit().putString("role", "CLIENT").putString("code", "135790").remove("pilotCode").commit()
+        assertEquals("135790", GatewayConfig.read(context).pilotCode)
+        // A gateway or direct phone of an older version has no pilot code.
+        prefs.edit().putString("role", "GATEWAY").putString("code", "246801").remove("pilotCode").commit()
+        assertEquals("", GatewayConfig.read(context).pilotCode)
+        assertEquals("246801", GatewayConfig.read(context).code)
     }
 
     @Test fun `unknown role from another version, back to direct Bluetooth`() {

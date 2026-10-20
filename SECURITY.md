@@ -16,7 +16,9 @@ DumbyLuba is a proof of concept meant for its owner's local network.
 - **Bluetooth**: the robot's protocol is not authenticated beyond BLE pairing; anyone in range with a compatible
   client can send it commands. This is not specific to this project.
 - **Gateway** (phone or ESP32): access through a six-digit code (random challenge, HMAC-SHA256 answer), on the local
-  network, over unencrypted TCP (port 8766). The ESP32's configuration Wi-Fi access point has a password unique to each board, drawn at first
+  network, over unencrypted TCP (port 8766). The Android gateway's pairing QR code carries that code (like its
+  screen): it is only shown on the gateway phone, and a pairing link opened from outside the app is applied only
+  after an explicit confirmation. The ESP32's configuration Wi-Fi access point has a password unique to each board, drawn at first
   boot. The ESP32's status page, Wi-Fi configuration (`/wifi`) and robot release (`/robot/release`) do not require a
   code.
 - **ESP32 update over Wi-Fi** (`/ota`, plain HTTP): single-use challenge (60 s) and HMAC-SHA256 proof of the code over

@@ -67,6 +67,32 @@ class RobotBleEssaisTest {
         bench.awaitReal(5000, "save cleared") { store.read(bench.device.address) == null }
     }
 
+    @Test fun `go-to-point move from the base leaves straight to the link point before turning`() {
+        bench.sim.placeDocked(RobotBench.BASE, RobotBench.DOCKED_HEADING)
+        connectedInZone()
+        assertTrue(bench.sim.charging)
+        val traceMark = bench.mark(); val trackMark = bench.sim.track.size
+        val target = Point(6.0, 4.5)
+        bench.ble.startPointNavigation(target)
+        assertTrue(bench.state.navTest.status, bench.state.navTest.running)
+        // Base (1.5, 3.0) docking towards −x: link point at (3.0, 3.0).
+        val exit = bench.state.navTest.plannedExit
+        assertEquals(2, exit.size)
+        assertEquals(3.0, exit.last().x, 1e-6); assertEquals(3.0, exit.last().y, 1e-6)
+        assertTrue(bench.state.navTest.planned.first().distance(exit.last()) < 1e-6)
+        bench.until(60_000, "link point reached") { bench.sim.position.x >= 2.9 }
+        // Straight exit: no rotation command and the robot stays in the 10 cm corridor of the base axis.
+        val exitMoves = bench.labelsAfter(traceMark).filter { it.startsWith("move") }
+        assertTrue(exitMoves.toString(), exitMoves.isNotEmpty() && exitMoves.all { it.split(" ")[2].toDouble() == 0.0 })
+        assertTrue(bench.sim.track.drop(trackMark).all { kotlin.math.abs(it.y - 3.0) <= 0.1 })
+        assertFalse(bench.sim.charging)
+        bench.until(5 * 60_000, "destination") { !bench.state.navTest.running }
+        assertEquals(bench.dump(), "PASS", bench.state.navTest.outcome)
+        assertTrue(bench.dump(), bench.sim.position.distance(target) < 0.35)
+        assertTrue(bench.state.navTest.plannedExit.isEmpty())
+        assertTrue(bench.sim.trace.none { it.second == "blades-on" })
+    }
+
     @Test fun `go-to-point move interrupted then discarded`() {
         connectedInZone()
         bench.ble.startPointNavigation(Point(6.5, 5.0))
@@ -77,7 +103,7 @@ class RobotBleEssaisTest {
         assertNull(bench.state.pointResume)
     }
 
-    @Test fun `go-to-point move stopped by the user then refused outside the map`() {
+    @Test fun `go-to-point move stopped by the user then refused too far beyond the map`() {
         connectedInZone()
         bench.ble.startPointNavigation(Point(6.5, 5.0))
         bench.until(30_000, "moving") { bench.sim.speed > 0.05 }
@@ -88,9 +114,46 @@ class RobotBleEssaisTest {
         bench.advance(3000)
         assertTrue(bench.labelsAfter(mark).none { it.startsWith("move") })
         assertEquals(0.0, bench.sim.speed, 0.005)
-        bench.ble.startPointNavigation(Point(20.0, 20.0))
+        bench.ble.startPointNavigation(Point(60.0, 60.0))
         assertFalse(bench.state.navTest.running)
-        assertTrue(bench.state.navTest.status, bench.state.navTest.status.startsWith("Navigation refusée"))
+        assertTrue(bench.state.navTest.status, bench.state.navTest.status.startsWith("Navigation refusée") &&
+            bench.state.navTest.status.contains("hors carte"))
+    }
+
+    @Test fun `go-to-point move beyond the mapped zone reaches its destination through the dotted section`() {
+        connectedInZone()
+        // Zone 8 × 6 m: destination 2 m beyond its east edge.
+        val target = Point(10.0, 3.0)
+        bench.ble.startPointNavigation(target)
+        assertTrue(bench.state.navTest.status, bench.state.navTest.running)
+        val offMap = bench.state.navTest.plannedOffMap
+        assertEquals(1, offMap.size)
+        assertEquals(target, offMap.single().last())
+        bench.until(5 * 60_000, "destination") { !bench.state.navTest.running }
+        assertEquals(bench.dump(), "PASS", bench.state.navTest.outcome)
+        assertTrue(bench.dump(), bench.sim.position.distance(target) < 0.35)
+        bench.advance(2000)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+    }
+
+    /** 2026-10-20: self-check 25 published once the robot crosses the zone border: the move goes on to its point. */
+    @Test fun `self-check 25 beyond the mapped zone does not stop the go-to-point move`() {
+        connectedInZone()
+        val target = Point(10.0, 3.0)
+        bench.ble.startPointNavigation(target)
+        assertTrue(bench.state.navTest.status, bench.state.navTest.running)
+        bench.until(5 * 60_000, "border crossed") { bench.sim.position.x > 8.2 || !bench.state.navTest.running }
+        bench.sim.selfCheck = 25
+        bench.until(5 * 60_000, "destination") { !bench.state.navTest.running }
+        assertEquals(bench.dump(), "PASS", bench.state.navTest.outcome)
+        assertTrue(bench.dump(), bench.sim.position.distance(target) < 0.35)
+        // A new move from beyond the map starts despite the 25, back inside the zone.
+        bench.advance(2000)
+        bench.ble.startPointNavigation(Point(5.0, 3.0))
+        assertTrue(bench.state.navTest.status, bench.state.navTest.running)
+        bench.sim.selfCheck = 0
+        bench.until(5 * 60_000, "back in the zone") { !bench.state.navTest.running }
+        assertEquals(bench.dump(), "PASS", bench.state.navTest.outcome)
     }
 
     @Test fun `contact during a go-to-point move, back-off then new path`() {

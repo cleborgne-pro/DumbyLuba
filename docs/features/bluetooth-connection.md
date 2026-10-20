@@ -32,10 +32,12 @@ A search with automatic connection also runs every time the app comes back to th
 (when no robot is connected); if several robots answer, a message opens this page. In **Direct Bluetooth** role, if a
 [gateway](gateway.md) is advertised on the Wi-Fi, no automatic direct connection is made, so that the robot stays
 free for it ("Gateway detected on the Wi-Fi: no direct automatic connection…"); tapping the robot still connects
-directly.
+directly, and **Use this gateway** switches this phone to control via that gateway (1.6.0, see
+[gateway](gateway.md#from-direct-bluetooth)).
 
-End-of-search messages: "No LUBA found. Close Mammotion and restart the detection; check the Android paired
-devices.", "Detection finished: N LUBA available", or "Turn on Android Bluetooth" when Bluetooth is off.
+End-of-search messages: "No robot found: off, out of range, or connected to the Mammotion app or another phone.
+Close the Mammotion app, then search again." (with the remembered robot named: "Luba-VS… does not advertise: …",
+1.8.0), "Detection finished: N LUBA available", or "Turn on Android Bluetooth" when Bluetooth is off.
 
 Permissions requested: Bluetooth (scan and connect) on Android 12+, precise location for scanning on Android 8
 to 11. If refused: "Allow Bluetooth in the Android settings (Android 8 to 11: location turned on)."
@@ -47,7 +49,7 @@ Bluetooth"), **Robot**, **Bluetooth identifier**, **Signal · MTU**, **Battery**
 
 ### Depending on the phone's role
 
-- **Control via the gateway**: search and connection go through the gateway ("Search and connection through the
+- **Pilot through a paired gateway** (**Go through the gateway** on): search and connection go through the gateway ("Search and connection through the
   gateway (Service → Wi-Fi gateway)").
 - **Gateway on the robot**: tapping the robot hands it to the gateway service, which holds the link and reconnects it
   on its own. A **Gateway link** group shows the robot held and a **Release the robot** button, which hands the robot
@@ -100,7 +102,7 @@ physical stop within reach."), group **Bluetooth link**:
 | Report renewal | 8 s (fixed) |
 | Requested reports | "1 s, 200 ms during routes and tests (actual rate measured)"; see above for the 200 ms cases |
 
-Group **Test limits**: **Minimum battery** 30 % (fixed). The page also holds the wireless debugging group of the
+Group **Test limits**: **Minimum battery** 30 % (fixed). Once the adb permission is granted (development), the page also holds the wireless debugging group of the
 [Android gateway](gateway.md#android-gateway-settings).
 
 ## Limitations

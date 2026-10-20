@@ -14,6 +14,8 @@ Mammotion-HA and Mammo are inspected references; none of their files are incorpo
 - Auth v2 and client constants: PyMammotion 0.10.8 distributed on PyPI, under the upstream project's license (GPL-3.0), port faithful to `http.py`. No personal credentials are embedded. Account reading and cloud action encodings: PyMammotion 0.10.10 and Mammotion-HA 0.6.17 ([details](docs/MAMMOTION_ACCOUNT.md)).
 
 - LocationTech JTS Core 1.20.0: https://github.com/locationtech/jts — EPL 2.0 / EDL 1.0. Metric buffers and coverage intersections.
+- ZXing core 3.5.3: https://github.com/zxing/zxing — Apache 2.0. Gateway pairing QR code: drawn on the gateway phone, decoded on the pilot.
+- AndroidX CameraX 1.4.2 (`camera-camera2`, `camera-lifecycle`, `camera-view`): Apache 2.0. Camera preview of the pilot's QR code reader.
 - Protocol Buffers (`protobuf-java` and `protoc` 3.25.5): https://github.com/protocolbuffers/protobuf — BSD 3-Clause. Code generated from the PyMammotion schemas.
 
 ## ESP32 firmware and enclosure viewer

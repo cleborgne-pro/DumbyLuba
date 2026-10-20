@@ -6,8 +6,8 @@ obstacles and signal surveys. Every mowing, every route and every survey starts 
 | | |
 |---|---|
 | **Access** | Home → **MY MAP** tile, robot photo or **Start mowing** (**Follow mowing** while a task runs); Me → account map |
-| **Status** | Implemented: BLE and cloud reading, local cache, local corrections (0.60.0) |
-| **Code** | `map/MapScreen.kt`, `MapSettingsSheet.kt`, `MapLayerBar.kt`, `MapDisplay.kt`, `MapFx.kt`, `MapFollow.kt`, `MapCompass.kt`, `MapOverlayLayout.kt`, `MapCorrections.kt`, `MapCorrectionEditor.kt`, `MapCorrectionTools.kt`, `MapCorrectionStore.kt`, `MapTransfer.kt`, `MapCache.kt`, `StationReader.kt`, `LastKnownPosition.kt`, `MapObstacles.kt`, `MapLive.kt`, `MapRobot.kt`, `simulation/BaseStore.kt` |
+| **Status** | Implemented: BLE and cloud reading, local cache, local corrections (0.60.0), DumbyLuba zones and passages recorded by driving (1.4.0) |
+| **Code** | `map/MapScreen.kt`, `MapSettingsSheet.kt`, `MapLayerBar.kt`, `MapDisplay.kt`, `MapFx.kt`, `MapFollow.kt`, `MapCompass.kt`, `MapOverlayLayout.kt`, `MapCorrections.kt`, `MapCorrectionEditor.kt`, `MapCorrectionTools.kt`, `MapCorrectionStore.kt`, `DrivenRecording.kt`, `MapTransfer.kt`, `MapCache.kt`, `StationReader.kt`, `LastKnownPosition.kt`, `MapObstacles.kt`, `MapLive.kt`, `MapRobot.kt`, `simulation/BaseStore.kt` |
 | **Reference** | [Map reading and test procedure](../MAP_PREVIEW_TEST.md) |
 
 <p align="center">
@@ -66,8 +66,8 @@ control, test, simulation). The home screen offers the same reading under the **
     Mammotion account without Bluetooth;
   - **Recenter the map** (also stops following the robot);
   - **Follow the robot** / **Stop following the robot** ([below](#following-the-robot));
-  - **Move to a point** ([station and moves](station-and-moves.md#move-to-a-point)); enabled with a connected, idle
-    robot and a complete map;
+  - **Move to a point** ([station and moves](station-and-moves.md#move-to-a-point)), inside the zones or beyond them;
+    enabled with a connected, idle robot and a complete map;
   - **Show the signal layers** / **Hide the layers**: shows or collapses the layer bar and the heatmap (green when a
     heatmap is shown).
   - always visible: the bottom panels (protection alert, layer bar, mowing resume, zone selection, action bar…)
@@ -127,7 +127,7 @@ the displayed source and the map contents ("7 zones · 26 no-go zones").
 | *Map background* | three illustrated tiles: **Grid** (default, "Metric grid tied to the map: one line per meter, stronger every 5 m"), **Dots** ("Discreet pattern, fixed on screen"), **Plain** ("Neutral background, no grid") |
 | *On the map* | switches **Zone names** (on by default), **Scale** (on), **Planned route animation** (comet running along the route in mowing order, on), **Encountered obstacles**, **Difficulties** (same toggles as the layer bar) |
 | *Signal heatmap* | **Show the heatmap** (**Show the simulated heatmap** during a simulated survey) and chips for the measured layers (Wi-Fi, RTK, BLE…), or "No signal survey on this map: open the history to show one."; **Layer bar** (shown or collapsed, like the **Layers** button), **Heatmap history**, **Flat-ground reference** (tilt and orientation of the gateway phone, for the terrain) |
-| *Local corrections* | **Correct the map**: number of active corrections ("2 active"); opens the editor ([below](#correcting-the-map-local-corrections)) |
+| *Local corrections* | **Correct the map**: number of active corrections ("2 active"); opens the editor ([below](#correcting-the-map-local-corrections)). **Record by driving**: opens manual control to record a DumbyLuba zone, passage or no-go zone ([below](#mammotion-zones-and-dumbyluba-zones)) |
 | *Map source* | **Read the robot map**, **Mammotion account map**, **Try the demo** ([above](#loading-a-map)) |
 | *Legend* | symbols drawn as on the map, by family: *Garden*, *Routes*, *Obstacles*, *Robot* |
 
@@ -136,21 +136,24 @@ the displayed source and the map contents ("7 zones · 26 no-go zones").
 | Item | Rendering |
 |---|---|
 | Mowing zone | pale green fill with a green outline (inspired by the Mammotion app); slightly stronger when selected, black badge = mowing order |
+| DumbyLuba zone | same fill, **dashed** green outline and "· DL" after its name: recorded by driving, exists only on this phone ([below](#mammotion-zones-and-dumbyluba-zones)) |
+| Beyond the Mammotion boundaries | **orange hatching** with a thin orange outline: mowing surface added on the phone (DumbyLuba zones, enlargements) |
 | No-go zone | ochre fill, thin darker outline |
 | Map obstacle | grey, outlined |
-| Passage | grey stripe dotted with white (path never mowed) |
+| Passage | grey stripe dotted with white (path never mowed); **green** stripe for a DumbyLuba passage |
 | Passes to mow | white lines, translucent white band at the cutting width |
 | Borders to mow | white lines on a lighter band at the cutting width: the margin kept along the boundaries and around no-go zones reads as a light edging |
 | Charging station | to-scale drawing and docking corridor; round badge with a lightning bolt when the station is smaller than 20 dp on screen |
 | Base safety zone | grey disc edged in white: the disc the planner excludes from every route (entry and exit through the front corridor only), shown once the docking axis is known |
 | Already mowed | dark green stripes at the cutting width and the robot's green trail |
 | Move with blades stopped | blue dots on a light edging: returns, links, manual accesses, move to a point (blue target) |
+| Move beyond the mapped zones | orange dots on a white edging over the route: section of a [move to a point](station-and-moves.md#beyond-the-mapped-zones) outside the zones, without border check |
 | Start and resume | purple "Start" marker (first cutting point) or "Resume" marker ([resume further on](mowing-resume.md#resume)) |
 | Saved obstacle | orange disc circled in white, margin as a fill, turning envelope dotted |
 | Presumed obstacle | dotted red circle on a light fill |
 | Bumper contact | red badge circled in white, white dot if a photo exists |
 | Difficulties | 1 m cells from yellow (rare) to red (frequent) |
-| Locally corrected | pencil ✎ after the zone name; in the editor, original Mammotion outline in grey dots |
+| Locally corrected | pencil ✎ after the name of a corrected Mammotion zone; in the editor, original Mammotion outline in grey dots |
 | Robot | LUBA silhouette oriented along its heading (kept readable when zoomed out): pulsing green waves for a fresh position ("Live position"), grey ring for the last FIX ("Last known position") |
 
 Lines, dots and badges keep the same thickness on screen at any zoom (before 0.56.0 they grew with it for obstacles
@@ -203,7 +206,35 @@ Mammotion map. A mowing resume saved before a correction is no longer possible (
 to the Mammotion account map (shapes targeted by their identifier), not to the demo nor to an already prepared
 simulation. Saving is refused during a local route ("Corrections: stop the current route first").
 
-File: `map-corrections.json` (app folder, versioned format, atomic write, at most 500 corrections).
+File: `map-corrections.json` (app folder, versioned format, atomic write, at most 500 corrections; types `patch`,
+`offset`, `nogo`, and since 1.4.0 `zone` and `passage`, which an older version ignores).
+
+## Mammotion zones and DumbyLuba zones
+
+The app works on **a single map**: the Mammotion map read from the robot, completed by the local corrections. Since
+1.4.0, these corrections can also add **DumbyLuba zones** and **DumbyLuba passages**, recorded by driving the robot like
+in the Mammotion app ([recording by driving](manual-control.md#recording-a-zone-a-passage-or-a-no-go-zone-by-driving)).
+
+| | Mammotion zone or passage | DumbyLuba zone or passage |
+|---|---|---|
+| Recorded by | the Mammotion app, in the robot | DumbyLuba, on this phone only (`map-corrections.json`) |
+| Seen by the robot and the Mammotion app | yes | **no** |
+| Zone choice, route preview, simulation, local mowing, resume, borders, start point | yes | **yes, the same way** |
+| Moves (return to base, move to a point, links between zones, surveys) | yes, through the zones and passages | **yes, the same way**: a DumbyLuba passage connects zones like a Mammotion one |
+| On the map | solid outline, grey passage | **dashed** outline, "· DL" after the name, **green** passage |
+| Edited, disabled, deleted | outline corrections only ([above](#correcting-the-map-local-corrections)) | tap it in the editor to edit its outline; disabled or deleted in ☰ **Corrections** like any correction (deleting it also deletes its edits) |
+
+**Surface beyond the Mammotion boundaries.** Everything the corrections add outside the zones recorded by Mammotion
+(DumbyLuba zones, enlargements) is **hatched in orange** on every map, and recalled in the result of a recording and in
+the task settings ("Includes 34.0 m² beyond the Mammotion boundaries…"). The robot does not know this surface: only
+DumbyLuba's checks (safe surface, chassis footprint, no-go zones, tracking) keep the robot inside it, and it is mowed
+under your responsibility. A Mammotion task started from the official app ignores it. The docking stays the official
+one, from the approach point in front of the base, which remains on the Mammotion map. That the firmware accepts
+motion and blades in a zone entirely outside its map still has to be checked on each robot (blades stopped first).
+
+Corrections are not tied to a robot: a DumbyLuba zone applies to any complete map in the same frame. They are reapplied
+after a new reading of the Mammotion map; a zone re-recorded on the Mammotion side that now overlaps a DumbyLuba zone
+is not cut automatically (disable or edit the DumbyLuba zone).
 
 ## Base and manual accesses
 

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Landscape
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Gamepad
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.TextFields
@@ -114,11 +115,14 @@ fun MapSettingsSheet(
     corrections: Int = 0,
     correctionsEnabled: Boolean = false,
     onCorrections: () -> Unit = {},
+    recordEnabled: Boolean = false,
+    onRecord: () -> Unit = {},
 ) {
     val colors = MammotionColors
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.Background, scrimColor = Color.Black.copy(alpha = 0.25f)) {
         MapSettingsContent(source, summary, heat, mapLoading, fetchEnabled, accountEnabled, demoEnabled, onSignal, onHeatVisible,
-            onLayerBar, onFetch, onAccount, onToggleDemo, onHistory, onCalibration, corrections, correctionsEnabled, onCorrections)
+            onLayerBar, onFetch, onAccount, onToggleDemo, onHistory, onCalibration, corrections, correctionsEnabled, onCorrections,
+            recordEnabled, onRecord)
     }
 }
 
@@ -143,6 +147,8 @@ fun MapSettingsContent(
     corrections: Int = 0,
     correctionsEnabled: Boolean = false,
     onCorrections: () -> Unit = {},
+    recordEnabled: Boolean = false,
+    onRecord: () -> Unit = {},
 ) {
     val colors = MammotionColors
     val display = MapDisplaySettings.current
@@ -197,6 +203,10 @@ fun MapSettingsContent(
                 subtitle = tr("Zones, no-go zones and obstacles corrected on the phone, without touching the Mammotion map", "Zones, no-go et obstacles corrigés sur le téléphone, sans toucher à la carte Mammotion"),
                 value = if (corrections > 0) tr("$corrections active", "$corrections active${if (corrections > 1) "s" else ""}") else null,
                 enabled = correctionsEnabled, onClick = onCorrections)
+            NavRow(tr("Record by driving", "Enregistrer en pilotant"), icon = Icons.Rounded.Gamepad,
+                subtitle = tr("New DumbyLuba zone, passage or no-go zone, driven with the joystick like in the Mammotion app; kept on this phone only",
+                    "Nouvelle zone DumbyLuba, passage ou no-go, parcourus au joystick comme dans l'app Mammotion ; gardés sur ce téléphone uniquement"),
+                enabled = recordEnabled, onClick = onRecord)
         }
 
         SettingsGroup(tr("Map source", "Source de la carte")) {
@@ -310,6 +320,12 @@ fun MapLegend() {
             LegendEntry(tr("Passage", "Passage"), tr("Links two zones, never mowed", "Relie deux zones, jamais tondu")) { c -> legendPassage(c) },
             LegendEntry(tr("Charging station", "Station de charge"), tr("Lightning badge when the station is small on screen", "Pastille éclair quand la station est petite à l'écran")) { c -> legendStation(c) },
             LegendEntry(tr("Base safety zone", "Zone de sécurité de la base"), tr("No route goes through it; entry and exit through the front corridor", "Aucun trajet n'y passe ; entrée et sortie par le couloir avant")) { c -> legendBaseSafety(c) },
+            LegendEntry(tr("DumbyLuba zone · DL", "Zone DumbyLuba · DL"), tr("Dashed outline: recorded by driving, exists only on this phone (not in the Mammotion app); mowed like the others",
+                "Contour en tirets : enregistrée en pilotant, n'existe que sur ce téléphone (pas dans l'app Mammotion) ; tondue comme les autres")) { c -> legendDumbyLubaZone(c) },
+            LegendEntry(tr("DumbyLuba passage", "Passage DumbyLuba"), tr("Green band: recorded by driving, links zones like a Mammotion passage",
+                "Bande verte : enregistré en pilotant, relie les zones comme un passage Mammotion")) { c -> legendPassage(c, dumbyLuba = true) },
+            LegendEntry(tr("Beyond the Mammotion boundaries", "Hors des contours Mammotion"), tr("Orange hatching: surface added on the phone (DumbyLuba zones, enlargements), mowed under your responsibility",
+                "Hachures orange : surface ajoutée sur le téléphone (zones DumbyLuba, agrandissements), tondue sous votre responsabilité")) { c -> legendBeyond(c) },
             LegendEntry(tr("Corrected locally ✎", "Corrigé localement ✎"), tr("Boundary edited on the phone; the Mammotion map stays unchanged", "Contour retouché sur le téléphone ; la carte Mammotion reste inchangée")) { c -> legendCorrected(c) },
         ),
         tr("Routes", "Trajets") to listOf(
@@ -396,10 +412,28 @@ private fun DrawScope.legendMapObstacle(c: LubaColors) {
     drawRoundRect(c.ObstacleStroke, r.topLeft, r.size, CornerRadius(3 * u()), style = Stroke(1.25f * u()))
 }
 
-private fun DrawScope.legendPassage(c: LubaColors) {
+/** DumbyLuba zone: filled zone with a dashed outline. */
+private fun DrawScope.legendDumbyLubaZone(c: LubaColors) {
+    val inset = 4 * u()
+    drawRoundRect(c.ZoneFill, Offset(inset, inset), Size(size.width - 2 * inset, size.height - 2 * inset), CornerRadius(5 * u()))
+    drawRoundRect(c.ZoneStroke, Offset(inset, inset), Size(size.width - 2 * inset, size.height - 2 * inset), CornerRadius(5 * u()),
+        style = Stroke(2f * u(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * u(), 4f * u()))))
+}
+
+/** Beyond the Mammotion boundaries: orange hatching over the zone. */
+private fun DrawScope.legendBeyond(c: LubaColors) {
+    lawnRect(c, false)
+    val ring = listOf(Point(size.width * 0.45, size.height * 0.2), Point(size.width * 0.92, size.height * 0.2),
+        Point(size.width * 0.92, size.height * 0.8), Point(size.width * 0.45, size.height * 0.8))
+    drawBeyondMammotion(BeyondArea(listOf(ring), 1.0), { pts, _ ->
+        Path().apply { pts.forEachIndexed { i, p -> if (i == 0) moveTo(p.x.toFloat(), p.y.toFloat()) else lineTo(p.x.toFloat(), p.y.toFloat()) }; close() }
+    }, u(), c)
+}
+
+private fun DrawScope.legendPassage(c: LubaColors, dumbyLuba: Boolean = false) {
     val y = size.height / 2
     val dark = c.Background.luminance() < 0.5f
-    drawLine((if (dark) Color.White else Color(0xFF6E767E)).copy(alpha = if (dark) 0.22f else 0.35f),
+    drawLine(if (dumbyLuba) c.ZoneStroke.copy(alpha = 0.45f) else (if (dark) Color.White else Color(0xFF6E767E)).copy(alpha = if (dark) 0.22f else 0.35f),
         Offset(6 * u(), y), Offset(size.width - 6 * u(), y), 6 * u(), StrokeCap.Round)
     drawLine(Color.White.copy(alpha = 0.95f), Offset(6 * u(), y), Offset(size.width - 6 * u(), y), 1.5f * u(), StrokeCap.Round,
         PathEffect.dashPathEffect(floatArrayOf(4 * u(), 3 * u())))

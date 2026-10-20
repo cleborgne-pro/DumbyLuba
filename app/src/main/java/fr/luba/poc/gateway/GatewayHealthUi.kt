@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.KeyValueRow
 import fr.luba.poc.ui.components.NoteTone
 import fr.luba.poc.ui.components.SettingsGroup
@@ -64,8 +65,14 @@ fun rememberLocalGatewayHealth(): GatewayHealth {
 
 /** Gateway health details (Service → Gateway page): a titled group of values, warnings below. */
 @Composable
-fun GatewayHealthDetails(health: GatewayHealth?, title: String = tr("Gateway health", "Santé de la passerelle"), reach: GatewayReach? = null) {
+fun GatewayHealthDetails(health: GatewayHealth?, title: String = tr("Gateway health", "Santé de la passerelle"), reach: GatewayReach? = null,
+    version: String? = null) {
     SettingsGroup(title) {
+        version?.let { gateway ->
+            KeyValueRow(tr("Version", "Version"), tr("gateway $gateway · this phone ${fr.luba.poc.BuildConfig.VERSION_NAME}",
+                "passerelle $gateway · ce téléphone ${fr.luba.poc.BuildConfig.VERSION_NAME}"))
+            versionNote(gateway)?.let { InfoNote(it) }
+        }
         if (health == null) {
             StatusNote(gatewayReachText(reach), if (reach?.reachable == false) NoteTone.WARNING else NoteTone.INFO)
             return@SettingsGroup
@@ -102,3 +109,11 @@ fun gatewayReachText(reach: GatewayReach?): String = when {
     reach.reachable -> tr("Gateway reachable; health state not received yet.", "Passerelle joignable ; état de santé pas encore reçu.")
     else -> tr("Gateway unreachable", "Passerelle injoignable") + reach.detail.takeIf { it.isNotBlank() }?.let { tr(": $it", " : $it") }.orEmpty()
 }
+
+/**
+ * Different app versions on the two phones: they still work together (same protocol), but fixes on one side only.
+ * Null when both run the same version.
+ */
+fun versionNote(gateway: String, pilot: String = fr.luba.poc.BuildConfig.VERSION_NAME): String? = if (gateway == pilot) null else tr(
+    "Different app versions ($gateway on the gateway, $pilot here): compatible, but install the same version on both phones to get the same fixes.",
+    "Versions différentes ($gateway sur la passerelle, $pilot ici) : compatibles, mais installez la même version sur les deux téléphones pour bénéficier des mêmes corrections.")

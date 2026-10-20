@@ -7,7 +7,7 @@ the same route engine as mowing.
 |---|---|
 | **Access** | Map → side bar → **Charging station** or **Move to a point** |
 | **Status** | Implemented; leaving the base and returning tried on the robot, docking via the official Mammotion return |
-| **Code** | `map/MapScreen.kt` (`StationDialog`, `InterruptedPointPanel`), `map/CloudStationDialog.kt`, `simulation/DockExit.kt`, `NativeDocking.kt`, `PointResume.kt`, `planning/RoutePlanning.kt` (`station`, `point`), `ble/RobotBle.kt` (`baseAction`, `startPointNavigation`) |
+| **Code** | `map/MapScreen.kt` (`StationDialog`, `PointMovePanel`, `InterruptedPointPanel`), `map/CloudStationDialog.kt`, `simulation/DockExit.kt`, `simulation/BaseDeparture.kt`, `NativeDocking.kt`, `PointResume.kt`, `planning/RoutePlanning.kt` (`station`, `point`), `simulation/PointPlanner.kt`, `ble/RobotBle.kt` (`baseAction`, `startPointNavigation`) |
 | **Reference** | [Station commands verified in PyMammotion](../STATION_BLE.md) |
 
 <p align="center">
@@ -52,17 +52,19 @@ With the [Mammotion account](mammotion-account.md) connected and no Bluetooth li
 ## Move to a point
 
 1. **Move to a point** (side bar; robot connected over Bluetooth or gateway and idle, complete map, not on the demo
-   or account map), then tap the destination ("Tap the map to choose the destination."). The panel computes the path
-   ("Computing the path…") and shows "Safe path: 12.3 m · blades stopped" with a blue target, or the reason of the
-   refusal. Another tap changes the destination.
+   or account map), then tap the destination ("Tap the map to choose the destination, inside or beyond the zones.").
+   The panel computes the path ("Computing the path…") and shows "Safe path: 12.3 m · blades stopped" with a blue
+   target, or the reason of the refusal. Another tap changes the destination.
 2. Tick **I am supervising the move, area clear and stop within reach**, set the **Travel speed** (10 to 100 %, the
    same setting as during mowing), **Go to the point**.
 
+- Robot on its base: it first leaves in a straight line, slowly, to the link point (see
+  [below](#leaving-the-base-first)).
 - Blades always stopped; at most 600 s; destination within a 200 m radius; battery above 30 %; fresh state and
   position and a known heading. Stop if no progress towards the point for 15 s.
-- The robot and the destination must lie in a mapped zone: "Place the robot inside a mapped zone", "Choose a point
-  inside a mapped zone", "Destination too close to a limit or an exclusion", "No safe path to this point (zones not
-  connected by a recorded passage?)", "The robot is already at the requested point".
+- Refusals: "Destination inside a no-go zone or an obstacle", "Destination too close to a no-go zone or an obstacle",
+  "No safe path to this point (zones not connected by a recorded passage?)", "The robot is already at the requested
+  point", and beyond the zones the limits below.
 - The path respects zones, passages and accesses, avoids no-go zones and obstacles, and keeps the move distance from
   borders.
 - A bumper contact triggers a back-off then a new path (at most 3 recoveries and 3 repairs).
@@ -74,6 +76,53 @@ With the [Mammotion account](mammotion-account.md) connected and no Bluetooth li
   the path from the robot's actual position to the same destination, with the same checks; **Discard** deletes the
   save. "Stay nearby during the resume." appears while the robot self-stop is not demonstrated. Arrival deletes it too, as does starting a coverage task (mowing, survey,
   border).
+
+### Leaving the base first
+
+A move started with the robot on its base (charging contact) or still inside the base safety zone never pivots near
+the station (version 1.5.1):
+
+- the robot first leaves in a **slow straight line** to the link point in front of the base, exactly like a mowing
+  route leaves it ([DockExit], 10 cm corridor, heading checked at rest, at most 60 s, release of the charging contact
+  confirmed; run by the gateway when it is on the robot), then turns and follows the path computed **from the link
+  point**;
+- the preview draws that exit before the path and the panel recalls it: "Robot on its base: it first leaves in a
+  straight line, slowly, to the link point (1.5 m), then follows the path.";
+- every path, from the base or not, goes around the base safety zone; a destination inside it is refused
+  ("Destination inside the base safety zone: use Recharge to return to the base");
+- refusals before any movement: "Charging observed far from the configured base", "Unknown base axis: observe the
+  robot while charging", "Robot next to the base, outside its exit corridor: put it back on the base or move it away
+  with the joystick";
+- the same exit precedes the [navigation test](tests-and-diagnostics.md#navigation-test) and the cutting test while
+  moving; a new path computed from inside the safety zone (after a contact) starts with it too.
+
+### Beyond the mapped zones
+
+The robot and the destination may lie outside the mapped zones (version 1.5.0), for example to reach an area not yet
+recorded before [recording it by driving](manual-control.md#recording-a-zone-a-passage-or-a-no-go-zone-by-driving),
+or a point along a boundary that the 50 cm reserve kept out of reach.
+
+- The path uses the zones and passages as usual; the part outside them is a **straight section** from the nearest
+  point of the navigable surface to the destination (or from the robot to that surface, or straight from the robot to
+  the destination when both are outside, whichever is shortest without a map). It is drawn in **orange dots** over the
+  route, during the preview and the move.
+- The panel shows "Path: 18.4 m including 6.2 m beyond the map · blades stopped" and a warning: the section is driven
+  without border check, only the no-go zones and the saved obstacles are avoided; a wall, a pool or a slope are not
+  known there. A second box, **I have checked that the dotted section is clear and safe**, is required (unticked on
+  every new destination).
+- At the start, the **Move beyond the mapped zones** notification ([notifications](notifications.md)) recalls the
+  length without a map.
+- Limits: at most 30 m beyond the map per move ("Too far beyond the mapped zones: 42.0 m without a map (maximum
+  30 m)"); the axis of the section stays at least half a chassis width + 5 cm from the no-go zones and from the saved
+  obstacles with their margin ("The section beyond the map passes too close to a no-go zone or an obstacle"); a
+  destination inside one of them is refused.
+- The section opens a ±0.9 m corridor that joins the surface of the planner: the footprint checks, the tracking from
+  the Fold or by the gateway, the recoveries and the new path after a bumper contact work there as inside the zones.
+  Blades always stopped, same STOP, duration, radius and battery limits.
+- Self-check 25 published beyond the map does not stop the move nor prevent starting one from there (version 1.11.0,
+  [safety](safety.md#self-check-25-beyond-the-mapped-zones-version-1110)).
+- Robot stopped beyond the map with self-check 25 or after a contact: the back-off follows the trace just driven there
+  (corridor of its last 3 m), see [collision lock](safety.md#collision-lock-self-check-25).
 
 ## Project rule on native commands
 

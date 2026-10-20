@@ -110,6 +110,10 @@ blades off by default, displayed on the map with its trail.
 - Stop if deviation > 30 cm, no progress for 15 s or blocked for 3 s; fresh state, battery, bumper and blades
   checked continuously.
 - Speeds are in raw units; the observed movement and the stopping delay are measured for calibration.
+- Started with the robot on its base (or inside the base safety zone): the robot first leaves in a slow straight line
+  to the link point in front of the base and the route is computed around that point, as for a
+  [move to a point](station-and-moves.md#leaving-the-base-first). The obstacle bypass and the frontal border test are
+  refused on the base ("Robot on its base: leave the station first").
 
 [Lightweight navigation on the map](../MAP_NAVIGATION_TEST.md) · [former random tests: guards and calibration](../NAV_RANDOM_TEST.md).
 

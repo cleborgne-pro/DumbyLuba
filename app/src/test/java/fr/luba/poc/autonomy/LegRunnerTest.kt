@@ -125,6 +125,21 @@ class LegRunnerTest {
             env.elapsedMs - latchedAt in fr.luba.poc.protocol.CollisionLatch.CONTACT_GRACE_MS..fr.luba.poc.protocol.CollisionLatch.CONTACT_GRACE_MS + 1500)
     }
 
+    /** 2026-10-20: move to a point beyond the map, 25 published on the section beyond the map: not a contact. */
+    @Test fun collisionLatchOnTheSectionBeyondTheMapIsIgnoredForAMoveBladesOff() {
+        val env = robotAtStart()
+        env.onTick = { if (it.elapsedMs > 15_000 && it.selfCheck == 0L) it.selfCheck = 25L }
+        val beyond = listOf(listOf(Point(-1.0, 0.0), Point(7.0, 0.0), Point(7.0, 0.5), Point(-1.0, 0.5)))
+        val result = run(env, spec(cutting = false).copy(offMapSections = beyond))
+        assertEquals(result.text, LegOutcome.DONE, result.outcome)
+        assertTrue(env.sent.none { it == "ROUTE_LATCH_STOP" })
+        // Off its sections, or with the bumper pressed, 25 stops the move as before.
+        val elsewhere = robotAtStart()
+        elsewhere.onTick = { if (it.elapsedMs > 15_000 && it.selfCheck == 0L) it.selfCheck = 25L }
+        val far = listOf(listOf(Point(20.0, 20.0), Point(25.0, 20.0)))
+        assertEquals(LegOutcome.FAILED, run(elsewhere, spec(cutting = false).copy(offMapSections = far)).outcome)
+    }
+
     @Test fun fleetingProtectionStillStopsTheRunForThePause() {
         val env = robotAtStart()
         var latchedAt = 0L
@@ -173,7 +188,7 @@ class LegRunnerTest {
         assertEquals(-0.03, decoded.slideField!!.velocity(Point(3.5, 0.5))!!.y, 1e-6)
         // Older pilot: neither base zone nor slides.
         assertNull(LegSpec.decode(spec().encode()).slideField)
-        val old = spec().encode().let { it.copyOf(it.size - 1) }   // without the final "slides" byte
+        val old = spec().encode().let { it.copyOf(it.size - 2) }   // without the final "slides" and "beyond the map" bytes
         assertNull(LegSpec.decode(old).slideField)
     }
 

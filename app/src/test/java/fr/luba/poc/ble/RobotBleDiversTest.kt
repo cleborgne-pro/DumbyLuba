@@ -256,7 +256,7 @@ class RobotBleDiversTest {
             }
         }.apply { isDaemon = true }.start()
         try {
-            fr.luba.poc.gateway.GatewayConfig.save(bench.app, fr.luba.poc.gateway.GatewayConfig(fr.luba.poc.gateway.GatewayRole.CLIENT, "127.0.0.1", server.localPort, code))
+            fr.luba.poc.gateway.GatewayConfig.save(bench.app, fr.luba.poc.gateway.GatewayConfig(fr.luba.poc.gateway.GatewayRole.CLIENT, "127.0.0.1", server.localPort, pilotCode = code))
             bench.ble.scan()
             bench.awaitReal(10_000, "end of scan") { !bench.state.scanning }
             assertEquals("Passerelle jointe, mais recherche Bluetooth impossible : Bluetooth désactivé sur la passerelle", bench.state.status)
@@ -273,7 +273,7 @@ class RobotBleDiversTest {
         bench.ble.scan()
         bench.advance(16_000)
         assertFalse(bench.state.scanning)
-        assertTrue(bench.state.status, bench.state.status.contains("LUBA") || bench.state.status.contains("Scan"))
+        assertTrue(bench.state.status, bench.state.status.contains("LUBA") || bench.state.status.contains("Scan") || bench.state.status.startsWith("Aucun robot trouvé"))
         bench.ble.background()
     }
 

@@ -22,6 +22,12 @@ another language is chosen in Me → Language ([language](#language)).
 
 ### Device (home)
 
+On a fresh installation the [first-launch assistant](getting-started.md#first-launch-assistant) comes first; below the
+map, the [Before the first mowing](getting-started.md#before-the-first-mowing) card lists the steps still to do.
+
+On the phone mounted on the robot (**Gateway on the robot** role), this tab shows the
+[gateway home screen](gateway.md#gateway-phone-home-screen) instead: pairing QR code and code, state, phone checks.
+
 - **Header**: **Notifications** bell, which opens the [notifications panel](notifications.md#notifications-panel)
   (red badge for notifications not seen yet, or when notifications are blocked); link status pill in the center
   ("Connected over Bluetooth", "Connected via the gateway", "Connecting…", "Gateway OK · robot unreachable",
@@ -61,7 +67,7 @@ page (back arrow, bottom bar hidden).
 
 | Group | Entries |
 |---|---|
-| **Connection** | [Bluetooth connection](bluetooth-connection.md) · [Wi-Fi gateway](gateway.md) · [Home server](home-server.md) |
+| **Connection** | [Bluetooth connection](bluetooth-connection.md) · [Check the setup](getting-started.md#check-the-setup) · [Wi-Fi gateway](gateway.md) · [Home server](home-server.md) |
 | **Robot** | [Manual control](manual-control.md) · [Cutting height](tests-and-diagnostics.md#cutting-height-and-blade-test) · [Camera](camera.md) |
 | **Garden and history** | [Task history](mowing-history.md) · [Obstacles](obstacles.md) (list, difficulties, photos, [simulation](obstacles.md#obstacle-simulation)) · [Signal surveys](signal-surveys-and-terrain.md) · [Rain and weather](rain-and-weather.md) |
 | **Supervised tests** | [Command cutoff](safety.md#command-cutoff-motor-watchdog) · [Navigation test](tests-and-diagnostics.md#navigation-test) · [Border following](tests-and-diagnostics.md#border-following) · [Obstacle tests](obstacles.md) · [Blade test](tests-and-diagnostics.md#cutting-height-and-blade-test) · [Trial mowing (painted zone)](tests-and-diagnostics.md#trial-mowing-painted-zone) |

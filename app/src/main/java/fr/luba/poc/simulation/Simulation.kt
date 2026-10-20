@@ -24,47 +24,11 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
         private val surfaceCache = object : LinkedHashMap<Any,Surfaces>(8,0.75f,true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Any,Surfaces>?) = size > 6
         }
-        fun pointPlan(map: RobotMap, start: Point, target: Point, obstacles: List<fr.luba.poc.obstacles.LocalObstacle>): fr.luba.poc.diagnostics.MapNavPlan {
-            require(map.complete && !map.source.contains("DÉMONSTRATION",true)) { tr("A complete real map is required", "Carte réelle complète obligatoire") }
-            require(listOf(start.x,start.y,target.x,target.y).all { it.isFinite() }) { tr("Invalid position", "Position invalide") }
-            require(start.distance(target)>fr.luba.poc.diagnostics.MapNavFollower.ARRIVAL_M) { tr("The robot is already at the requested point", "Le robot est déjà au point demandé") }
-            val zones=map.shapes.filter { it.kind==ShapeKind.ZONE && it.points.size>=3 }
-            require(zones.any { Geometry.inside(start,it.points) }) { tr("Place the robot inside a mapped zone", "Placer le robot dans une zone cartographiée") }
-            require(zones.any { Geometry.inside(target,it.points) }) { tr("Choose a point inside a mapped zone", "Choisir un point dans une zone cartographiée") }
-            val passages=map.shapes.filter { it.kind==ShapeKind.PASSAGE && it.points.size>=2 }
-            // Same configuration as mowing transits: recorded outline (outer side of the chassis),
-            // chassis margin, exclusions and local obstacles; the LUBA 2 footprint is checked everywhere.
-            val margin=RobotEnvelope.LUBA2.halfWidthM+0.05
-            val holes=map.shapes.filter { it.kind==ShapeKind.NO_GO || it.kind==ShapeKind.OBSTACLE }.map { it.points }.filter { it.size>=3 } +
-                obstacles.map { obstacle ->
-                    val r=obstacle.exclusionRadiusM/cos(Math.PI/64)
-                    (0 until 64).map { i -> Point(obstacle.x+r*cos(i*2*Math.PI/64),obstacle.y+r*sin(i*2*Math.PI/64)) }
-                }
-            val planner=fr.luba.poc.planning.RoutePlanning.navigation(map.copy(shapes=zones+passages),margin,holes,recordedBoundary=true)
-            require(planner.safe(start,start)) { tr("Robot outside the navigable surface (too close to a limit or an exclusion): move it away with the joystick",
-                "Robot hors de la surface navigable (trop près d’une limite ou d’une exclusion) : l’éloigner au joystick") }
-            require(planner.safe(target,target)) { tr("Destination too close to a limit or an exclusion", "Destination trop proche d’une limite ou d’une exclusion") }
-            val points=try { planner.between(start,target) }
-                catch (e: IllegalArgumentException) { throw IllegalArgumentException(tr("No safe path to this point (zones not connected by a recorded passage?)",
-                    "Aucun chemin sûr jusqu’à ce point (zones non reliées par un passage enregistré ?)"), e) }
-            planner.requirePath(points)
-            // Single outline for the tracking checks: union of the zones and passage corridors
-            // (same corridors as the planner), holes and exclusions kept.
-            val factory=GeometryFactory()
-            fun polygon(p: List<Point>) = factory.createPolygon((p+p.first()).map { Coordinate(it.x,it.y) }.toTypedArray())
-            val corridors=passages.map { path ->
-                factory.createLineString(path.points.map { Coordinate(it.x,it.y) }.toTypedArray()).buffer(margin+0.4)
-            }
-            val union=UnaryUnionOp.union(zones.map { polygon(it.points) }+corridors)
-            val here=factory.createPoint(Coordinate(start.x,start.y))
-            val part=(0 until union.numGeometries).map { union.getGeometryN(it) }.filterIsInstance<org.locationtech.jts.geom.Polygon>()
-                .firstOrNull { it.covers(here) } ?: error(tr("Robot zone not found", "Zone du robot introuvable"))
-            val outline=part.exteriorRing.coordinates.dropLast(1).map { Point(it.x,it.y) }
-            val enclaves=(0 until part.numInteriorRing).map { i -> part.getInteriorRingN(i).coordinates.dropLast(1).map { Point(it.x,it.y) } }
-            return fr.luba.poc.diagnostics.MapNavPlan(outline,holes+enclaves,points,emptyList(),emptyList(),
-                points.indices.map { if(it==0) tr("Start", "Départ") else if(it==points.lastIndex) "Destination" else tr("Bypass", "Contournement") },planner,
-                physicalGuard=true)
-        }
+        /** Move to a point ([PointPlanner]); [offMap] lets the start or the destination lie beyond the mapped zones. */
+        fun pointPlan(map: RobotMap, start: Point, target: Point, obstacles: List<fr.luba.poc.obstacles.LocalObstacle>,
+                      offMap: Boolean = false, base: MapBase? = null, charging: Boolean = false,
+                      accesses: List<List<Point>> = emptyList()): fr.luba.poc.diagnostics.MapNavPlan =
+            PointPlanner.plan(map, start, target, obstacles, offMap, base, charging, accesses)
         /** Only the known docking corridor extends the mapped surfaces.
          * No arbitrary link to the nearest zone; exclusions stay subtracted.
          */
@@ -219,6 +183,8 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
     private val physicalFree get() = surfaces.physicalFree
     private val envelope get() = surfaces.envelope
     private val free get() = surfaces.free
+    /** Surface allowed to the robot centre (zones, corridors, exclusions and reserves applied). */
+    val navigableSurface: org.locationtech.jts.geom.Geometry get() = free
     // Same tolerance as the former prepared free.buffer(1e-5), without a JTS allocation per query.
     private val navigable get() = surfaces.navigable
     // Only the reused polyline validations, not the visibility searches

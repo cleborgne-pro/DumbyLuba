@@ -8,6 +8,10 @@ import fr.luba.poc.i18n.tr
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+/** Result of [GatewayClient.probe]: gateway reached, its version and health, the robots its Bluetooth sees. */
+data class GatewayProbe(val host: String, val handshakeMs: Long, val appVersion: String?, val capabilities: Set<String>,
+    val health: GatewayHealth?, val robots: List<SeenRobot>, val scanFailure: String?)
+
 /** Gateway announced on the Wi-Fi (mDNS `_dumbyluba._tcp`). */
 data class GatewayEndpoint(val name: String, val host: String, val port: Int)
 
@@ -65,7 +69,7 @@ object GatewayClient {
             for (endpoint in endpoints) {
                 if (!tried.add(endpoint.host to endpoint.port)) continue
                 try {
-                    val channel = GatewayChannel.open(endpoint.host, endpoint.port, config.code)
+                    val channel = GatewayChannel.open(endpoint.host, endpoint.port, config.pilotCode)
                     val target = config.copy(host = endpoint.host, port = endpoint.port)
                     if (target.host != config.host || target.port != config.port) GatewayConfig.save(context, target)
                     return channel to target
@@ -106,6 +110,36 @@ object GatewayClient {
             runCatching { channel.send(GatewayProtocol.CLOSE) }
             return found.values.toList()
         } finally { channel.close() }
+    }
+
+    /**
+     * Setup check: connects like a pilot, then asks the gateway to search for the robot, without opening the robot link.
+     * The gateway's refusals and failures are thrown as for [scan]; a Bluetooth search impossible on the gateway is
+     * returned in [GatewayProbe.scanFailure] (the gateway itself was reached).
+     */
+    fun probe(context: Context, config: GatewayConfig, timeoutMs: Long = 12_000): GatewayProbe {
+        val (channel, target) = openAny(context, config)
+        var health: GatewayHealth? = null
+        val found = linkedMapOf<String, SeenRobot>()
+        var failure: String? = null
+        try {
+            channel.send(GatewayProtocol.SCAN)
+            val deadline = System.currentTimeMillis() + timeoutMs
+            var lastPing = System.currentTimeMillis()
+            while (System.currentTimeMillis() < deadline) {
+                val frame = channel.read()
+                if (frame.type == GatewayProtocol.SCAN_END) break
+                if (frame.type == GatewayProtocol.SCAN_RESULT) {
+                    val (name, address, rssi) = GatewayProtocol.parseScanResult(frame)
+                    found[address] = SeenRobot(name, address, rssi)
+                }
+                if (frame.type == GatewayProtocol.HEALTH) GatewayHealth.decode(frame.payload)?.let { health = it; GatewayHealthStore.update(it) }
+                if (frame.type == GatewayProtocol.FAILURE) { failure = GatewayWireText.display(frame.text()); break }
+                if (System.currentTimeMillis() - lastPing >= GatewayProtocol.PING_MS) { channel.send(GatewayProtocol.PING); lastPing = System.currentTimeMillis() }
+            }
+            runCatching { channel.send(GatewayProtocol.CLOSE) }
+        } finally { channel.close() }
+        return GatewayProbe(target.host, channel.handshakeMs, channel.appVersion, channel.capabilities, health, found.values.toList(), failure)
     }
 
     /** Finds the gateway that accepts the code (saved address, then Wi-Fi announcements), without touching the robot. */

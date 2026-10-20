@@ -28,7 +28,8 @@ SEL = {
  'border': ('mowdebug-border', 'top'), 'obstacles': ('obstacles-list', 'top'), 'obstacle-simulation': ('obstacle-sim', 'top'),
  'command-cutoff': ('service-coupure', 'top'), 'notifications': ('notifications', ''), 'notification-settings': ('notifications-settings', ''), 'weather': ('weather-service', ''),
  'garden-location': ('garden-location', ''), 'account': ('account-robot', ''), 'gateway-pilot': ('service-passerelle-pilote', 'top'),
- 'gateway-robot': ('service-passerelle-passerelle', 'top'), 'connection': ('service-connexion-recherche', ''),
+ 'gateway-robot': ('service-passerelle-passerelle', 'top'), 'gateway-home': ('passerelle-accueil', 'top'),
+ 'setup-wizard': ('assistant-accueil', 'top'), 'first-mowing': ('accueil-premiere-tonte', 'trim'), 'connection': ('service-connexion-recherche', ''),
  'logs': ('service-journaux', ''), 'diagnostics': ('service-diagnostic', 'top'),
 }
 only = set(sys.argv[3].split(',')) if len(sys.argv) > 3 else None

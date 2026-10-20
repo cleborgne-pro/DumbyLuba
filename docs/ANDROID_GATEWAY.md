@@ -86,15 +86,16 @@ written to the pilot's log (`gateway_health`). Both phones must run the same app
 > "Control via the gateway" and close the Mammotion app.
 
 1. Install the same app version on both phones (`tools/deploy.sh` installs on
-   all distinct ADB devices).
+   all distinct ADB devices). The same gateway protocol is required; different app versions only get a note.
 2. **Redmi**: Service → Wi-Fi gateway → role **Gateway** ("Gateway on the robot"). Allow Bluetooth.
-   Note the code shown. Exempt the app from battery optimization ("Battery" button).
-   Then Service → Bluetooth connection: tap the robot; the gateway connects to it and holds it.
+   Note the code shown. Exempt the app from battery optimization ("Battery" button, direct system request).
    The gateway restarts on its own after a phone restart or an app update,
    and every time the app is opened.
-3. **Fold**: Service → Wi-Fi gateway → role **Pilot** ("Control via the gateway"), enter the code,
-   **Find and test**. From then on, robot scanning and connection go through the Redmi.
-4. Switch back to "Direct Bluetooth" to drive without the gateway.
+3. **Fold**: Service → Wi-Fi gateway → **Pilot**, **Scan the gateway QR code** (or choose the gateway in
+   *Gateways on this Wi-Fi* (announced as "DumbyLuba passerelle · Redmi A1"), enter the code,
+   **Find and test**). From then on, robot scanning and connection go through the Redmi: tap the robot in
+   Service → Bluetooth connection, the Redmi connects to it, holds it and remembers it (no action on the Redmi).
+4. Turn **Go through the gateway** off to drive over direct Bluetooth without forgetting the gateway.
 
 ## Automatic connection and two phones next to the robot
 

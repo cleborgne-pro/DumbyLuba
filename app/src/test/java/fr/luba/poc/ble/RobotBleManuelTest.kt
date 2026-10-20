@@ -112,6 +112,25 @@ class RobotBleManuelTest {
         assertEquals(0.0, bench.sim.speed, 0.005)
     }
 
+    /** 2026-10-20: beyond the mapped zones, self-check 25 does not prevent driving freely (blades OFF). */
+    @Test fun `self-check 25 beyond the mapped zones, joystick still allowed`() {
+        bench.installMap()
+        bench.sim.place(Point(11.0, 3.0), 0.0)
+        bench.connect()
+        assertTrue(bench.state.robotMap.shapes.isNotEmpty())
+        bench.sim.selfCheck = 25
+        bench.advance(1500)
+        bench.ble.beginManualGesture()
+        assertTrue(bench.state.manualStatus, hold(-250, 0, 1500))
+        assertTrue(bench.state.manualActive)
+        assertTrue("robot moved back towards the zone: ${bench.sim.position}", bench.sim.position.x < 10.9)
+        assertTrue(bench.state.events.any { it.contains("hors des zones") || it.contains("beyond the mapped") })
+        // Bumper pressed: stop as before.
+        bench.sim.sensorLow = 1
+        hold(-250, 0, 1500)
+        assertFalse(bench.state.manualActive)
+    }
+
     @Test fun `battery at floor, manual control refused`() {
         bench.sim.battery = 30.0
         bench.connect()

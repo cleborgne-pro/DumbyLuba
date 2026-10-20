@@ -156,7 +156,7 @@ class ZoneLabel(val id: Long, val name: String, val at: Point, val widthM: Doubl
 
 /**
  * Labels of the named zones, computed once per map (JTS interior point, like the order numbers). A zone corrected
- * locally ([MapCorrections]) carries a pencil after its name.
+ * locally ([MapCorrections]) carries a pencil after its name, a DumbyLuba zone (phone only) the "DL" mark.
  */
 fun zoneLabels(map: RobotMap): List<ZoneLabel> {
     val factory = GeometryFactory()
@@ -165,8 +165,8 @@ fun zoneLabels(map: RobotMap): List<ZoneLabel> {
         runCatching {
             val polygon = factory.createPolygon((zone.points + zone.points.first()).map { Coordinate(it.x, it.y) }.toTypedArray())
             val c = polygon.centroid.takeIf { polygon.covers(it) } ?: polygon.interiorPoint
-            val corrected = original != null && original[zone.id]?.points != zone.points
-            ZoneLabel(zone.id, zone.name.trim() + if (corrected) " ✎" else "", Point(c.x, c.y), zone.points.maxOf { it.x } - zone.points.minOf { it.x },
+            val corrected = original?.get(zone.id)?.let { it.points != zone.points } == true
+            ZoneLabel(zone.id, MapCorrections.zoneTitle(zone, zone.name) + if (corrected) " ✎" else "", Point(c.x, c.y), zone.points.maxOf { it.x } - zone.points.minOf { it.x },
                 zone.points.maxOf { it.y } - zone.points.minOf { it.y })
         }.getOrNull()
     }
@@ -250,6 +250,17 @@ fun DrawScope.drawTransitPath(path: androidx.compose.ui.graphics.Path, unit: Flo
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f * unit, 4f * unit))))
 }
 
+/**
+ * Section of a move beyond the mapped zones: orange dots on an opaque halo laid over the route, so that the dashes of
+ * the mapped part do not show through.
+ */
+fun DrawScope.drawOffMapPath(path: androidx.compose.ui.graphics.Path, unit: Float, colors: LubaColors, width: Float = 3.5f) {
+    val dark = colors.Background.luminance() < 0.5f
+    drawPath(path, if (dark) Color.Black else Color.White,
+        style = Stroke((width + 3f) * unit, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+    drawPath(path, colors.Warning, style = Stroke(width * unit, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round,
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(0.01f * unit, width * 2f * unit))))
+}
 
 /** Destination of the move to a point: blue target circled in white, at a constant on-screen size. */
 fun DrawScope.drawMapTarget(at: Offset, unit: Float, colors: LubaColors) {

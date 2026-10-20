@@ -193,7 +193,7 @@ class GatewayService : Service() {
     private fun register() {
         val nsd = getSystemService(NsdManager::class.java) ?: return
         val info = NsdServiceInfo().apply {
-            serviceName = GatewayProtocol.SERVICE_NAME; serviceType = GatewayProtocol.SERVICE_TYPE; port = GatewayProtocol.PORT
+            serviceName = GatewayProtocol.serviceName(Build.MODEL); serviceType = GatewayProtocol.SERVICE_TYPE; port = GatewayProtocol.PORT
         }
         val listener = object : NsdManager.RegistrationListener {
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) { report(tr("mDNS announcement refused ($errorCode)", "Annonce mDNS refusée ($errorCode)")) }
@@ -249,6 +249,8 @@ class GatewayService : Service() {
         private val mutable = MutableStateFlow(GatewayStatus())
         val status = mutable.asStateFlow()
         private fun update(change: (GatewayStatus) -> GatewayStatus) { synchronized(mutable) { mutable.value = change(mutable.value) } }
+        /** Documentation screenshots (JVM): a running gateway state without starting the service. */
+        @androidx.annotation.VisibleForTesting internal fun showcase(status: GatewayStatus) = update { status }
 
         fun start(context: Context) {
             try { context.startForegroundService(Intent(context, GatewayService::class.java)) }

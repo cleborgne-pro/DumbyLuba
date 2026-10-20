@@ -375,3 +375,112 @@ while the signal was already falling gives the same alert marked "probably". The
 the robot drives 3 m with a steady signal of −50 dBm or better, so a phone left on the ground on purpose is never
 taken for a fall. See [gateway](docs/features/gateway.md#autonomous-tracking-android-gateway) and
 [technical detail](docs/AUTONOMOUS_GATEWAY.md#gateway-fallen-off-the-robot-130).
+
+Version 1.4.0 (169): **zones recorded by driving, beyond the Mammotion map**. Manual control → **Record by driving** (also Map
+sheet → *Local corrections*): the robot is driven with the joysticks along a new **zone**, **passage** or **no-go
+zone**, like in the Mammotion app, with the trace drawn on a map above the joysticks (RTK FIX positions of the centre
+only, 200 ms reports, pause, erase the last meter, closing within 1 m of the start). Nothing is written to the robot:
+the shape is saved as a local correction (`zone` and `passage` types in `map-corrections.json`) and joins the single
+map used everywhere, so a **DumbyLuba zone** is chosen, previewed, simulated, mowed and resumed like a Mammotion zone,
+and a **DumbyLuba passage** connects zones for every move (links, return to base, move to a point). A recorded zone is
+the centre trace grown by half the chassis width (outer side of the chassis, like a Mammotion boundary), a no-go the
+trace shrunk by half the width; an outline overlapping a zone becomes either a new zone (outside part only) or an
+enlargement of that zone; an unreachable zone, passage ends outside the zones and straight joins without FIX are
+flagged. On the map, a DumbyLuba zone has a dashed outline and "· DL" after its name, a DumbyLuba passage a green
+band, and every surface beyond the Mammotion boundaries (DumbyLuba zones, enlargements) is hatched in orange; the
+task settings recall the area concerned before each mowing, mowed under the user's responsibility. See
+[recording by driving](docs/features/manual-control.md#recording-a-zone-a-passage-or-a-no-go-zone-by-driving) and
+[Mammotion zones and DumbyLuba zones](docs/features/map.md#mammotion-zones-and-dumbyluba-zones).
+
+Version 1.5.0 (170): **move to a point beyond the mapped zones**. The robot and the destination of a move to a point
+may now lie outside the zones: a robot left at the edge or outside of the map (after a recording by driving, for
+example) or a destination tapped beyond a boundary or along it, inside the 50 cm reserve, used to be refused ("Place
+the robot inside a mapped zone", "Choose a point inside a mapped zone", "Robot outside the navigable surface",
+"Destination too close to a limit or an exclusion"). The part outside the zones is a straight section from the nearest
+point of the navigable surface (at most 30 m without a map per move, kept away from the no-go zones and saved
+obstacles), drawn in orange dots over the route; the panel gives its length with a warning (no border check, wall,
+pool or slope unknown there) and requires a second box, **I have checked that the dotted section is clear and safe**;
+the start raises the **Move beyond the mapped zones** notification. The section opens a ±0.9 m corridor in the surface
+of the planner, so the footprint checks, the tracking from the Fold or by the gateway, the recoveries and the path
+recomputed after a contact work there unchanged. The map route test and the obstacle tests keep the strict rule. See
+[beyond the mapped zones](docs/features/station-and-moves.md#beyond-the-mapped-zones).
+
+Version 1.5.1 (171): **moves leave the base in a straight line first**. A move to a point started with the robot on
+its base turned on the spot right away, next to the station. Every move (move to a point and its resume, navigation
+test, cutting test while moving) started on the base or inside its safety zone now first leaves in a slow straight
+line to the link point in front of the base, with the same exit as mowing routes (shared `straightDockExit`: 10 cm
+corridor, heading checked at rest, 60 s, charging contact released; run by the gateway when it is on the robot), then
+follows a path computed from that link point. The preview draws the exit and the panel recalls it. Paths of moves go
+around the base safety zone and take the manual accesses into account; a destination inside the safety zone is
+refused, as are the obstacle bypass and the frontal border test started on the base. See
+[leaving the base first](docs/features/station-and-moves.md#leaving-the-base-first).
+
+Version 1.5.2 (172): **unlocking a robot stopped beyond the mapped zones**. After a move to a point beyond the map,
+the robot published self-check 25 and stayed stuck: **Clear** (30 cm back-off) was always refused, because the back-off
+was checked against the zone borders only and ignored the trace of the move. The trace of a move to a point is now
+used, and its last 3 m driven outside the zones open a ±0.9 m corridor for the back-off (no-go zones and obstacles
+kept, borders unchanged inside the zones); the back-off after a bumper contact during the move uses the same corridor.
+Without a trace beyond the map, the refusal says so. See [collision lock](docs/features/safety.md#collision-lock-self-check-25).
+
+Version 1.6.0 (173): **easier gateway setup**. The pilot page lists the gateways announced on the Wi-Fi by phone
+model (group *Gateways on this Wi-Fi*; Android gateways now announce themselves as "DumbyLuba passerelle · *model*",
+the ESP32 is shown as "ESP32"), and a tap fills the address. The code typed on the pilot is kept apart from the code
+this phone shows as a gateway (a single code used to serve both, so typing another gateway's code replaced it; a
+pilot's code is carried over once). In direct Bluetooth, a gateway found on the Wi-Fi now comes with a **Use this
+gateway** button that switches to control via that gateway. The gateway's **Battery** button asks Android directly for
+the exemption. The Android gateway announces its app version on connection: the pilot shows "gateway 1.6.0 · this
+phone 1.6.0" and advises the same version on both phones, and a protocol mismatch names both versions. Development
+tools are hidden until they can work (wireless debugging group only once the adb permission is granted, no adb command
+under "Keep this phone silent"), and the last device names of the development setup ("Fold", "Redmi") are gone from
+the interface. The documented setup drops the robot selection on the gateway phone: the robot chosen from the pilot is
+held and remembered by the gateway. See [gateway](docs/features/gateway.md#setup-with-two-android-phones).
+
+Version 1.7.0 (174): **gateway pairing by QR code and a home screen for the gateway phone**. The phone mounted on the
+robot now opens on **Gateway on the robot** instead of the map: the pairing QR code with its code and Wi-Fi address
+(replaced by "Pilot connected" once a pilot is there), the robot held and the pilot, and what this phone still needs
+(Bluetooth, Wi-Fi, battery exemption, "Do not disturb"), each with a **Fix** action opening the right Android screen,
+plus a placement tip and **Gateway settings**. On the pilot, **Scan the gateway QR code** (Service → Wi-Fi gateway,
+CameraX preview and ZXing decoding on the phone) fills the address, port and code and tests the connection at once;
+the robot then connects through the gateway on its own. The QR code is a `dumbyluba://pair` link: opened from another
+app, it asks **Use this gateway?** and changes nothing before confirmation (robot disconnected). The gateway page can
+also show the QR code. New permission: camera (optional, the code can still be typed). See
+[pairing QR code](docs/features/gateway.md#pairing-qr-code) and
+[gateway home screen](docs/features/gateway.md#gateway-phone-home-screen).
+
+Version 1.8.0 (175): **Service → Check the setup**. A new page checks, link by link, the chain from this phone to the
+robot for its role and offers the fix of each point: as a pilot, this phone's Wi-Fi, the gateways announced, the
+connection to the gateway (code, answer time), the versions of both phones, the gateway phone's health, the robot seen
+by the gateway's Bluetooth (a search asked without opening the robot link, or the live link when the robot is already
+connected), the robot link, the **placement of the gateway** on the robot from its Bluetooth signal (−50 dBm or better
+expected), the **Wi-Fi at the base** while charging and the command cutoff test; in direct Bluetooth, the permission,
+the robot in range and the advice to use a gateway; on the gateway phone, its service, Bluetooth, Wi-Fi, battery
+exemption, "Do not disturb", the robot held and the pilot. A robot that is not found is now named with the likely
+cause ("Luba-VS… does not advertise: … connected to the Mammotion app, another phone or a gateway"), also at the end
+of a search. New page [getting started and setup check](docs/features/getting-started.md).
+
+Version 1.9.0 (176): **first-launch assistant and "Before the first mowing"**. A fresh installation opens, after the
+intro, on **Welcome to DumbyLuba**: "I control the robot with this phone" (Bluetooth and notifications asked
+together, then **Scan the gateway QR code** with the connection tested at once, or direct Bluetooth for now, then
+**Check the setup**), "This phone goes on the robot" (permissions, gateway started, battery exemption and "Do not
+disturb", then its QR code), "Just a test next to the robot" (permissions, automatic connection) or "Explore without a
+robot" (demo map); every page can be skipped. The home screen of the pilot then shows **Before the first mowing**, the
+six steps of the quick start with their progress (robot connected, setup checked, map read, command cutoff tested,
+manual control, route followed with blades stopped), each opening its page, until all are done or the list is hidden.
+Installations updated from an older version see neither. See
+[getting started](docs/features/getting-started.md#first-launch-assistant).
+
+Version 1.10.0 (177): **two roles instead of three**. Service → Wi-Fi gateway now offers **Pilot** or **Gateway**: the
+gateway is an option of piloting rather than a role of its own. In Pilot, group *Gateway on the robot* says "No gateway
+paired: direct Bluetooth…" until one is paired (QR code, or **Find and test** succeeding, which turns it on), then
+offers **Go through the gateway** (off: direct Bluetooth only, the pairing kept) and **Forget this gateway**. Leaving
+Gateway for Pilot goes through the paired gateway if there is one. Behaviour is unchanged: "Direct Bluetooth" and
+"Control via the gateway" are still the two states of a pilot, with the same direct Bluetooth fallback while the
+gateway does not answer. The Service hub shows "pilot · direct", "pilot · gateway" or "gateway". See
+[roles](docs/features/gateway.md#roles).
+
+Version 1.11.0 (178): **self-check 25 ignored beyond the mapped zones**. Driven beyond its zones, the robot publishes
+self-check 25 without any contact, which stopped the move to a point and then refused the joystick. For the blade-OFF
+moves (joystick, move to a point tracked from the Fold or by the gateway), 25 is ignored while the robot stands beyond
+the zones (or less than 35 cm inside them) with bumper and lift clear; the "Robot stuck" panel gives way to a note. A
+real contact (bumper, code -1014) is still handled; inside the zones and while mowing, 25 stays the collision lock.
+See [self-check 25 beyond the mapped zones](docs/features/safety.md#self-check-25-beyond-the-mapped-zones-version-1110).

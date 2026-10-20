@@ -98,7 +98,7 @@ class GatewayClientTest {
 
     @Test fun `saved address reached directly, without search or settings rewrite`() {
         val port = gateway()
-        val config = GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, code)
+        val config = GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, pilotCode = code)
         GatewayConfig.save(context, config.copy(host = "", port = 1))
         val (channel, target) = GatewayClient.openAny(context, config)
         channel.close()
@@ -110,7 +110,7 @@ class GatewayClientTest {
 
     @Test fun `saved address unreachable, gateway announced on Wi-Fi chosen and saved`() {
         val port = gateway()
-        val config = GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", closedPort(), code)
+        val config = GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", closedPort(), pilotCode = code)
         val result = background { GatewayClient.openAny(context, config) }
         announce(port, others = true)
         val (channel, target) = result.get(10, TimeUnit.SECONDS)
@@ -121,7 +121,7 @@ class GatewayClientTest {
 
     @Test fun `code refused by the saved gateway reported as is, gateway still reachable`() {
         val port = gateway(gatewayCode = "111111")
-        val result = background { GatewayClient.openAny(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, code)) }
+        val result = background { GatewayClient.openAny(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, pilotCode = code)) }
         announce()
         val error = runCatching { result.get(10, TimeUnit.SECONDS) }.exceptionOrNull()?.cause
         assertTrue("$error", error is GatewayDenied)
@@ -131,7 +131,7 @@ class GatewayClientTest {
 
     @Test fun `no gateway, readable cause and gateway recorded as unreachable`() {
         val dead = closedPort()
-        val result = background { GatewayClient.openAny(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", dead, code)) }
+        val result = background { GatewayClient.openAny(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", dead, pilotCode = code)) }
         announce()
         val error = runCatching { result.get(10, TimeUnit.SECONDS) }.exceptionOrNull()?.cause!!
         assertEquals("127.0.0.1 injoignable (connexion impossible) et passerelle introuvable sur le Wi-Fi", error.message)
@@ -148,7 +148,7 @@ class GatewayClientTest {
             GatewayProtocol.write(output, GatewayProtocol.SCAN_RESULT, GatewayProtocol.scanResult("Luba-VS1", "AA:01", -55))
             GatewayProtocol.write(output, GatewayProtocol.SCAN_END)
         }
-        val robots = GatewayClient.scan(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, code))
+        val robots = GatewayClient.scan(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, pilotCode = code))
         assertEquals(listOf(SeenRobot("Luba-VS1", "AA:01", -55), SeenRobot("Luba-VS2", "AA:02", -71)), robots)
         assertEquals(77, GatewayHealthStore.latest.value?.health?.batteryPercent)
         val deadline = System.currentTimeMillis() + 3000
@@ -162,15 +162,45 @@ class GatewayClientTest {
             GatewayProtocol.write(output, GatewayProtocol.FAILURE, "Bluetooth désactivé sur la passerelle".toByteArray())
         }
         val error = assertThrows(GatewayScanFailed::class.java) {
-            GatewayClient.scan(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, code))
+            GatewayClient.scan(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, pilotCode = code))
         }
         assertEquals("Bluetooth désactivé sur la passerelle", error.message)
+    }
+
+    @Test fun `setup check probe, version, health and robots seen, without opening the robot link`() {
+        val port = gateway { input, output ->
+            check(GatewayProtocol.read(input).type == GatewayProtocol.SCAN)
+            GatewayProtocol.write(output, GatewayProtocol.HEALTH, GatewayHealth(batteryPercent = 64, wifiRssiDbm = -58).encode())
+            GatewayProtocol.write(output, GatewayProtocol.SCAN_RESULT, GatewayProtocol.scanResult("Luba-VS1", "AA:01", -44))
+            GatewayProtocol.write(output, GatewayProtocol.SCAN_END)
+        }
+        val probe = GatewayClient.probe(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, pilotCode = code))
+        assertEquals("127.0.0.1", probe.host)
+        assertEquals(fr.luba.poc.BuildConfig.VERSION_NAME, probe.appVersion)
+        assertEquals(64, probe.health?.batteryPercent)
+        assertEquals(listOf(SeenRobot("Luba-VS1", "AA:01", -44)), probe.robots)
+        assertNull(probe.scanFailure)
+        assertTrue(probe.handshakeMs >= 0)
+        assertEquals(fr.luba.poc.BuildConfig.VERSION_NAME, GatewayHealthStore.gatewayVersion.value)
+        val deadline = System.currentTimeMillis() + 3000
+        while (GatewayProtocol.CLOSE !in received && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertFalse("no robot link opened", GatewayProtocol.OPEN in received)
+    }
+
+    @Test fun `setup check probe, Bluetooth off on the gateway reported, gateway still reached`() {
+        val port = gateway { input, output ->
+            GatewayProtocol.read(input)
+            GatewayProtocol.write(output, GatewayProtocol.FAILURE, "Bluetooth désactivé sur la passerelle".toByteArray())
+        }
+        val probe = GatewayClient.probe(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, pilotCode = code))
+        assertEquals("Bluetooth désactivé sur la passerelle", probe.scanFailure)
+        assertTrue(probe.robots.isEmpty())
     }
 
     @Test fun `find and test, gateway reached then released`() {
         val port = gateway()
         assertEquals("Passerelle 127.0.0.1 jointe, code accepté",
-            GatewayClient.find(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, code)))
+            GatewayClient.find(context, GatewayConfig(GatewayRole.CLIENT, "127.0.0.1", port, pilotCode = code)))
         val deadline = System.currentTimeMillis() + 3000
         while (GatewayProtocol.CLOSE !in received && System.currentTimeMillis() < deadline) Thread.sleep(10)
         assertTrue(GatewayProtocol.CLOSE in received)

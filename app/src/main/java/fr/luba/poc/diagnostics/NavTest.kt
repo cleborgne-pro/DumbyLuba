@@ -76,6 +76,8 @@ object NavSafety {
         name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
         sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, bladeTestRunning: Boolean,
         mapLoading: Boolean, heightMm: Int, batteryFloor: Int = 30,
+        /** Move to a point beyond the mapped zones: self-check 25 ignored there ([fr.luba.poc.protocol.OffMapLatch]). */
+        ignoreOffMapLatch: Boolean = false,
     ): String? {
         if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Walk reserved for a LUBA 2 identified as Luba-VS", "Marche réservée au LUBA 2 identifié Luba-VS")
         if (campaignRunning) return tr("Stop the BLE campaign before the walk", "Arrêter la campagne BLE avant la marche")
@@ -85,7 +87,8 @@ object NavSafety {
         if (stateAgeMs == null || stateAgeMs !in 0..2000) return tr("Robot state missing or older than 2 s", "État robot absent ou âgé de plus de 2 s")
         if (battery == null || battery <= batteryFloor) return tr("Battery unknown or ≤$batteryFloor %", "Batterie inconnue ou ≤$batteryFloor %")
         if (robotState != 11) return tr("Robot not ready (MODE_READY=11 expected)", "Robot non prêt (MODE_READY=11 attendu)")
-        if (!fr.luba.poc.protocol.SelfCheck.nominal(selfCheck)) return fr.luba.poc.protocol.SelfCheck.refusal(selfCheck)
+        if (!fr.luba.poc.protocol.SelfCheck.nominal(selfCheck) && !(ignoreOffMapLatch && selfCheck == fr.luba.poc.protocol.CollisionLatch.VALUE))
+            return fr.luba.poc.protocol.SelfCheck.refusal(selfCheck)
         if (sensors == null || sensors and 7 != 0) return tr("Bumper health alert", "Alerte de santé bumper")
         if (sensors and (7 shl 9) != 0) return tr("Blades not confirmed OFF by telemetry", "Lames non confirmées OFF par la télémétrie")
         return null

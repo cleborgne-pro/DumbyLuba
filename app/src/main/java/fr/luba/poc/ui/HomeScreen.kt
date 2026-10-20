@@ -101,6 +101,8 @@ fun HomeScreen(
     alertsBadge: Boolean = false,
     /** Mammotion account telemetry for this robot (null if the account follows another robot). */
     apiTelemetry: fr.luba.poc.protocol.Telemetry? = cloudState.telemetry,
+    /** "Before the first mowing" card, below the map (empty once done or hidden). */
+    checklist: @Composable () -> Unit = {},
 ) {
     val colors = MammotionColors
     val t = state.telemetry
@@ -248,6 +250,8 @@ fun HomeScreen(
             if (!cloudState.connected && cloudState.map.shapes.isEmpty() && !map.complete) {
                 TextAction(tr("Read the map via the Mammotion account", "Lire la carte via le compte Mammotion"), onAccount, Modifier.fillMaxWidth().padding(top = Dimens.Sm))
             }
+            Spacer(Modifier.height(Dimens.Md))
+            checklist()
             Spacer(Modifier.height(Dimens.Lg))
         }
       }

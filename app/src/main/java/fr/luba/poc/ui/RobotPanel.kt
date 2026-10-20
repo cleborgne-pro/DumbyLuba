@@ -51,6 +51,7 @@ enum class ServicePage(val key: String, private val titleEn: String, private val
     HUB("", "Service", "Service"),
     // Connection
     CONNECTION("Robot", "Bluetooth connection", "Connexion Bluetooth"),
+    SETUP("Verification", "Check the setup", "Vérifier l'installation"),
     RELAY("Passerelle", "Wi-Fi gateway", "Passerelle Wi-Fi"),
     HOME_SERVER("Serveur", "Home server", "Serveur maison"),
     // Robot
@@ -151,7 +152,8 @@ fun RobotPanel(
     }
 
     when (page) {
-        ServicePage.CONNECTION -> ConnectionPage(robot, state, back)
+        ServicePage.CONNECTION -> ConnectionPage(robot, state, back) { onTabChange(ServicePage.RELAY.key) }
+        ServicePage.SETUP -> SetupCheckPage(robot, state, back, onTabChange)
         ServicePage.RELAY -> PushedPage(page.title, back, modifier) {
             fr.luba.poc.gateway.GatewayPanel(linkIdle = state.connection == ConnectionState.Disconnected, disconnect = robot::disconnect)
         }
@@ -203,7 +205,8 @@ fun RobotPanel(
 fun ManualPage(robot: RobotBle, state: RobotUi, back: () -> Unit, modifier: Modifier = Modifier) {
     PushedPage(ServicePage.MANUAL.title, back, modifier) {
         if (!state.ready) StatusNote(tr("Robot not connected: control unlocks as soon as it is (gateway or direct Bluetooth).", "Robot non connecté : le pilotage se débloque dès qu'il l'est (passerelle ou Bluetooth direct)."), NoteTone.WARNING)
-        fr.luba.poc.manual.JoystickPanel(robot, state)
+        // Recording by driving between the camera and the joysticks: map of the trace in sight while driving.
+        fr.luba.poc.manual.JoystickPanel(robot, state) { fr.luba.poc.manual.DrivenRecordGroup(robot, state) }
         SettingsGroup(tr("Mammotion task", "Tâche Mammotion")) {
             SecondaryPillButton(tr("Stop the Mammotion task", "Arrêter la tâche Mammotion"), robot::stopMammotionTask, Modifier.fillMaxWidth(),
                 enabled = state.ready && !state.taskStopPending && !state.manualActive && !state.robotRoute.running && !state.navTest.running)
@@ -278,7 +281,8 @@ private fun AdvancedPage(robot: RobotBle, state: RobotUi, back: () -> Unit, modi
             KeyValueRow(tr("Minimum battery", "Batterie minimale"), "30 %")
             InfoNote(tr("Bluetooth diagnostics keep the robot stationary; the navigation test, the command cutoff and trial mowing make it move.", "Le diagnostic Bluetooth laisse le robot immobile ; l'essai de navigation, la coupure des commandes et la tonte d'essai le font rouler."))
         }
-        fr.luba.poc.gateway.WirelessDebugGroup()
+        // Development tool: only once the adb permission has been granted (otherwise it can do nothing).
+        if (fr.luba.poc.gateway.WirelessDebugKeeper.canWrite(androidx.compose.ui.platform.LocalContext.current)) fr.luba.poc.gateway.WirelessDebugGroup()
     }
 }
 
@@ -331,11 +335,12 @@ private fun ServiceHub(state: RobotUi, modifier: Modifier, open: (String) -> Uni
         // Groups by intent; one-line subtitles, status on the right only when useful.
         SettingsGroup(tr("Connection", "Connexion")) {
             Entry(ServicePage.CONNECTION, Icons.Rounded.Bluetooth, tr("Search, connect, disconnect", "Rechercher, connecter, déconnecter"))
+            Entry(ServicePage.SETUP, Icons.Rounded.Checklist, tr("Wi-Fi, gateway, robot and safety, link by link", "Wi-Fi, passerelle, robot et sécurité, maillon par maillon"))
             Entry(ServicePage.RELAY, Icons.Rounded.Router, tr("Relay phone placed on the robot", "Téléphone relais posé sur le robot"),
                 value = when (role) {
-                    fr.luba.poc.gateway.GatewayRole.OFF -> "direct"
+                    fr.luba.poc.gateway.GatewayRole.OFF -> tr("pilot · direct", "pilote · direct")
                     fr.luba.poc.gateway.GatewayRole.GATEWAY -> if (gateway.running) tr("gateway", "passerelle") else tr("stopped", "arrêtée")
-                    fr.luba.poc.gateway.GatewayRole.CLIENT -> tr("pilot", "pilote")
+                    fr.luba.poc.gateway.GatewayRole.CLIENT -> tr("pilot · gateway", "pilote · passerelle")
                 })
             Entry(ServicePage.HOME_SERVER, Icons.Rounded.Dns, tr("Robot status on a local web page", "État du robot sur une page web locale"),
                 value = if (relay.running) tr("active", "actif") else null)
@@ -374,7 +379,7 @@ private fun ServiceHub(state: RobotUi, modifier: Modifier, open: (String) -> Uni
             Entry(ServicePage.SENSORS, Icons.Rounded.Radar, tr("Ultrasonic sensors, vision (exploration)", "Ultrasons, vision (exploration)"), enabled = ready,
                 value = if (state.sensorProbe.running) tr("in progress", "en cours") else null)
             Entry(ServicePage.LOGS, Icons.Rounded.Description, tr("View and export", "Consulter et exporter"))
-            Entry(ServicePage.ADVANCED, Icons.Rounded.Tune, tr("Link delays, wireless debugging", "Délais de liaison, débogage sans fil"))
+            Entry(ServicePage.ADVANCED, Icons.Rounded.Tune, tr("Link delays and test limits", "Délais de liaison et limites des essais"))
         }
     }
 }
@@ -390,7 +395,7 @@ private fun connectionShort(state: RobotUi) = when {
 
 
 @Composable
-private fun ConnectionPage(robot: RobotBle, state: RobotUi, back: () -> Unit) {
+private fun ConnectionPage(robot: RobotBle, state: RobotUi, back: () -> Unit, openGateway: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var permissionStatus by remember { mutableStateOf("") }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
@@ -417,6 +422,16 @@ private fun ConnectionPage(robot: RobotBle, state: RobotUi, back: () -> Unit) {
             GatewayRobotNote()
         if (gatewayRole == fr.luba.poc.gateway.GatewayRole.CLIENT)
             InfoNote(tr("Search and connection through the gateway (Service → Wi-Fi gateway).", "Recherche et connexion par la passerelle (Service → Passerelle Wi-Fi)."))
+        // Direct Bluetooth and a gateway announced on the Wi-Fi: offer to go through it instead of taking the robot's only link.
+        val seen = state.gatewaySeen
+        if (gatewayRole == fr.luba.poc.gateway.GatewayRole.OFF && seen != null && disconnected) {
+            StatusNote(tr("A DumbyLuba gateway is announced on this Wi-Fi ($seen).", "Une passerelle DumbyLuba est annoncée sur ce Wi-Fi ($seen)."), NoteTone.INFO)
+            PrimaryPillButton(tr("Use this gateway", "Utiliser cette passerelle"), {
+                val config = fr.luba.poc.gateway.GatewayConfig.read(context)
+                fr.luba.poc.gateway.GatewayConfig.save(context, config.copy(role = fr.luba.poc.gateway.GatewayRole.CLIENT, host = seen))
+                openGateway()
+            }, Modifier.fillMaxWidth(), icon = Icons.Rounded.Router)
+        }
         // Result of the last search or connection (refusal, gateway unreachable, robot not found…);
         // the default waiting message adds nothing here and is not shown.
         val lastStatus = state.status.takeIf { it.isNotBlank() && it != IDLE_STATUS }

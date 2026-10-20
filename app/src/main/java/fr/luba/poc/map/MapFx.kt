@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -96,7 +97,14 @@ fun DrawScope.drawLawn(
     val zones = shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
     val outlines = zones.map { path(it.points, true) }
     zones.forEachIndexed { i, zone -> drawPath(outlines[i], if (active(zone)) colors.ZoneFillSelected else colors.ZoneFill) }
-    outlines.forEach { drawPath(it, colors.ZoneStroke, style = Stroke(1.5f * unit, join = StrokeJoin.Round)) }
+    // Surface beyond the Mammotion boundaries (DumbyLuba zones, enlargements): orange hatching, always visible.
+    drawBeyondMammotion(MapCorrections.beyondMammotion(map), path, unit, colors)
+    // DumbyLuba zone (phone only): dashed outline; Mammotion zone: solid outline.
+    zones.forEachIndexed { i, zone ->
+        if (MapCorrections.isDumbyLuba(zone)) drawPath(outlines[i], colors.ZoneStroke, style = Stroke(2f * unit, join = StrokeJoin.Round,
+            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f * unit, 4f * unit))))
+        else drawPath(outlines[i], colors.ZoneStroke, style = Stroke(1.5f * unit, join = StrokeJoin.Round))
+    }
     for (shape in shapes) {
         when (shape.kind) {
             ShapeKind.ZONE -> Unit
@@ -106,9 +114,11 @@ fun DrawScope.drawLawn(
                 drawPath(outline, colors.NoGoStroke.copy(alpha = 0.7f), style = Stroke(1f * unit, join = StrokeJoin.Round))
             }
             // Passage: grey band dotted with white, like a path (never mowed).
+            // DumbyLuba passage: same band, tinted with the zone green.
             ShapeKind.PASSAGE -> {
                 val line = path(shape.points, false)
-                drawPath(line, (if (dark) Color.White else Color(0xFF6E767E)).copy(alpha = if (dark) 0.22f else 0.35f),
+                drawPath(line, if (MapCorrections.isDumbyLuba(shape)) colors.ZoneStroke.copy(alpha = 0.45f)
+                    else (if (dark) Color.White else Color(0xFF6E767E)).copy(alpha = if (dark) 0.22f else 0.35f),
                     style = Stroke(6f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 drawPath(line, Color.White.copy(alpha = 0.95f), style = Stroke(1.5f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
                     pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f * unit, 3f * unit))))
@@ -120,6 +130,28 @@ fun DrawScope.drawLawn(
             }
         }
     }
+}
+
+/** Orange hatching (and thin outline) over the surface beyond the Mammotion boundaries. */
+fun DrawScope.drawBeyondMammotion(beyond: BeyondArea, path: (List<Point>, Boolean) -> Path, unit: Float, colors: LubaColors) {
+    if (beyond.rings.isEmpty()) return
+    val area = Path().apply {
+        fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+        beyond.rings.filter { it.size >= 3 }.forEach { addPath(path(it, true)) }
+    }
+    val bounds = area.getBounds()
+    if (bounds.isEmpty) return
+    val tint = colors.Warning
+    drawPath(area, tint.copy(alpha = 0.10f))
+    clipPath(area) {
+        val step = 7f * unit
+        var x = bounds.left - bounds.height
+        while (x < bounds.right) {
+            drawLine(tint.copy(alpha = 0.55f), Offset(x, bounds.bottom), Offset(x + bounds.height, bounds.top), 1f * unit)
+            x += step
+        }
+    }
+    drawPath(area, tint.copy(alpha = 0.8f), style = Stroke(1f * unit, join = StrokeJoin.Round))
 }
 
 /**

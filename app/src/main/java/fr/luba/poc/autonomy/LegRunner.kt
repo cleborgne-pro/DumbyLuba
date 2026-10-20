@@ -271,7 +271,10 @@ class LegRunner(
                 val live = view.telemetry
                 NavSafety.automaticPositionFailure(now - view.positionPrevious, live.x, live.y)?.let { error(it) }
                 NavSafety.tickFailure(now - view.devicePrevious, live.battery, live.sensorStatus, true, RouteRecharge.RESERVE_PERCENT)?.let { error(it) }
-                val protectionUp = !(live.robotState in (if (spec.departure) listOf(11, 15, 20, 39) else listOf(11, 20)) && SelfCheck.nominal(live.selfCheck))
+                // Move beyond the map: self-check 25 published on its sections is not a contact ([OffMapLatch]).
+                val offMapLatch = spec.offMapSections.isNotEmpty() && !blades && fr.luba.poc.protocol.OffMapLatch.ignored(live.selfCheck, live.sensorStatus,
+                    fr.luba.poc.protocol.OffMapLatch.onSections(live.x?.let { x -> live.y?.let { y -> Point(x, y) } }, spec.offMapSections))
+                val protectionUp = !(live.robotState in (if (spec.departure) listOf(11, 15, 20, 39) else listOf(11, 20)) && (SelfCheck.nominal(live.selfCheck) || offMapLatch))
                 // Protection waiting for the contact code: cleared, or delay elapsed without contact → stop on the protection.
                 latch?.let { (since, reason) -> if (!protectionUp || now - since >= CollisionLatch.CONTACT_GRACE_MS) error(reason) }
                 if (protectionUp) {

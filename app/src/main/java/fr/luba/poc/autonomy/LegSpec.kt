@@ -68,6 +68,12 @@ data class LegSpec(
      * after [baseZone]: an older gateway ignores it, an older pilot does not send it.
      */
     val slideField: SlideField? = null,
+    /**
+     * Move to a point beyond the mapped zones: sections driven beyond the map. On them, self-check 25 is ignored
+     * ([fr.luba.poc.protocol.OffMapLatch]). Optional trailing field, after [slideField]: an older gateway ignores it
+     * (stop on 25 as before), an older pilot does not send it.
+     */
+    val offMapSections: List<List<Point>> = emptyList(),
 ) {
     init {
         // Decoded on the gateway: the messages go back to the pilot in the refusal, in the gateway phone's language.
@@ -75,6 +81,8 @@ data class LegSpec(
         require(speedPercent in 10..100) { tr("Speed out of range", "Vitesse hors plage") }
         require(returnPercent in 10..80) { tr("Return threshold out of range", "Seuil de retour hors plage") }
         require(from >= 0)
+        require(offMapSections.size <= MAX_OFF_MAP_SECTIONS && offMapSections.all { it.size <= MAX_OFF_MAP_POINTS }) {
+            tr("Too many sections beyond the map", "Trop de tronçons hors carte") }
     }
 
     fun encode(): ByteArray = ByteArrayOutputStream().also { bytes ->
@@ -96,6 +104,9 @@ data class LegSpec(
             baseZone?.let { out.writeDouble(it.station.x); out.writeDouble(it.station.y); out.writeDouble(it.radiusM) }
             out.writeBoolean(slideField != null)
             slideField?.write(out)
+            out.writeBoolean(offMapSections.isNotEmpty())
+            if (offMapSections.isNotEmpty()) out.writeShort(offMapSections.size)
+            offMapSections.forEach { section -> out.writeShort(section.size); section.forEach { out.writeDouble(it.x); out.writeDouble(it.y) } }
         }
     }.toByteArray()
 
@@ -114,12 +125,25 @@ data class LegSpec(
             val baseZone = if (input.available() > 0 && input.readBoolean())
                 ReturnDrift.BaseZone(Point(input.readDouble(), input.readDouble()), input.readDouble()) else null
             val slideField = if (input.available() > 0 && input.readBoolean()) SlideField.read(input) else null
+            val offMap = if (input.available() > 0 && input.readBoolean()) (0 until input.readUnsignedShort()).map {
+                (0 until input.readUnsignedShort()).map { Point(input.readDouble(), input.readDouble()) } } else emptyList()
             LegSpec(legId, routeId, from, cutting = flags and 1 != 0, shown = flags and 2 != 0, watchBattery = flags and 4 != 0,
                 departure = flags and 8 != 0, lastArrivalM = arrival.takeIf { hasArrival }, heightMm = height, speedPercent = speed,
                 returnPercent = low, baseApproach = if (hasBase) Point(bx, by) else null, guardId = guard, physicalGuardId = physical,
                 calibration = if (hasCalibration) DeadReckoning.Calibration(mpu, dpu) else null, obstacles = obstacles,
-                sampling = flags and 16 != 0, dockExit = flags and 32 != 0, baseZone = baseZone, slideField = slideField)
+                sampling = flags and 16 != 0, dockExit = flags and 32 != 0, baseZone = baseZone, slideField = slideField,
+                offMapSections = offMap)
         }
+
+        const val MAX_OFF_MAP_SECTIONS = 8
+        const val MAX_OFF_MAP_POINTS = 64
+
+        /** Sections beyond the map within the frame limits: the first ones, vertices thinned evenly (ends kept). */
+        fun boundedSections(sections: List<List<Point>>): List<List<Point>> =
+            sections.filter { it.isNotEmpty() }.take(MAX_OFF_MAP_SECTIONS).map { s ->
+                if (s.size <= MAX_OFF_MAP_POINTS) s
+                else (0 until MAX_OFF_MAP_POINTS - 1).map { i -> s[i * (s.size - 1) / (MAX_OFF_MAP_POINTS - 1)] } + s.last()
+            }
     }
 }
 

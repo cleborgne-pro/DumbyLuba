@@ -53,8 +53,8 @@ interface GatewayPilot : PilotSink {
  data class GatewayRobotState(val address: String? = null, val name: String? = null, val connecting: Boolean = false,
     val ready: Boolean = false, val mtu: Int = 23, val pilot: Boolean = false) {
     val label: String get() = when {
-        address == null -> tr("No robot: connect it from the Bluetooth connection page of this phone",
-            "Aucun robot : le connecter depuis la page Connexion Bluetooth de ce téléphone")
+        address == null -> tr("No robot yet: choose it from the pilot phone (Service → Bluetooth connection)",
+            "Pas encore de robot : le choisir depuis le téléphone de pilotage (Service → Connexion Bluetooth)")
         ready && pilot -> tr("${name ?: address} connected over Bluetooth · controlled from the other phone",
             "${name ?: address} connecté en Bluetooth · piloté depuis l'autre téléphone")
         ready -> tr("${name ?: address} connected over Bluetooth · waiting for the pilot phone",

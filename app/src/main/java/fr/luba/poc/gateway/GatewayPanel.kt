@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,11 +28,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Short labels of the segmented control; the full role label is shown below. */
-private fun GatewayRole.short() = when (this) {
-    GatewayRole.OFF -> "Direct"
-    GatewayRole.GATEWAY -> tr("Gateway", "Passerelle")
-    GatewayRole.CLIENT -> tr("Pilot", "Pilote")
+/**
+ * What this phone is for, as offered to the user: it drives the robot (through the paired gateway when there is one and
+ * it is turned on, otherwise over direct Bluetooth: roles CLIENT and OFF), or it lies on the robot (GATEWAY).
+ */
+private enum class PhoneUse { PILOT, GATEWAY }
+
+private fun PhoneUse.short() = when (this) {
+    PhoneUse.PILOT -> tr("Pilot", "Pilote")
+    PhoneUse.GATEWAY -> tr("Gateway", "Passerelle")
 }
 
 /** Tone of a gateway message: failure or refusal as a warning, success in green (French or English wording). */
@@ -42,7 +48,7 @@ private fun messageTone(text: String) = when {
 }
 
 /**
- * Role choice: direct Bluetooth, gateway lying on the robot (Redmi), or control via the gateway (Fold).
+ * What this phone is for: pilot (through the paired gateway, or direct Bluetooth) or gateway lying on the robot.
  * [linkIdle]: role can only be changed with the robot disconnected; [disconnect] closes the current link (STOP then close).
  * Emits titled groups directly into the column of the calling page.
  */
@@ -67,11 +73,15 @@ fun GatewayPanel(linkIdle: Boolean, disconnect: () -> Unit = {}) {
     }
 
     SettingsGroup(tr("Role of this phone", "Rôle de ce téléphone")) {
-        Segmented(GatewayRole.entries.map { it to it.short() }, config.role, { role ->
+        Segmented(PhoneUse.entries.map { it to it.short() }, if (config.role == GatewayRole.GATEWAY) PhoneUse.GATEWAY else PhoneUse.PILOT, { use ->
             message = ""
-            when (role) {
-                GatewayRole.GATEWAY -> becomeGateway()
-                else -> { if (config.role == GatewayRole.GATEWAY) GatewayService.stop(context); save(config.copy(role = role)) }
+            when (use) {
+                PhoneUse.GATEWAY -> if (config.role != GatewayRole.GATEWAY) becomeGateway()
+                // Back to piloting: through the paired gateway if there is one, otherwise direct Bluetooth.
+                PhoneUse.PILOT -> if (config.role == GatewayRole.GATEWAY) {
+                    GatewayService.stop(context)
+                    save(config.copy(role = if (config.paired) GatewayRole.CLIENT else GatewayRole.OFF))
+                }
             }
         }, enabled = linkIdle && !busy)
         Text(config.role.label, style = MaterialTheme.typography.titleSmall)
@@ -94,7 +104,22 @@ fun GatewayPanel(linkIdle: Boolean, disconnect: () -> Unit = {}) {
                 NoteTone.WARNING)
             SecondaryPillButton(tr("Disconnect the robot", "Déconnecter le robot"), disconnect, Modifier.fillMaxWidth())
         }
-        if (message.isNotBlank() && config.role != GatewayRole.CLIENT) StatusNote(message, messageTone(message))
+        if (message.isNotBlank() && config.role == GatewayRole.GATEWAY) StatusNote(message, messageTone(message))
+    }
+    // Pilot: the gateway is an option of piloting, not a separate role. Turned off, the pairing is kept.
+    if (config.role != GatewayRole.GATEWAY) SettingsGroup(tr("Gateway on the robot", "Passerelle sur le robot")) {
+        if (config.paired) {
+            val through = config.role == GatewayRole.CLIENT
+            ToggleRow(tr("Go through the gateway", "Passer par la passerelle"), through, { on -> message = ""; save(config.copy(role = if (on) GatewayRole.CLIENT else GatewayRole.OFF)) },
+                subtitle = if (through) tr("Gateway ${config.host.ifBlank { "found on the Wi-Fi" }}; direct Bluetooth while it does not answer",
+                    "Passerelle ${config.host.ifBlank { "trouvée sur le Wi-Fi" }} ; Bluetooth direct tant qu'elle ne répond pas")
+                    else tr("Off: direct Bluetooth only, a few meters from the robot", "Désactivé : Bluetooth direct seulement, à quelques mètres du robot"),
+                enabled = linkIdle && !busy)
+            TextAction(tr("Forget this gateway", "Oublier cette passerelle"), {
+                message = ""; save(config.copy(role = GatewayRole.OFF, host = "", pilotCode = ""))
+            }, Modifier.fillMaxWidth(), enabled = linkIdle && !busy, danger = true)
+        } else InfoNote(tr("No gateway paired: direct Bluetooth, a few meters from the robot. Pair the gateway below to control the robot across the garden.",
+            "Aucune passerelle appairée : Bluetooth direct, à quelques mètres du robot. Appairez la passerelle ci-dessous pour piloter le robot dans tout le jardin."))
     }
     when (config.role) {
         GatewayRole.GATEWAY -> {
@@ -105,43 +130,85 @@ fun GatewayPanel(linkIdle: Boolean, disconnect: () -> Unit = {}) {
                 KeyValueRow("Robot", status.robot.label)
                 CodeValue(tr("Gateway code", "Code de la passerelle"), config.code)
                 status.address?.let { KeyValueRow(tr("Wi-Fi address", "Adresse Wi-Fi"), "$it:${GatewayProtocol.PORT}") }
+                var qr by remember { mutableStateOf(false) }
+                GatewayPairing.ofThisGateway(context, status.address.takeIf { status.running })?.let { pairing ->
+                    if (qr) QrImage(pairing.uri(), tr("Pairing QR code", "QR code d'appairage"), Modifier.fillMaxWidth(0.7f))
+                    TextAction(if (qr) tr("Hide the QR code", "Masquer le QR code") else tr("Show the pairing QR code", "Afficher le QR code d'appairage"), { qr = !qr }, Modifier.fillMaxWidth())
+                }
                 KeyValueRow(tr("Battery exemption", "Exemption batterie"), if (exempt) tr("active", "active") else tr("missing", "absente"))
                 if (!exempt) StatusNote(tr("Without a battery exemption, the gateway may be suspended when the screen is off.",
                     "Sans exemption batterie, la passerelle peut être suspendue écran éteint."), NoteTone.WARNING)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
                     if (status.running) SecondaryPillButton(tr("Stop", "Arrêter"), { GatewayService.stop(context) }, Modifier.weight(1f))
                     else PrimaryPillButton(tr("Start", "Démarrer"), { becomeGateway() }, Modifier.weight(1f), icon = Icons.Rounded.PlayArrow)
-                    SecondaryPillButton(tr("Battery", "Batterie"), { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }, Modifier.weight(1f))
+                    SecondaryPillButton(tr("Battery", "Batterie"), { requestBatteryExemption(context) }, Modifier.weight(1f))
                 }
             }
             GatewayHealthDetails(rememberLocalGatewayHealth(), tr("Health of this phone (reported to the pilot)", "Santé de ce téléphone (remontée au pilote)"))
             SettingsGroup(tr("Gateway settings", "Réglages de la passerelle")) {
                 var keepScreen by remember { mutableStateOf(GatewayConfig.keepScreen(context)) }
                 ToggleRow(tr("Keep the screen on while piloting", "Garder l'écran allumé pendant le pilotage"), keepScreen, { keepScreen = it; GatewayConfig.setKeepScreen(context, it) },
-                    subtitle = tr("Off: saves the battery (~8 %/h with the screen on). Screen off, the Wi-Fi may lag by a few hundred ms; no effect on autonomous tracking, only noticeable for the sequences still driven from the Fold (bypass, docking).",
-                        "Désactivé : économise la batterie (~8 %/h écran allumé). Écran éteint, le Wi-Fi peut prendre quelques centaines de ms de retard ; sans effet sur le suivi autonome, sensible seulement pour les séquences encore pilotées depuis le Fold (contournement, accostage)."))
+                    subtitle = tr("Off: saves the battery (~8 %/h with the screen on). Screen off, the Wi-Fi may lag by a few hundred ms; no effect on autonomous tracking, only noticeable for the sequences still driven from the pilot phone (bypass, docking).",
+                        "Désactivé : économise la batterie (~8 %/h écran allumé). Écran éteint, le Wi-Fi peut prendre quelques centaines de ms de retard ; sans effet sur le suivi autonome, sensible seulement pour les séquences encore pilotées depuis le téléphone de pilotage (contournement, accostage)."))
                 SilenceRow()
             }
             val events = status.lastEvents.takeLast(12).asReversed()
             if (events.isNotEmpty()) SettingsGroup(tr("Gateway log", "Journal de la passerelle")) { LogLines(events) }
         }
-        GatewayRole.CLIENT -> {
+        GatewayRole.CLIENT, GatewayRole.OFF -> {
             var host by remember(config.role) { mutableStateOf(config.host) }
-            var code by remember(config.role) { mutableStateOf(config.code) }
-            LaunchedEffect(host, code) { kotlinx.coroutines.delay(400); save(config.copy(host = host.trim(), code = code)) }
+            var code by remember(config.role) { mutableStateOf(config.pilotCode) }
+            LaunchedEffect(host, code) { kotlinx.coroutines.delay(400); save(config.copy(host = host.trim(), pilotCode = code)) }
+            // Gateways announced on the Wi-Fi: listed by name so the pilot picks one instead of typing an address.
+            var announced by remember { mutableStateOf<List<GatewayEndpoint>?>(null) }
+            var discoverToken by remember { mutableStateOf(0) }
+            LaunchedEffect(discoverToken) {
+                announced = null
+                announced = withContext(Dispatchers.IO) { runCatching { GatewayClient.discoverAll(context, 3000) }.getOrDefault(emptyList()) }
+            }
+            fun findAndTest(target: GatewayConfig) {
+                busy = true; message = tr("Searching for the gateway…", "Recherche de la passerelle…")
+                scope.launch {
+                    val outcome = withContext(Dispatchers.IO) { runCatching { GatewayClient.find(context, target) } }
+                    message = outcome.fold({ it }, { tr("Failed: ${it.message ?: it.javaClass.simpleName}", "Échec : ${it.message ?: it.javaClass.simpleName}") })
+                    // Gateway reached with this code: piloting goes through it from now on.
+                    if (outcome.isSuccess) GatewayConfig.read(context).takeIf { it.role == GatewayRole.OFF }?.let { GatewayConfig.save(context, it.copy(role = GatewayRole.CLIENT)) }
+                    config = GatewayConfig.read(context); host = config.host; busy = false
+                }
+            }
+            var scanning by remember { mutableStateOf(false) }
+            if (scanning) QrScanDialog(onPairing = { pairing ->
+                scanning = false
+                val paired = GatewayPairing.apply(context, pairing)
+                config = paired; host = paired.host; code = paired.pilotCode
+                findAndTest(paired)
+            }, onDismiss = { scanning = false })
+            SettingsGroup(tr("Pairing", "Appairage")) {
+                PrimaryPillButton(tr("Scan the gateway QR code", "Scanner le QR code de la passerelle"), { scanning = true }, Modifier.fillMaxWidth(),
+                    enabled = linkIdle && !busy, icon = Icons.Rounded.QrCodeScanner)
+                InfoNote(tr("The QR code is on the home screen of the gateway phone. It fills the address and the code, then tests the connection.",
+                    "Le QR code est sur l'écran d'accueil du téléphone passerelle. Il remplit l'adresse et le code, puis teste la connexion."))
+            }
+            SettingsGroup(tr("Gateways on this Wi-Fi", "Passerelles sur ce Wi-Fi")) {
+                when {
+                    announced == null -> { LubaProgress(Modifier.fillMaxWidth()); InfoNote(tr("Searching the Wi-Fi…", "Recherche sur le Wi-Fi…")) }
+                    announced!!.isEmpty() -> InfoNote(tr("No gateway announced on this Wi-Fi. Check that the gateway phone is on the same Wi-Fi with the Gateway role started.",
+                        "Aucune passerelle annoncée sur ce Wi-Fi. Vérifiez que le téléphone passerelle est sur le même Wi-Fi, rôle Passerelle démarré."))
+                    else -> announced!!.forEach { endpoint ->
+                        NavRow(GatewayProtocol.displayName(endpoint.name, endpoint.host), icon = Icons.Rounded.Router, subtitle = "${endpoint.host}:${endpoint.port}",
+                            value = if (endpoint.host == host.trim()) tr("chosen", "choisie") else tr("Choose", "Choisir"), enabled = linkIdle && !busy,
+                            onClick = { host = endpoint.host })
+                    }
+                }
+                TextAction(tr("Search again", "Rechercher à nouveau"), { discoverToken++ }, Modifier.fillMaxWidth())
+            }
             SettingsGroup(tr("Connection to the gateway", "Connexion à la passerelle")) {
                 LubaTextField(host, { host = it }, tr("Gateway address", "Adresse de la passerelle"), enabled = linkIdle && !busy,
                     placeholder = tr("found automatically on the Wi-Fi", "trouvée automatiquement sur le Wi-Fi"))
                 LubaTextField(code, { code = it.filter { c -> c in '0'..'9' }.take(6) }, tr("Code shown on the gateway", "Code affiché sur la passerelle"), enabled = linkIdle && !busy,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                PrimaryPillButton(if (busy) tr("Searching…", "Recherche…") else tr("Find and test", "Trouver et tester"), {
-                    busy = true; message = tr("Searching for the gateway…", "Recherche de la passerelle…")
-                    scope.launch {
-                        message = withContext(Dispatchers.IO) {
-                            runCatching { GatewayClient.find(context, config.copy(host = host.trim(), code = code)) }.fold({ it }, { tr("Failed: ${it.message ?: it.javaClass.simpleName}", "Échec : ${it.message ?: it.javaClass.simpleName}") })
-                        }
-                        config = GatewayConfig.read(context); host = config.host; busy = false
-                    }
+                SecondaryPillButton(if (busy) tr("Searching…", "Recherche…") else tr("Find and test", "Trouver et tester"), {
+                    findAndTest(config.copy(host = host.trim(), pilotCode = code))
                 }, Modifier.fillMaxWidth(), enabled = !busy && code.length == 6, icon = Icons.Rounded.Search)
                 if (busy) LubaProgress(Modifier.fillMaxWidth())
                 if (message.isNotBlank()) StatusNote(message, messageTone(message))
@@ -155,8 +222,9 @@ fun GatewayPanel(linkIdle: Boolean, disconnect: () -> Unit = {}) {
                     "missions passent ensuite par la passerelle."))
             }
             // Status before the settings, as on the gateway side.
-            GatewayHealthDetails(rememberPilotGatewayHealth(pilot = true), reach = rememberPilotGatewayReach(pilot = true))
-            SettingsGroup(tr("Routes", "Trajets")) {
+            if (config.role == GatewayRole.CLIENT) GatewayHealthDetails(rememberPilotGatewayHealth(pilot = true), reach = rememberPilotGatewayReach(pilot = true),
+                version = GatewayHealthStore.gatewayVersion.collectAsStateWithLifecycle().value)
+            if (config.role == GatewayRole.CLIENT) SettingsGroup(tr("Routes", "Trajets")) {
                 var legs by remember { mutableStateOf(fr.luba.poc.autonomy.AutonomySettings.enabled(context)) }
                 ToggleRow(tr("Hand routes over to the gateway", "Confier les trajets à la passerelle"), legs, { legs = it; fr.luba.poc.autonomy.AutonomySettings.set(context, it) },
                     subtitle = tr("Autonomous tracking by the phone lying on the robot", "Suivi autonome par le téléphone posé sur le robot"), enabled = linkIdle)
@@ -167,7 +235,7 @@ fun GatewayPanel(linkIdle: Boolean, disconnect: () -> Unit = {}) {
                     else tr("Routes driven frame by frame from here: a Wi-Fi outage of more than ${GatewayProtocol.SILENCE_MS / 1000} s stops the robot.",
                         "Trajets pilotés trame à trame d'ici : une coupure Wi-Fi de plus de ${GatewayProtocol.SILENCE_MS / 1000} s arrête le robot."))
             }
-            SettingsGroup(tr("ESP32 gateway updates", "Mises à jour de la passerelle ESP32")) {
+            if (config.role == GatewayRole.CLIENT) SettingsGroup(tr("ESP32 gateway updates", "Mises à jour de la passerelle ESP32")) {
                 var otaMowing by remember { mutableStateOf(GatewayOta.load(context)) }
                 ToggleRow(tr("Updates during mowing", "Mises à jour pendant une tonte"), otaMowing, { otaMowing = it; GatewayOta.set(context, it) },
                     subtitle = if (otaMowing) tr("Accepted: robot stopped, gateway restarted, mowing resumed automatically",
@@ -187,8 +255,17 @@ fun GatewayPanel(linkIdle: Boolean, disconnect: () -> Unit = {}) {
                     "Réglage transmis à la passerelle à chaque connexion (passerelle ESP32 seulement)."))
             }
         }
-        GatewayRole.OFF -> Unit
     }
+}
+
+/**
+ * Asks Android to exempt the app from battery optimization (system dialog for this app). Falls back to the list of
+ * optimized apps if the dialog is not available on this phone.
+ */
+@android.annotation.SuppressLint("BatteryLife")
+fun requestBatteryExemption(context: android.content.Context) {
+    val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:${context.packageName}"))
+    runCatching { context.startActivity(direct) }.onFailure { runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
 }
 
 /** Gateway phone kept silent: volumes at minimum and "Do not disturb", restored as soon as Android changes them. */
@@ -206,7 +283,6 @@ private fun SilenceRow() {
             else -> tr("Volumes at minimum only: no \"Do not disturb\" access", "Volumes au minimum seulement : accès « Ne pas déranger » absent")
         })
     if (keep && !granted) {
-        LogLines(listOf("adb shell cmd notification allow_dnd ${context.packageName}"), title = tr("Or from the computer", "Ou depuis l'ordinateur"))
         TextAction(tr("Allow \"Do not disturb\"", "Autoriser « Ne pas déranger »"), { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) })
     }
     val events by SilenceKeeper.lastEvents.collectAsStateWithLifecycle()
@@ -233,4 +309,26 @@ fun WirelessDebugGroup() {
         val events by WirelessDebugKeeper.lastEvents.collectAsStateWithLifecycle()
         LogLines(events.asReversed())
     }
+}
+
+/**
+ * Confirmation of a pairing link opened from outside the app (another app read the QR code, shared link): nothing is
+ * changed before the user accepts. The robot must be disconnected, as for any role change.
+ */
+@Composable
+fun PairingConfirmDialog(pairing: GatewayPairing, linkIdle: Boolean, isGateway: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    LubaDialog(onDismissRequest = onDismiss, title = tr("Use this gateway?", "Utiliser cette passerelle ?"), content = {
+        Text(tr("Control the robot through the gateway ${pairing.label} (${pairing.host}).", "Piloter le robot via la passerelle ${pairing.label} (${pairing.host})."),
+            style = MaterialTheme.typography.bodyLarge)
+        InfoNote(tr("This phone becomes the pilot: the robot search, the connection and the missions go through the gateway mounted on the robot.",
+            "Ce téléphone devient le pilote : la recherche du robot, la connexion et les missions passent par la passerelle posée sur le robot."))
+        if (isGateway) StatusNote(tr("This phone is the gateway right now: it stops being one.", "Ce téléphone est actuellement la passerelle : il cesse de l'être."), NoteTone.WARNING)
+        if (!linkIdle) StatusNote(tr("Disconnect the robot first (Service → Bluetooth connection).", "Déconnectez d'abord le robot (Service → Connexion Bluetooth)."), NoteTone.WARNING)
+    }, footer = {
+        PrimaryPillButton(tr("Use this gateway", "Utiliser cette passerelle"), {
+            if (isGateway) GatewayService.stop(context)
+            onConfirm()
+        }, Modifier.fillMaxWidth(), enabled = linkIdle)
+    })
 }

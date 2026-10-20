@@ -4,6 +4,8 @@ import fr.luba.poc.i18n.tr
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -85,6 +87,18 @@ class UiShotsServiceTest {
     @Test fun connectionGateway() { role(GatewayRole.GATEWAY); page("service-connexion-passerelle", "Robot", state(false)) }
     @Config(qualifiers = "w412dp-h1600dp-xxhdpi")
     @Test fun manual() = page("service-pilotage", "Pilotage")
+    /** Manual control while recording a DumbyLuba zone by driving: map of the trace above the joysticks. */
+    @Config(qualifiers = "w412dp-h2400dp-xxhdpi")
+    @Test fun manualRecording() {
+        val lawn = fr.luba.poc.map.MapShape(1, 0, listOf(fr.luba.poc.map.Point(0.0, 0.0), fr.luba.poc.map.Point(10.0, 0.0),
+            fr.luba.poc.map.Point(10.0, 8.0), fr.luba.poc.map.Point(0.0, 8.0)), "Pelouse")
+        val map = fr.luba.poc.map.RobotMap(listOf(lawn), true, "test")
+        val corners = listOf(fr.luba.poc.map.Point(9.5, 0.5), fr.luba.poc.map.Point(16.0, 0.5), fr.luba.poc.map.Point(16.0, 7.5), fr.luba.poc.map.Point(10.5, 7.5))
+        val trace = corners.zipWithNext().flatMap { (a, b) -> (0 until 20).map { i -> fr.luba.poc.map.Point(a.x + (b.x - a.x) * i / 20, a.y + (b.y - a.y) * i / 20) } }
+        val driven = fr.luba.poc.map.DrivenTrace(fr.luba.poc.map.DrivenKind.ZONE, 1L, trace)
+        page("service-pilotage-enregistrement", "Pilotage", state(true).copy(robotMap = map, mammotionMap = map, driven = driven,
+            telemetry = Telemetry(battery = 87, x = trace.last().x, y = trace.last().y, heading = 180.0, rtkStatus = 4, positioningLevel = 4, firmware = "1.12.4")))
+    }
     @Config(qualifiers = "w412dp-h2000dp-xxhdpi")
     @Test fun watchdog() {
         val now = System.currentTimeMillis()
@@ -118,6 +132,28 @@ class UiShotsServiceTest {
     @Test fun relayGateway() { role(GatewayRole.GATEWAY); page("service-passerelle-passerelle", "Passerelle", state(false)) }
     @Config(qualifiers = "w412dp-h2400dp-xxhdpi")
     @Test fun relayClient() { role(GatewayRole.CLIENT); page("service-passerelle-pilote", "Passerelle", state(true)) }
+    /** First-launch assistant: what this phone is for. */
+    @Config(qualifiers = "w412dp-h1200dp-xxhdpi")
+    @Test fun setupWizard() = shot("assistant-accueil") { fr.luba.poc.onboarding.SetupWizard(onExit = {}) }
+
+    /** "Before the first mowing" card of the home screen, two steps done. */
+    @Test fun firstMowingCard() = shot("accueil-premiere-tonte") {
+        androidx.compose.foundation.layout.Box(Modifier.padding(16.dp)) {
+            fr.luba.poc.onboarding.FirstMowingCard(fr.luba.poc.onboarding.FirstMowingChecklist.items(
+                setOf(fr.luba.poc.onboarding.SetupStep.ROBOT_CONNECTED), ready = true, mapComplete = true, cutoffTested = false), onOpen = {}, onHide = {})
+        }
+    }
+
+    /** Home screen of the phone mounted on the robot: pairing QR code, state and phone checks. */
+    @Config(qualifiers = "w412dp-h2400dp-xxhdpi")
+    @Test fun gatewayHome() {
+        role(GatewayRole.GATEWAY)
+        fr.luba.poc.gateway.GatewayService.showcase(fr.luba.poc.gateway.GatewayStatus(running = true,
+            message = tr("Waiting for the pilot phone", "En attente du téléphone de pilotage"), address = "192.168.1.42",
+            robot = fr.luba.poc.gateway.GatewayRobotState("C4:5B:BE:00:11:22", "Luba-VS-DEMO", ready = true)))
+        try { shot("passerelle-accueil") { fr.luba.poc.gateway.GatewayHomeScreen(onOpenSettings = {}) } }
+        finally { fr.luba.poc.gateway.GatewayService.showcase(fr.luba.poc.gateway.GatewayStatus()) }
+    }
     @Config(qualifiers = "w412dp-h2400dp-xxhdpi")
     @Test fun relayClientDark() { role(GatewayRole.CLIENT); page("service-passerelle-pilote-dark", "Passerelle", state(false), dark = true) }
 }

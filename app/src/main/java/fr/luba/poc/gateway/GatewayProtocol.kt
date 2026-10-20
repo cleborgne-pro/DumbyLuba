@@ -47,10 +47,46 @@ object GatewayProtocol {
     fun config(otaDuringMowing: Boolean): ByteArray =
         "$CONFIG_OTA_DURING_MOWING=${if (otaDuringMowing) 1 else 0}".toByteArray(Charsets.UTF_8)
     const val GATEWAY_NAME = "DumbyLuba passerelle"
-    fun welcome(capabilities: List<String> = listOf(CAP_AUTONOMY, CAP_DOCK_EXIT)): ByteArray =
-        (GATEWAY_NAME + if (capabilities.isEmpty()) "" else "\ncaps=" + capabilities.joinToString(",")).toByteArray(Charsets.UTF_8)
+    /**
+     * WELCOME line giving the gateway's app version (`app=1.6.0`, 1.6.0 onwards). Older pilots only read the `caps=`
+     * line, so it changes nothing for them; the ESP32 does not send it.
+     */
+    private const val APP_LINE = "app="
+    fun welcome(capabilities: List<String> = listOf(CAP_AUTONOMY, CAP_DOCK_EXIT), appVersion: String? = fr.luba.poc.BuildConfig.VERSION_NAME): ByteArray =
+        (GATEWAY_NAME + (if (capabilities.isEmpty()) "" else "\ncaps=" + capabilities.joinToString(",")) +
+            (appVersion?.let { "\n$APP_LINE$it" } ?: "")).toByteArray(Charsets.UTF_8)
     fun capabilities(welcome: Frame): Set<String> = welcome.text().lineSequence().drop(1).firstOrNull { it.startsWith("caps=") }
         ?.removePrefix("caps=")?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
+    /** App version announced by an Android gateway (1.6.0 onwards); null for an older gateway or the ESP32. */
+    fun appVersion(welcome: Frame): String? = welcome.text().lineSequence().drop(1).firstOrNull { it.startsWith(APP_LINE) }
+        ?.removePrefix(APP_LINE)?.trim()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * mDNS instance name of an Android gateway: the common prefix (what pilots look for) followed by the phone model, so
+     * the pilot can tell several gateways apart. At most 63 bytes (DNS label).
+     */
+    fun serviceName(model: String?): String {
+        val clean = model?.filter { it.isLetterOrDigit() || it in " -_." }?.trim().orEmpty()
+        val full = if (clean.isEmpty()) SERVICE_NAME else "$SERVICE_NAME · $clean"
+        var name = full
+        while (name.toByteArray(Charsets.UTF_8).size > 63) name = name.dropLast(1)
+        return name.trimEnd(' ', '·')
+    }
+
+    /** Readable label of an announced gateway: the model after the prefix, "ESP32" for the board, otherwise its address. */
+    fun displayName(serviceName: String, host: String): String {
+        val rest = serviceName.removePrefix(SERVICE_NAME).trim().trimStart('·').trim().replace(Regex("""\s*\(\d+\)$"""), "")
+        return when {
+            rest.contains("ESP32", ignoreCase = true) -> "ESP32"
+            rest.isNotEmpty() -> rest
+            else -> host
+        }
+    }
+
+    /** Readable refusal for a protocol version mismatch, with both versions, in the current language. */
+    fun versionMismatch(gatewayVersion: Int): String = tr(
+        "Different gateway protocol (gateway v$gatewayVersion, this phone v$VERSION): install the same DumbyLuba version on both phones (this phone: ${fr.luba.poc.BuildConfig.VERSION_NAME})",
+        "Protocole de passerelle différent (passerelle v$gatewayVersion, ce téléphone v$VERSION) : installer la même version de DumbyLuba sur les deux téléphones (ce téléphone : ${fr.luba.poc.BuildConfig.VERSION_NAME})")
 
     /** Period at which the gateway health is sent to the pilot. */
     const val HEALTH_MS = 5000L

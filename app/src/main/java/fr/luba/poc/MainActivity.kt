@@ -82,6 +82,8 @@ class MainActivity : ComponentActivity() {
     private var alertOpenToken by mutableStateOf(0)
     /** "open_map" extra: opens the map (deployment check, shortcuts). */
     private var mapOpenToken by mutableStateOf(0)
+    /** Gateway pairing link opened (dumbyluba://pair, QR code read by another app): confirmed before being applied. */
+    private var pendingPairing by mutableStateOf<fr.luba.poc.gateway.GatewayPairing?>(null)
     private lateinit var robot: RobotBle
     private lateinit var themeStore: ThemeStore
     private lateinit var simulation: fr.luba.poc.simulation.SimulationSession
@@ -91,6 +93,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if(intent.getBooleanExtra("local_alerts", false)) alertOpenToken++
         if(intent.getBooleanExtra("open_map", false)) mapOpenToken++
+        if (savedInstanceState == null) pendingPairing = fr.luba.poc.gateway.GatewayPairing.parse(intent?.dataString)
         // Gateway phone mounted on the robot: listening for the pilot resumes on every launch.
         if (fr.luba.poc.gateway.GatewayConfig.read(this).role == fr.luba.poc.gateway.GatewayRole.GATEWAY) fr.luba.poc.gateway.GatewayService.start(this)
         if (Build.VERSION.SDK_INT >= 31) {
@@ -119,10 +122,13 @@ class MainActivity : ComponentActivity() {
         val cloud = ViewModelProvider(this)[CloudViewModel::class.java]
         themeStore = ThemeStore(this)
         setContent {
+            val activity = this@MainActivity
             var intro by remember { mutableStateOf(savedInstanceState == null) }
+            // First launch of a fresh installation: assistant after the intro (role, permissions, pairing).
+            var wizard by rememberSaveable { mutableStateOf(fr.luba.poc.onboarding.SetupProgress.showWizard(activity)) }
+            var wizardExit by rememberSaveable { mutableStateOf<fr.luba.poc.onboarding.WizardExit?>(null) }
             var themeMode by rememberSaveable { mutableStateOf(themeStore.mode) }
             val dark = themeMode.isDark(isSystemInDarkTheme())
-            val activity = this@MainActivity
             SideEffect {
                 activity.enableEdgeToEdge(
                     statusBarStyle = if (dark || intro) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
@@ -131,7 +137,9 @@ class MainActivity : ComponentActivity() {
             }
             LubaTheme(dark) {
                 Crossfade(targetState = intro, animationSpec = tween(220), label = "DumbyLuba startup") { showIntro ->
-                    if (showIntro) DumbyIntro(onFinished = { intro = false }) else RobotScreen(
+                    if (showIntro) DumbyIntro(onFinished = { intro = false })
+                    else if (wizard) fr.luba.poc.onboarding.SetupWizard(onExit = { wizardExit = it; wizard = false })
+                    else RobotScreen(
                         robot = robot,
                         alertOpenToken = alertOpenToken,
                         mapOpenToken = mapOpenToken,
@@ -142,6 +150,9 @@ class MainActivity : ComponentActivity() {
                         // New language: the activity is recreated so every screen is rebuilt with the new texts
                         // (a configuration change for onStop: the mission and the BLE link are kept).
                         onLanguageChange = { fr.luba.poc.i18n.LanguageStore.set(activity, it); activity.recreate() },
+                        pairing = pendingPairing,
+                        onPairingHandled = { pendingPairing = null },
+                        startAt = wizardExit,
                     )
                 }
             }
@@ -153,6 +164,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if(intent.getBooleanExtra("local_alerts", false)) alertOpenToken++
         if(intent.getBooleanExtra("open_map", false)) mapOpenToken++
+        fr.luba.poc.gateway.GatewayPairing.parse(intent.dataString)?.let { pendingPairing = it }
     }
 
     override fun onResume() {
@@ -180,6 +192,10 @@ private fun RobotScreen(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
     onLanguageChange: (fr.luba.poc.i18n.AppLanguage) -> Unit,
+    pairing: fr.luba.poc.gateway.GatewayPairing? = null,
+    onPairingHandled: () -> Unit = {},
+    /** Page asked by the first-launch assistant when it closes. */
+    startAt: fr.luba.poc.onboarding.WizardExit? = null,
 ) {
     val cloudState by cloud.state.collectAsStateWithLifecycle()
     val state by robot.state.collectAsStateWithLifecycle()
@@ -222,6 +238,26 @@ private fun RobotScreen(
     fun openDevice(target: DevicePage) { tab = Tab.Appareil; page = target }
     LaunchedEffect(mapOpenToken) { if (mapOpenToken > 0) openDevice(DevicePage.MAP) }
     fun openService(sub: String) { robotTab = sub; tab = Tab.Service }
+    val role = fr.luba.poc.gateway.rememberGatewayRole()
+    var demoMap by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(startAt) {
+        when (startAt) {
+            fr.luba.poc.onboarding.WizardExit.DEMO_MAP -> { demoMap = true; openDevice(DevicePage.MAP) }
+            fr.luba.poc.onboarding.WizardExit.SETUP_CHECK -> openService(fr.luba.poc.ui.ServicePage.SETUP.key)
+            else -> Unit
+        }
+    }
+    // First-mowing list: steps remembered once seen done (robot linked, manual control, route with blades stopped).
+    LaunchedEffect(state.ready) { if (state.ready) fr.luba.poc.onboarding.SetupProgress.mark(context, fr.luba.poc.onboarding.SetupStep.ROBOT_CONNECTED) }
+    LaunchedEffect(state.manualActive) { if (state.manualActive) fr.luba.poc.onboarding.SetupProgress.mark(context, fr.luba.poc.onboarding.SetupStep.MANUAL_TRIED) }
+    val bladesOffRoute = (state.navTest.running && !state.navTest.tonte) || (state.robotRoute.running && state.robotRoute.cutProgress == null && !state.mowing.active)
+    LaunchedEffect(bladesOffRoute) { if (bladesOffRoute) fr.luba.poc.onboarding.SetupProgress.mark(context, fr.luba.poc.onboarding.SetupStep.BLADES_OFF_ROUTE) }
+    pairing?.let { link ->
+        fr.luba.poc.gateway.PairingConfirmDialog(link, linkIdle = state.connection == ConnectionState.Disconnected,
+            isGateway = role == fr.luba.poc.gateway.GatewayRole.GATEWAY,
+            onConfirm = { fr.luba.poc.gateway.GatewayPairing.apply(context, link); onPairingHandled(); openService(fr.luba.poc.ui.ServicePage.RELAY.key) },
+            onDismiss = onPairingHandled)
+    }
     // Background Bluetooth search every time the app returns to the foreground, whatever the screen:
     // direct connection to the only robot found, otherwise a message and the selection page.
     val btPermissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(android.Manifest.permission.BLUETOOTH_SCAN, android.Manifest.permission.BLUETOOTH_CONNECT)
@@ -340,7 +376,10 @@ private fun RobotScreen(
             top = if (homeEdge) 0.dp else padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
             when (tab) {
                 Tab.Appareil -> when (page) {
-                    DevicePage.HOME -> HomeScreen(
+                    // Phone mounted on the robot: its home screen is the gateway's (pairing QR code, state, checks).
+                    DevicePage.HOME -> if (role == fr.luba.poc.gateway.GatewayRole.GATEWAY)
+                        fr.luba.poc.gateway.GatewayHomeScreen(onOpenSettings = { openService(fr.luba.poc.ui.ServicePage.RELAY.key) })
+                    else HomeScreen(
                         state = panels,
                         cloudState = cloudState,
                         map = map,
@@ -354,6 +393,20 @@ private fun RobotScreen(
                         alertsBadge = !alerts.enabled || alerts.unseen > 0,
                         // Account following this robot, or no known BLE robot: the API is authoritative.
                         apiTelemetry = cloudState.telemetry.takeIf { matchingCloudRobot || (state.selected == null && state.lastKnown == null) },
+                        checklist = {
+                            val done = fr.luba.poc.onboarding.rememberSetupDone(context)
+                            if (!fr.luba.poc.onboarding.SetupProgress.checklistHidden(context)) fr.luba.poc.onboarding.FirstMowingCard(
+                                fr.luba.poc.onboarding.FirstMowingChecklist.items(done, state.ready, map.complete, state.motorWatchdog != null),
+                                onOpen = { target -> when (target) {
+                                    fr.luba.poc.onboarding.SetupTarget.CONNECTION -> openService(fr.luba.poc.ui.ServicePage.CONNECTION.key)
+                                    fr.luba.poc.onboarding.SetupTarget.SETUP_CHECK -> openService(fr.luba.poc.ui.ServicePage.SETUP.key)
+                                    fr.luba.poc.onboarding.SetupTarget.MAP -> openDevice(DevicePage.MAP)
+                                    fr.luba.poc.onboarding.SetupTarget.COMMAND_CUTOFF -> openService(fr.luba.poc.ui.ServicePage.WATCHDOG.key)
+                                    fr.luba.poc.onboarding.SetupTarget.MANUAL -> openDevice(DevicePage.MANUAL)
+                                    fr.luba.poc.onboarding.SetupTarget.NAVIGATION -> openService(fr.luba.poc.ui.ServicePage.NAVIGATION.key)
+                                } },
+                                onHide = { fr.luba.poc.onboarding.SetupProgress.hideChecklist(context) })
+                        },
                     )
                     DevicePage.MAP -> MapScreen(
                         simulation = simulation,
@@ -398,6 +451,7 @@ private fun RobotScreen(
                                 robot.stopNavTest(tr("Move to a point stopped / left the map", "Arrêt du déplacement au point / sortie carte"), userInitiated = true)
                         },
                         onStop = robot::stop,
+                        startDemo = demoMap,
                     )
                     DevicePage.MANUAL -> fr.luba.poc.ui.ManualPage(robot, state, back = { page = DevicePage.HOME })
                 }

@@ -18,8 +18,8 @@ android {
         applicationId = "fr.luba.poc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 168
-        versionName = "1.3.0"
+        versionCode = 178
+        versionName = "1.11.0"
         testInstrumentationRunner = "fr.luba.poc.planning.PlannerDeviceBenchmark"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -71,6 +71,11 @@ dependencies {
     implementation("com.google.protobuf:protobuf-java:3.25.5")
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     implementation("org.locationtech.jts:jts-core:1.20.0")
+    // Gateway pairing: QR code drawn on the gateway, read by the pilot's camera.
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.16")

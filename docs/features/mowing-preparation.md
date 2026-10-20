@@ -31,11 +31,16 @@ mowed in this order."
 - **Add all**, **Clear**, then **Next**. A complete map is required ("Load a complete map first (Map button).").
 - The cross closes the zone choice. **Mow** reopens the route preview already computed, if any, instead of the zone
   choice.
+- [DumbyLuba zones](map.md#mammotion-zones-and-dumbyluba-zones) (recorded by driving, kept on the phone) are chosen and
+  mowed like the Mammotion zones; their chip and their name carry the **DL** mark ("3. Verger · DL").
 
 ### 2. Task settings
 
 The **Task settings** page starts with the **Zones** group ("3 zones · mowing order", with the order "1. Aire de
-jeux → 2. Piscine…"; a tap goes back to the zone choice on the map).
+jeux → 2. Piscine…"; a tap goes back to the zone choice on the map). When the chosen zones go beyond the Mammotion
+boundaries (DumbyLuba zones, enlargements), an orange note gives the area concerned: "Includes 34.0 m² beyond the
+Mammotion boundaries (DumbyLuba zones, enlargements; hatched on the map): this surface only exists on this phone and is
+mowed under your responsibility."
 
 **Route mode**
 

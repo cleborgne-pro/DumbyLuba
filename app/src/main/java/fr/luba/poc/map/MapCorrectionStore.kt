@@ -7,7 +7,8 @@ import java.io.File
 
 /**
  * Format of the local corrections (`map-corrections.json`): `{schemaVersion: 1, corrections: [...]}` in application
- * order. An unreadable entry is ignored without losing the others.
+ * order. An unreadable entry is ignored without losing the others. Types: `patch`, `offset`, `nogo`, `zone` and
+ * `passage` (DumbyLuba zone and passage, 1.4.0; an older version ignores them).
  */
 object MapCorrectionJson {
     const val SCHEMA_VERSION = 1
@@ -48,6 +49,8 @@ object MapCorrectionJson {
                 o.put("type", "nogo").put("origin", c.origin.name).put("points", points(c.points))
                 c.primitive?.let { o.put("primitive", primitive(it)) }
             }
+            is AddedZone -> o.put("type", "zone").put("name", c.name).put("points", points(c.points))
+            is AddedPassage -> o.put("type", "passage").put("points", points(c.points))
         }
         return o
     }
@@ -69,6 +72,9 @@ object MapCorrectionJson {
             "offset" -> ShapeOffset(id, created, label, o.getString("target").toLong(), fingerprint, o.getDouble("distanceM"), enabled)
             "nogo" -> AddedNoGo(id, created, label, points(o.getJSONArray("points")), NoGoOrigin.valueOf(o.getString("origin")),
                 o.optJSONObject("primitive")?.let(::primitive), enabled).also { require(it.points.size >= 3) }
+            "zone" -> AddedZone(id, created, label, o.optString("name", label), points(o.getJSONArray("points")), enabled)
+                .also { require(it.points.size >= 3) }
+            "passage" -> AddedPassage(id, created, label, points(o.getJSONArray("points")), enabled).also { require(it.points.size >= 2) }
             else -> error(tr("Unknown type", "Type inconnu"))
         }
     }

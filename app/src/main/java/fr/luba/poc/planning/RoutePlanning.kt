@@ -80,8 +80,11 @@ object RoutePlanning {
         PlannerStrategy.EXPERIMENTAL_LNS -> "Recherche locale"
     }
 
-    fun point(map: RobotMap,start: Point,target: Point,obstacles: List<LocalObstacle>) =
-        TrajectoryPlanner.pointPlan(map,start,target,obstacles)
+    /** Move to a point; [offMap]: start or destination allowed beyond the mapped zones (supervised move only);
+     * [base]/[charging]: exit from the station first ([fr.luba.poc.simulation.BaseDeparture]). */
+    fun point(map: RobotMap,start: Point,target: Point,obstacles: List<LocalObstacle>,offMap: Boolean = false,
+              base: MapBase? = null,charging: Boolean = false,accesses: List<List<Point>> = emptyList()) =
+        TrajectoryPlanner.pointPlan(map,start,target,obstacles,offMap,base,charging,accesses)
 
     /** Same navigation and same envelope validation for all local missions.
      * Reserves stay explicit: the supervised move keeps its 0.95 m margin,
@@ -167,6 +170,16 @@ object RoutePlanning {
             map.shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points } +
                 obstacles.map { fr.luba.poc.simulation.ObstacleBypass.circle(Point(it.x,it.y),it.radiusM) },
             recordedBoundary=recordedBoundary)
+
+    /**
+     * [physical] for a straight back-off along [trail]: when the robot stands beyond the mapped zones, the corridor of the
+     * trace it has just driven there is added ([fr.luba.poc.simulation.PointPlanner.trailCorridors]); otherwise unchanged.
+     * Without it, the unlock under the collision lock (25) and the back-off after a contact were always refused off the map.
+     */
+    fun backOffPhysical(map: RobotMap,obstacles: List<LocalObstacle>,robot: Point,trail: List<Point>,recordedBoundary: Boolean = true): TrajectoryPlanner {
+        val corridors = fr.luba.poc.simulation.PointPlanner.trailCorridors(map,robot,trail)
+        return physical(if(corridors.isEmpty()) map else map.copy(shapes=map.shapes+corridors),obstacles,recordedBoundary)
+    }
 
     /**
      * Start of the computation of a mowing, a survey or a debug mowing: as close as possible to where the robot is.

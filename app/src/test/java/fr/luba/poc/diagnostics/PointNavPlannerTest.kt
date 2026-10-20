@@ -1,6 +1,7 @@
 package fr.luba.poc.diagnostics
 
 import fr.luba.poc.map.*
+import fr.luba.poc.simulation.PointPlanner
 import fr.luba.poc.simulation.TrajectoryPlanner
 import fr.luba.poc.obstacles.*
 import org.junit.Assert.*
@@ -52,6 +53,139 @@ class PointNavPlannerTest {
         for (m in listOf(map().copy(complete=false),Geometry.demo()))
             assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(m,Point(3.0,3.0),Point(10.0,10.0),emptyList()) }
         assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),Point(Double.NaN,3.0),Point(10.0,10.0),emptyList()) }
+    }
+
+    /** Route accepted by the tracking checks (Fold) at every vertex, heading along the next segment. */
+    private fun assertTracked(plan: MapNavPlan) {
+        plan.points.zipWithNext().forEach { (a,b) ->
+            val heading=Math.toDegrees(kotlin.math.atan2(b.y-a.y,b.x-a.x))
+            assertNull("$a",MapNavGuard.positionFailure(plan,a,heading))
+            assertNull("$a→$b",MapNavGuard.motionFailure(plan,a,heading,b,150,0))
+        }
+        assertNull(MapNavGuard.positionFailure(plan,plan.points.last()))
+    }
+    private fun sectionLength(s: List<Point>) = s.zipWithNext().sumOf { (a,b) -> a.distance(b) }
+
+    @Test fun destinationBeyondTheZonesIsJoinedStraightFromTheNearestEntry() {
+        val start=Point(3.0,10.0); val target=Point(24.0,10.0)
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),start,target,emptyList()) }
+        val plan=TrajectoryPlanner.pointPlan(map(),start,target,emptyList(),offMap=true)
+        assertEquals(start,plan.points.first()); assertEquals(target,plan.points.last())
+        assertEquals(1,plan.offMap.size)
+        // Zone edge at x=20, robot centre half a width inside it: a little more than 4 m beyond the map.
+        assertTrue("${plan.offMapMeters}",plan.offMapMeters in 4.0..4.6)
+        assertEquals(target,plan.offMap.single().last())
+        assertTrue(plan.offMap.single().all { it.x>=19.5 && kotlin.math.abs(it.y-10.0)<0.01 })
+        requireNotNull(plan.routes).requirePath(plan.points)
+        assertTracked(plan)
+    }
+    @Test fun robotBeyondTheZonesJoinsTheMapStraightThenUsesIt() {
+        val start=Point(-3.0,10.0); val target=Point(10.0,10.0)
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),start,target,emptyList()) }
+        val plan=TrajectoryPlanner.pointPlan(map(),start,target,emptyList(),offMap=true)
+        assertEquals(start,plan.offMap.single().first())
+        assertTrue("${plan.offMapMeters}",plan.offMapMeters in 3.0..3.6)
+        assertTracked(plan)
+    }
+    @Test fun robotAndDestinationBeyondTheZonesUseTheDirectSection() {
+        val start=Point(-3.0,10.0); val target=Point(-3.0,15.0)
+        val plan=TrajectoryPlanner.pointPlan(map(),start,target,emptyList(),offMap=true)
+        assertEquals(listOf(start,target),plan.points)
+        assertEquals(5.0,plan.offMapMeters,0.05)
+        assertTracked(plan)
+    }
+    @Test fun destinationAlongTheBorderIsReachedWithAShortSectionBeyondTheMap() {
+        val start=Point(3.0,10.0); val target=Point(19.95,10.0)
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),start,target,emptyList()) }
+        val plan=TrajectoryPlanner.pointPlan(map(),start,target,emptyList(),offMap=true)
+        assertEquals(target,plan.points.last())
+        assertTrue("${plan.offMapMeters}",plan.offMapMeters in 0.05..0.5)
+    }
+    @Test fun routeInsideTheZonesHasNoSectionBeyondTheMap() {
+        val hole=rect(7.0,6.0,6.0,8.0)
+        val plan=TrajectoryPlanner.pointPlan(map(hole),Point(3.0,7.0),Point(17.0,7.0),emptyList(),offMap=true)
+        assertTrue(plan.points.size>2)
+        assertTrue(plan.offMap.isEmpty())
+        assertEquals(0.0,plan.offMapMeters,1e-9)
+    }
+    @Test fun sectionBeyondTheMapKeepsAwayFromNoGoZonesAndObstaclesAndStaysShort() {
+        val start=Point(3.0,10.0)
+        // No-go zone outside the zones, on the straight section.
+        val outside=rect(21.0,9.0,1.5,2.0)
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(outside),start,Point(25.0,10.0),emptyList(),offMap=true) }
+        // Destination inside the no-go zone.
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(outside),start,Point(21.5,10.0),emptyList(),offMap=true) }
+        // Saved obstacle beyond the map, on the section.
+        val tree=LocalObstacle("tree",ObstacleKind.OTHER,22.5,10.0,0.4,0.3,createdAtMs=0)
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),start,Point(25.0,10.0),listOf(tree),offMap=true) }
+        // Too far beyond the map.
+        val error=runCatching { TrajectoryPlanner.pointPlan(map(),start,Point(20.0+PointPlanner.MAX_OFF_MAP_M+5,10.0),emptyList(),offMap=true) }.exceptionOrNull()
+        assertTrue("$error",error is IllegalArgumentException && error.message!!.contains("30"))
+    }
+    @Test fun referenceMapDestinationBeyondARecordedZoneIsTracked() {
+        val json=org.json.JSONObject(requireNotNull(javaClass.getResourceAsStream("/planner-reference-map.json")).bufferedReader().use { it.readText() })
+        val array=json.getJSONArray("shapes")
+        val shapes=(0 until array.length()).map { i -> val s=array.getJSONObject(i); val p=s.getJSONArray("points")
+            MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until p.length()).map { Point(p.getJSONArray(it).getDouble(0),p.getJSONArray(it).getDouble(1)) },s.getString("name")) }
+        val map=RobotMap(shapes,true)
+        val start=Point(1.2557,2.404)
+        val zones=shapes.filter { it.kind==ShapeKind.ZONE }
+        val home=zones.first { Geometry.inside(start,it.points) }
+        // Points 3 m beyond each vertex of the robot's zone, outward from its centre, outside every shape.
+        val cx=home.points.map { it.x }.average(); val cy=home.points.map { it.y }.average()
+        val candidates=home.points.map { v -> val d=kotlin.math.hypot(v.x-cx,v.y-cy); Point(v.x+(v.x-cx)/d*3,v.y+(v.y-cy)/d*3) }
+            .filter { p -> shapes.none { (it.kind==ShapeKind.ZONE || it.kind==ShapeKind.NO_GO) && Geometry.inside(p,it.points) } }
+        val step=maxOf(1,candidates.size/8)
+        val plans=candidates.filterIndexed { i,_ -> i%step==0 }.mapNotNull { target ->
+            val began=System.nanoTime()
+            runCatching { TrajectoryPlanner.pointPlan(map,start,target,emptyList(),offMap=true) }
+                .also { println("POINT_OFF_MAP $target: ${(System.nanoTime()-began)/1_000_000} ms ${it.exceptionOrNull()?.message ?: "%.1f m beyond".format(it.getOrNull()?.offMapMeters)}") }
+                .getOrNull()
+        }
+        assertTrue("no destination beyond ${home.name} reached among ${candidates.size}",plans.isNotEmpty())
+        plans.forEach { plan ->
+            assertTrue(plan.offMap.isNotEmpty() && plan.offMapMeters<=PointPlanner.MAX_OFF_MAP_M)
+            assertTracked(plan)
+        }
+    }
+
+    // Base at (2, 10) docking towards −x: link point at (3.5, 10), safety zone of ≈1.05 m around the base.
+    private val base = fr.luba.poc.simulation.MapBase(Point(2.0,10.0),"Transmise par le robot",entryHeadingDegrees=180.0,approachDistanceM=1.5)
+    private val safety = TrajectoryPlanner.baseSafetyRadius(1.5)
+
+    @Test fun robotOnItsBaseLeavesStraightToTheLinkPointBeforeThePath() {
+        val docked=Point(2.0,10.0); val target=Point(2.0,16.0)
+        val plan=TrajectoryPlanner.pointPlan(map(),docked,target,emptyList(),base=base,charging=true)
+        val exit=requireNotNull(plan.departure)
+        assertEquals(Point(3.5,10.0),exit.approach)
+        assertEquals(docked,exit.from)
+        // The path starts at the link point and never enters the base safety zone (no pivot near the station).
+        assertEquals(exit.approach,plan.points.first()); assertEquals(target,plan.points.last())
+        plan.points.zipWithNext().forEach { (a,b) -> assertTrue("$a→$b",Geometry.distance(base.point,a,b)>=safety-0.03) }
+        requireNotNull(plan.routes).requirePath(plan.points)
+        assertTracked(plan)
+    }
+    @Test fun robotInsideTheBaseSafetyZoneAlsoLeavesStraight() {
+        val plan=TrajectoryPlanner.pointPlan(map(),Point(2.6,10.03),Point(15.0,10.0),emptyList(),base=base)
+        assertEquals(Point(3.5,10.0),requireNotNull(plan.departure).approach)
+        // Away from the base, not charging: no exit.
+        assertNull(TrajectoryPlanner.pointPlan(map(),Point(8.0,10.0),Point(15.0,10.0),emptyList(),base=base).departure)
+    }
+    @Test fun baseDepartureRefusals() {
+        // Charging far from the configured base, next to the base outside the corridor, destination in the safety zone, axis unknown.
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),Point(8.0,10.0),Point(15.0,10.0),emptyList(),base=base,charging=true) }
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),Point(2.3,10.6),Point(15.0,10.0),emptyList(),base=base) }
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),Point(8.0,10.0),Point(2.5,10.2),emptyList(),base=base) }
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),Point(2.0,10.0),Point(15.0,10.0),emptyList(),
+            base=base.copy(entryHeadingDegrees=null),charging=true) }
+        assertThrows(IllegalArgumentException::class.java) { TrajectoryPlanner.pointPlan(map(),Point(2.0,10.0),Point(15.0,10.0),emptyList(),charging=true) }
+    }
+    @Test fun pathsAroundTheBaseNeverCrossItsSafetyZone() {
+        // Straight line through the station without base, around its safety zone with it.
+        val start=Point(1.5,8.0); val target=Point(1.5,12.0)
+        val plan=TrajectoryPlanner.pointPlan(map(),start,target,emptyList(),base=base)
+        assertNull(plan.departure)
+        plan.points.zipWithNext().forEach { (a,b) -> assertTrue("$a→$b",Geometry.distance(base.point,a,b)>=safety-0.03) }
     }
 
     @Test(timeout=300000) fun referenceMapReachesEveryZoneThroughRecordedPassages() {

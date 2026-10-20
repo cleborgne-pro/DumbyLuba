@@ -26,6 +26,10 @@ class GatewayDenied(val wire: String) : IOException(GatewayWireText.display(wire
 class GatewayChannel private constructor(val socket: Socket, val input: DataInputStream, val output: DataOutputStream) {
     /** Capabilities announced by the gateway (see [GatewayProtocol.CAP_AUTONOMY]); empty for an older gateway. */
     @Volatile var capabilities: Set<String> = emptySet(); private set
+    /** App version of an Android gateway (1.6.0 onwards), null otherwise (older gateway, ESP32). */
+    @Volatile var appVersion: String? = null; private set
+    /** Time from the TCP connection to WELCOME (connection + two round trips): Wi-Fi latency seen by the pilot. */
+    @Volatile var handshakeMs: Long = 0; private set
     fun send(type: Int, payload: ByteArray = ByteArray(0)) = GatewayProtocol.write(output, type, payload)
     fun read(): Frame = GatewayProtocol.read(input)
     fun close() { runCatching { socket.close() } }
@@ -37,6 +41,7 @@ class GatewayChannel private constructor(val socket: Socket, val input: DataInpu
         fun open(host: String, port: Int, code: String, connectTimeoutMs: Int = 3000, silenceMs: Long = GatewayProtocol.SILENCE_MS): GatewayChannel {
             require(host.isNotBlank()) { tr("gateway address unknown", "adresse de la passerelle inconnue") }
             val socket = Socket()
+            val began = System.nanoTime()
             try {
                 socket.connect(InetSocketAddress(host, port), connectTimeoutMs)
                 socket.tcpNoDelay = true
@@ -48,14 +53,15 @@ class GatewayChannel private constructor(val socket: Socket, val input: DataInpu
                 while (challenge.type == GatewayProtocol.PING && System.currentTimeMillis() < deadline) challenge = channel.read()
                 if (challenge.type == GatewayProtocol.DENIED) throw GatewayDenied(challenge.text())
                 check(challenge.type == GatewayProtocol.CHALLENGE && challenge.payload.isNotEmpty()) { tr("unexpected answer", "réponse inattendue") }
-                check(challenge.payload[0].toInt() == GatewayProtocol.VERSION) {
-                    tr("different version: update both phones", "version différente : mettre à jour les deux téléphones")
-                }
+                check(challenge.payload[0].toInt() == GatewayProtocol.VERSION) { GatewayProtocol.versionMismatch(challenge.payload[0].toInt()) }
                 channel.send(GatewayProtocol.HELLO, GatewayProtocol.hello(code, challenge.payload.copyOfRange(1, challenge.payload.size)))
                 val answer = channel.read()
                 if (answer.type == GatewayProtocol.DENIED) throw GatewayDenied(answer.text())
                 check(answer.type == GatewayProtocol.WELCOME) { tr("unexpected answer", "réponse inattendue") }
                 channel.capabilities = GatewayProtocol.capabilities(answer)
+                channel.appVersion = GatewayProtocol.appVersion(answer)
+                channel.handshakeMs = (System.nanoTime() - began) / 1_000_000
+                GatewayHealthStore.version(channel.appVersion)
                 GatewayHealthStore.reached()
                 return channel
             } catch (error: Exception) { runCatching { socket.close() }; throw error }
@@ -323,7 +329,7 @@ class GatewayLink private constructor(private val host: String, private val port
         /** Recognizes both languages, the reason may have been built before a language change. */
         fun gatewayUnreachable(reason: String) = UNREACHABLE_PREFIXES.any { reason.startsWith(it) }
         fun open(config: GatewayConfig, address: String, name: String?, listener: RobotLink.Listener): GatewayLink? =
-            open(config.host, config.port, config.code, address, listener, name)
+            open(config.host, config.port, config.pilotCode, address, listener, name)
         fun open(host: String, port: Int, code: String, address: String, listener: RobotLink.Listener, name: String? = null): GatewayLink? {
             if (host.isBlank()) return null
             return GatewayLink(host, port, code, address, name, listener).also { it.start() }

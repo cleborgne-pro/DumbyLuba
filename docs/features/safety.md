@@ -111,6 +111,32 @@ deviation ≤ 12 cm, progress, lift, blades. The app then waits for the lock to 
 robot refuses to back up or keeps the lock: free it by hand, press STOP then Start. The lock remains a protection:
 joystick and routes stay refused while it is active.
 
+Beyond the mapped zones (version 1.5.2), after a [move to a point beyond the map](station-and-moves.md#beyond-the-mapped-zones):
+the back-off was always refused, since it was checked against the zone borders only and the trace of the move was
+not used ("no safe back-off behind the robot"). **Clear** now takes the trace of the move as well as the one of a
+route, and the last 3 m of that trace driven outside the zones open a ±0.9 m corridor, as for the section of the move;
+no-go zones and saved obstacles stay excluded, and inside the zones the borders apply unchanged. Without a recorded
+trace beyond the map (app restarted), the back-off stays refused: "robot beyond the mapped zones without a recorded
+trace", free it by hand. The same corridor is used for the back-off after a bumper contact during the move.
+
+### Self-check 25 beyond the mapped zones (version 1.11.0)
+
+Driven beyond its zones (2026-10-20, move to a point), the robot publishes self-check 25 without any contact. For the
+blade-OFF moves, 25 is now **ignored** while the robot centre stands beyond the zones and passages, or less than 35 cm
+inside their limits (chassis across the border), with bumper and lift sensors clear (`protocol/OffMapLatch.kt`):
+
+- **joystick**: control starts and goes on;
+- **move to a point**: start accepted, tracking from the Fold not stopped; with the gateway, the sections beyond the
+  map travel with the route (optional trailing field of `LegSpec`) and 25 is ignored within 0.9 m of them (an older
+  gateway still stops);
+- map: the **Robot stuck against an obstacle** panel gives way to a dismissible note "Beyond the mapped zones
+  (self-check 25): ignored…"; the log records `off_map_latch_ignored`.
+
+A real contact is still handled: bumper or lift alert stops the joystick and the move, the contact code (-1014) gives
+the back-off and the new path of the move. Inside the zones, during mowing and for routes with blades, 25 stays the
+collision lock described above. Whether the robot itself accepts the speed commands under 25 remains to be checked
+on the robot: if it refuses them, the progress guard stops the move ("no progress").
+
 Mowing interrupted and robot stuck: a single panel (0.49.1), with progress, **Discard** and **Clear**; the technical
 detail (self-check, stop cause) is behind **Details**. Once the robot is freed, the **Mowing interrupted** panel offers
 to resume.

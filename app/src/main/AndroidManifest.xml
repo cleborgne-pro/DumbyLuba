@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Gateway phone: direct "exempt from battery optimization" request instead of the list of all apps. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -20,6 +22,9 @@
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <!-- Gateway: "Do not disturb" kept on (silent phone mounted on the robot). -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- Pilot: reads the gateway pairing QR code. The camera is optional (code typed by hand otherwise). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application android:usesCleartextTraffic="true" android:name=".relay.RelayApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="false" android:supportsRtl="true" android:theme="@style/Theme.DumbyLuba.Starting">
         <service android:name=".relay.RobotLinkService" android:exported="false" android:foregroundServiceType="connectedDevice" android:stopWithTask="false" />
         <service android:name=".relay.RelayService" android:exported="false" android:foregroundServiceType="connectedDevice" android:stopWithTask="false" />
@@ -34,6 +39,13 @@
              instead of stacking a second one, which duplicated the cloud and fought over the video player (camera stuck). -->
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+            <!-- Gateway pairing link (dumbyluba://pair?...), also behind the gateway's QR code; confirmed before being applied. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="dumbyluba" android:host="pair" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

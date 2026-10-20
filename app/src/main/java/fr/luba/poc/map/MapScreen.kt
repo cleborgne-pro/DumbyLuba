@@ -161,9 +161,11 @@ fun MapScreen(
     onOpenAllTasks: () -> Unit = {},
     /** Saves the full list of local map corrections; false if refused (route in progress…). */
     onSaveCorrections: (List<MapCorrection>) -> Boolean = { false },
+    /** Opened from the first-launch assistant ("Explore without a robot"): the demo map is shown at once. */
+    startDemo: Boolean = false,
 ) {
     val colors = MammotionColors
-    var demo by remember { mutableStateOf(false) }
+    var demo by remember { mutableStateOf(startDemo) }
     val sim by simulation.ui.collectAsStateWithLifecycle()
     // Wheels of the simulated robot animated by its movement.
     val simOdometer = remember { WheelOdometer() }
@@ -229,7 +231,7 @@ fun MapScreen(
     androidx.compose.runtime.DisposableEffect(pointMode) {
         onDispose { if (pointMode) onStopPointNavigation() }
     }
-    LaunchedEffect(destination, map, state.obstacles, pointMode) {
+    LaunchedEffect(destination, map, state.obstacles, pointMode, mapBase, state.telemetry.chargeState in setOf(1,2)) {
         pointPlan = null; pointError = ""; pointComputing = false
         val target = destination
         if (pointMode && target != null && !state.navTest.running) {
@@ -238,7 +240,8 @@ fun MapScreen(
                 val start = Point(requireNotNull(state.telemetry.x) { tr("Robot position unavailable", "Position robot indisponible") },
                     requireNotNull(state.telemetry.y) { tr("Robot position unavailable", "Position robot indisponible") })
                 pointPlan = withContext(Dispatchers.Default) {
-                    RoutePlanning.point(map,start,target,state.obstacles)
+                    RoutePlanning.point(map,start,target,state.obstacles,offMap=true,base=mapBase,
+                        charging=state.telemetry.chargeState in setOf(1,2),accesses=accesses)
                 }
             } catch (cancel: CancellationException) { throw cancel }
             catch (e: Exception) { pointError = e.message ?: tr("No safe path", "Aucun chemin sûr") }
@@ -863,6 +866,12 @@ fun MapScreen(
                 if (pointMode) {
                     val points = if (state.navTest.running) state.navTest.planned else pointPlan?.points.orEmpty()
                     if (points.size > 1) drawTransitPath(path(points,false), screenUnit, colors, 3f)
+                    // Straight exit from the base to the link point, before the path.
+                    val exitLine = if (state.navTest.running) state.navTest.plannedExit else pointPlan?.departure?.let { listOf(it.from, it.approach) }.orEmpty()
+                    if (exitLine.size > 1) drawTransitPath(path(exitLine,false), screenUnit, colors, 3f)
+                    // Sections beyond the mapped zones: orange dots over the route.
+                    (if (state.navTest.running) state.navTest.plannedOffMap else pointPlan?.offMap.orEmpty())
+                        .forEach { if (it.size > 1) drawOffMapPath(path(it,false), screenUnit, colors) }
                     destination?.let { drawMapTarget(screen(it), screenUnit, colors) }
                     val trail = state.navTest.trail.map { Point(it.x,it.y) }
                     if (trail.size>1) drawPath(path(trail,false),colors.RobotMarker,style=screenStroke(2f))
@@ -961,7 +970,13 @@ fun MapScreen(
                 // Robot stuck and mowing interrupted: a single panel (2026-10-15, 17:53: two stacked technical panels
                 // covered the whole map). The resume shows once the robot is unlocked.
                 val blockedCheckpoint = state.missionCheckpoint?.takeIf { !state.robotRoute.running && sim.engine == null && !pointMode && !placingAccess }
-                val robotBlocked = state.ready && !demo && !cloud && (fr.luba.poc.protocol.StopUnlock.blocked(selfCheck) || state.unlockPending)
+                // Self-check 25 beyond the mapped zones, bumper clear: not a lock for the blade-OFF moves (2026-10-20,
+                // [fr.luba.poc.protocol.OffMapLatch]); a note replaces the "Robot stuck" panel.
+                val offMapLatch = state.ready && !demo && !cloud && !state.mowing.active && !state.robotRoute.running &&
+                    fr.luba.poc.protocol.OffMapLatch.ignored(selfCheck, state.telemetry.sensorStatus,
+                        fr.luba.poc.simulation.PointPlanner.beyondMapped(state.robotMap, state.telemetry.x?.let { x -> state.telemetry.y?.let { y -> Point(x, y) } }))
+                var offMapHidden by remember(selfCheck) { mutableStateOf(false) }
+                val robotBlocked = state.ready && !demo && !cloud && ((fr.luba.poc.protocol.StopUnlock.blocked(selfCheck) && !offMapLatch) || state.unlockPending)
                 // Forbidden time range of the Mammotion app (self-check 23): nothing to unlock, a message is enough (can be
                 // hidden until the next state change).
                 var forbiddenHidden by remember(selfCheck) { mutableStateOf(false) }
@@ -975,6 +990,10 @@ fun MapScreen(
                         "Mammotion et utiliser celle de DumbyLuba (Paramètres de la tâche) : arrêt propre, retour à la base " +
                         "et reprise au point interrompu."), NoteTone.WARNING) { forbiddenHidden = true }
                 }
+                else if (offMapLatch && !robotBlocked && !offMapHidden && !state.navTest.running && !state.manualActive)
+                    MapFloatingNote(tr("Beyond the mapped zones (self-check 25): ignored, joystick and move to a point stay available, blades stopped.",
+                        "Hors des zones cartographiées (self-check 25) : ignoré, joystick et déplacement au point restent possibles, lames arrêtées."),
+                        NoteTone.INFO) { offMapHidden = true }
                 else if (robotBlocked) {
                     val collision = fr.luba.poc.protocol.CollisionLatch.latched(selfCheck)
                     var details by remember { mutableStateOf(false) }
@@ -1001,20 +1020,10 @@ fun MapScreen(
                 else if (state.unlockStatus.startsWith(tr("Robot unlocked", "Robot déverrouillé")) && !pointMode)
                     MapFloatingNote(state.unlockStatus, NoteTone.SUCCESS)
                 // Travel speed during mowing: set in the details ("⋯" of the mowing bar), not on the map.
-                if (pointMode) MapPanel(tr("Move to a point", "Déplacer à un point"),
-                    subtitle = if (state.navTest.running || pointAttempted) state.navTest.status else if (pointComputing) tr("Computing the path…", "Calcul du chemin…")
-                        else if (pointError.isNotBlank()) pointError
-                        else pointPlan?.let { tr("Safe path: ${Format.num(it.meters,1)} m · blades stopped", "Chemin sûr : ${Format.num(it.meters,1)} m · lames arrêtées") }
-                        ?: tr("Tap the map to choose the destination.", "Touchez la carte pour choisir la destination."),
-                    onClose = { onStopPointNavigation(); pointMode = false; destination = null }) {
-                    if (!state.navTest.running) LubaCheckRow(tr("I am supervising the move, area clear and stop within reach", "Je supervise le déplacement, zone dégagée et arrêt accessible"),
-                        pointConfirmed, { pointConfirmed = it })
-                    SliderRow(tr("Travel speed", "Vitesse de déplacement"), state.trajectorySpeedPercent.toFloat(), { onTrajectorySpeed(it.toInt()) },
-                        valueRange=10f..100f,valueLabel="${state.trajectorySpeedPercent} %")
-                    if (state.navTest.running) DangerPillButton("STOP", onStopPointNavigation, Modifier.fillMaxWidth())
-                    else PrimaryPillButton(tr("Go to the point", "Aller au point"), { pointAttempted = true; destination?.let(onStartPointNavigation) }, Modifier.fillMaxWidth(),
-                        enabled = pointIdle && pointPlan != null && !pointComputing && pointConfirmed, icon = Icons.Rounded.NearMe)
-                }
+                if (pointMode) PointMovePanel(state, destination, pointPlan, pointComputing, pointError, pointAttempted, pointConfirmed,
+                    { pointConfirmed = it }, pointIdle, onTrajectorySpeed, onStopPointNavigation,
+                    onStart = { pointAttempted = true; destination?.let(onStartPointNavigation) },
+                    onClose = { onStopPointNavigation(); pointMode = false; destination = null })
                 if (placingAccess) MapPanel(tr("Manual access · ${draftAccess.size} points", "Accès manuel · ${draftAccess.size} points"),
                     subtitle = tr("Draw a free passage into the zones. Assumed width: 0.8 m + margin.", "Tracez un passage libre jusqu'à l'intérieur des zones. Largeur supposée : 0,8 m + marge."),
                     onClose = { placingAccess = false; draftAccess = emptyList() }) {
@@ -1239,7 +1248,9 @@ fun MapScreen(
             onDismiss = { mapActions = false },
             corrections = state.mapCorrections.count { it.enabled },
             correctionsEnabled = !demo && sim.engine == null && !state.robotRoute.running && !state.mowing.active && state.mammotionMap.complete,
-            onCorrections = { mapActions = false; correcting = true })
+            onCorrections = { mapActions = false; correcting = true },
+            recordEnabled = state.ready && !demo && !cloud && sim.engine == null && !state.robotRoute.running && !state.mowing.active && state.mammotionMap.complete,
+            onRecord = { mapActions = false; onOpenManual() })
         if (correcting) androidx.compose.ui.window.Dialog(onDismissRequest = { correcting = false },
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
                 dismissOnBackPress = false, dismissOnClickOutside = false)) {
@@ -1304,6 +1315,10 @@ fun MapScreen(
                             Modifier.fillMaxWidth(), enabled = selected.isNotEmpty() && map.complete && !computing, icon = Icons.Rounded.Route)
                     }) {
                     ZoneOrderGroup(selected.size, zoneLine, onEdit = { mowingDialog = false; selectingZones = true }, editEnabled = !computing)
+                    // Mowing beyond the Mammotion boundaries (DumbyLuba zones, enlargements): recalled before every task.
+                    val beyond = remember(map, selected) { MapCorrections.beyondMammotion(map, selected) }
+                    if (beyond >= 0.05) StatusNote(tr("Includes ${MapCorrections.squareMeters(beyond)} beyond the Mammotion boundaries (DumbyLuba zones, enlargements; hatched on the map): this surface only exists on this phone and is mowed under your responsibility.",
+                        "Dont ${MapCorrections.squareMeters(beyond)} hors des contours Mammotion (zones DumbyLuba, agrandissements ; hachurés sur la carte) : cette surface n'existe que sur ce téléphone et est tondue sous votre responsabilité."), NoteTone.WARNING)
                     // The signal survey is no longer a mowing mode: it is automatic while moving, and the dedicated route opens
                     // from Service → Signal surveys.
                     SettingsGroup(if (surveyTask) tr("Signal survey route", "Parcours de relevé des signaux") else tr("Route mode", "Mode de trajet")) {
@@ -1484,7 +1499,7 @@ private fun rechargeLine(state: RobotUi): String {
 
 /** Line "1. Aire de jeux → 2. Piscine": actual mowing order. */
 private fun selectedZoneLine(map: RobotMap, order: List<Long>): String =
-    order.mapIndexedNotNull { index, id -> map.shapes.firstOrNull { it.id == id }?.let { "${index + 1}. ${it.name.trim().ifBlank { "Zone ${it.id}" }}" } }
+    order.mapIndexedNotNull { index, id -> map.shapes.firstOrNull { it.id == id }?.let { "${index + 1}. ${MapCorrections.zoneTitle(it, "Zone ${it.id}")}" } }
         .joinToString(" → ").ifBlank { tr("none", "aucune") }
 
 /** Calibration taken from the robot's real mowing history (none in demo). */
@@ -1511,7 +1526,7 @@ private fun ZoneOrderChips(map: RobotMap, order: List<Long>, onRemove: (Long) ->
     if (order.isEmpty()) return
     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
         order.forEachIndexed { index, id ->
-            val name = map.shapes.firstOrNull { it.id == id }?.name?.trim()?.ifBlank { null } ?: "Zone ${index + 1}"
+            val name = map.shapes.firstOrNull { it.id == id }?.let { MapCorrections.zoneTitle(it, "Zone ${index + 1}") } ?: "Zone ${index + 1}"
             Surface(onClick = { onRemove(id) }, shape = CircleShape, color = colors.GreenSoft) {
                 Row(Modifier.padding(start = 4.dp, end = 10.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1547,6 +1562,49 @@ private fun mapExtentY(map: RobotMap): Double {
  */
 @Composable
 private fun androidx.compose.foundation.layout.BoxScope.IsolatedBox(content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) = content()
+
+/**
+ * Move to a point: path, section beyond the mapped zones (warning and its own acknowledgement), supervision, speed,
+ * start and STOP. Separate function: keeps MapScreen away from the Dalvik register limit.
+ */
+@Composable
+private fun PointMovePanel(
+    state: RobotUi, destination: Point?, plan: fr.luba.poc.diagnostics.MapNavPlan?, computing: Boolean, error: String,
+    attempted: Boolean, confirmed: Boolean, onConfirmed: (Boolean) -> Unit, idle: Boolean, onTrajectorySpeed: (Int) -> Unit,
+    onStop: () -> Unit, onStart: () -> Unit, onClose: () -> Unit,
+) {
+    // Section beyond the mapped zones: acknowledged separately for each destination and each path.
+    var offMapConfirmed by remember(destination, plan) { mutableStateOf(false) }
+    val offMeters = plan?.offMapMeters ?: 0.0
+    val offMap = offMeters > 0.0
+    MapPanel(tr("Move to a point", "Déplacer à un point"),
+        subtitle = if (state.navTest.running || attempted) state.navTest.status else if (computing) tr("Computing the path…", "Calcul du chemin…")
+            else if (error.isNotBlank()) error
+            else plan?.let {
+                if (offMap) tr("Path: ${Format.num(it.meters,1)} m including ${Format.num(offMeters,1)} m beyond the map · blades stopped",
+                    "Chemin : ${Format.num(it.meters,1)} m dont ${Format.num(offMeters,1)} m hors carte · lames arrêtées")
+                else tr("Safe path: ${Format.num(it.meters,1)} m · blades stopped", "Chemin sûr : ${Format.num(it.meters,1)} m · lames arrêtées")
+            } ?: tr("Tap the map to choose the destination, inside or beyond the zones.", "Touchez la carte pour choisir la destination, dans les zones ou au-delà."),
+        onClose = onClose) {
+        plan?.departure?.takeIf { !state.navTest.running }?.let { exit ->
+            StatusNote(tr("Robot on its base: it first leaves in a straight line, slowly, to the link point (${Format.num(exit.meters,1)} m), then follows the path.",
+                "Robot sur sa base : il sort d’abord en ligne droite, lentement, jusqu’au point de liaison (${Format.num(exit.meters,1)} m), puis suit le chemin."), NoteTone.INFO)
+        }
+        if (offMap && !state.navTest.running) StatusNote(tr("Beyond the mapped zones (orange dots): ${Format.num(offMeters,1)} m driven in a straight line without border check. Only the no-go zones and the saved obstacles are avoided: a wall, a pool or a slope are not known there.",
+            "Au-delà des zones cartographiées (pointillés orange) : ${Format.num(offMeters,1)} m parcourus en ligne droite sans contrôle des bords. Seules les zones interdites et les obstacles enregistrés sont évités : un mur, une piscine ou une pente n’y sont pas connus."), NoteTone.WARNING)
+        if (offMap && state.navTest.running) StatusNote(tr("Section beyond the map: stay next to the robot, STOP within reach.",
+            "Tronçon hors carte : rester près du robot, STOP à portée de main."), NoteTone.WARNING)
+        if (!state.navTest.running) LubaCheckRow(tr("I am supervising the move, area clear and stop within reach", "Je supervise le déplacement, zone dégagée et arrêt accessible"),
+            confirmed, onConfirmed)
+        if (offMap && !state.navTest.running) LubaCheckRow(tr("I have checked that the dotted section is clear and safe", "J’ai vérifié que le tronçon en pointillé est dégagé et sans danger"),
+            offMapConfirmed, { offMapConfirmed = it })
+        SliderRow(tr("Travel speed", "Vitesse de déplacement"), state.trajectorySpeedPercent.toFloat(), { onTrajectorySpeed(it.toInt()) },
+            valueRange=10f..100f,valueLabel="${state.trajectorySpeedPercent} %")
+        if (state.navTest.running) DangerPillButton("STOP", onStop, Modifier.fillMaxWidth())
+        else PrimaryPillButton(tr("Go to the point", "Aller au point"), onStart, Modifier.fillMaxWidth(),
+            enabled = idle && plan != null && !computing && confirmed && (!offMap || offMapConfirmed), icon = Icons.Rounded.NearMe)
+    }
+}
 
 /**
  * Floating panel laid on the map (zone choice, move, access, resume): shaded white card, title, discreet subtitle and

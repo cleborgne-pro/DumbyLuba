@@ -253,6 +253,8 @@ fun MapCorrectionEditor(
                     obstacleKind = ObstacleKind.entries.firstOrNull { it.matches(c.label) } ?: ObstacleKind.OTHER
                 }
             }
+            // DumbyLuba zone or passage: not reopened (its outline is edited by tapping it on the map, as a new correction).
+            is AddedZone, is AddedPassage -> Unit
         }
     }
 
@@ -276,7 +278,7 @@ fun MapCorrectionEditor(
                     else -> corrections + candidate
                 }
                 val result = if (candidate == null) corrected else MapCorrections.apply(raw, list)
-                val shapeId = when (candidate) { is AddedNoGo -> candidate.shapeId; null -> null; else -> MapCorrections.target(candidate) }
+                val shapeId = candidate?.let(MapCorrections::shapeOf)
                 val after = shapeId?.let { id -> result.map.shapes.firstOrNull { it.id == id } }
                 val original = shapeId?.let { id -> raw.shapes.firstOrNull { it.id == id } }
                 val before = shapeId?.let { id -> corrected.map.shapes.firstOrNull { it.id == id } }
@@ -527,7 +529,7 @@ fun MapCorrectionEditor(
                         commit(corrections.map { if (it.id == c.id) it.withEnabled(on) else it }, if (on) tr("Correction enabled again", "Correction réactivée") else tr("Correction disabled", "Correction désactivée"))
                         listOpen = true
                     }, onShow = { c ->
-                        val id = (c as? AddedNoGo)?.shapeId ?: MapCorrections.target(c)
+                        val id = MapCorrections.shapeOf(c)
                         corrected.map.shapes.firstOrNull { it.id == id }?.let { focus(it.points) }
                     }, onEdit = { reopen(it) }, onDelete = { c ->
                         val n = MapCorrections.dependents(corrections, c.id)
@@ -590,7 +592,7 @@ fun MapCorrectionEditor(
 private fun stationWarning(raw: RobotMap, c: MapCorrection): String {
     val station = raw.station?.point ?: return ""
     val map = MapCorrections.apply(raw, listOf(c)).map
-    val shapeId = (c as? AddedNoGo)?.shapeId ?: MapCorrections.target(c) ?: return ""
+    val shapeId = MapCorrections.shapeOf(c) ?: return ""
     val shape = map.shapes.firstOrNull { it.id == shapeId && it.kind == ShapeKind.NO_GO } ?: return ""
     val near = Geometry.inside(station, shape.points) ||
         shape.points.indices.any { i -> Geometry.distance(station, shape.points[i], shape.points[(i + 1) % shape.points.size]) < 1.0 }

@@ -177,7 +177,7 @@ fun TiltCalibrationDialog(orientation: MountEstimate?, calibration: TiltCalibrat
         SettingsGroup(tr("Current reading", "Mesure actuelle")) {
             val g = live
             if (g != null) KeyValueRow(tr("Tilt", "Inclinaison"), "%.1f°".format(TiltCalibration(g, null, 0).tiltDegrees))
-            else StatusNote(tr("No tilt received: control the robot through the gateway (Redmi mounted on the robot).", "Aucune inclinaison reçue : piloter le robot via la passerelle (Redmi posé sur le robot)."), NoteTone.WARNING)
+            else StatusNote(tr("No tilt received: control the robot through the gateway (Android phone mounted on the robot).", "Aucune inclinaison reçue : piloter le robot via la passerelle (téléphone Android posé sur le robot)."), NoteTone.WARNING)
             if (orientation != null) KeyValueRow(tr("Current orientation", "Orientation en cours"), mountDescription(orientation).removePrefix(mountPrefix()))
             Text(tr("Saves the current tilt as zero", "Enregistre l'inclinaison actuelle comme zéro") +
                 if (orientation != null) tr(" and the current orientation.", " et l'orientation en cours.")
@@ -214,7 +214,7 @@ fun TiltCalibrationDialog(orientation: MountEstimate?, calibration: TiltCalibrat
 /** Legend of the terrain layers (and why they are empty). */
 fun terrainLegend(signal: SurveySignal, relief: ReliefResult?, samples: List<SignalSample>): String {
     if (relief == null) return if (samples.none { it.hasTilt })
-        tr("No tilt received: the Redmi gateway lying flat on the robot sends the slope.", "Aucune inclinaison reçue : la passerelle Redmi posée à plat sur le robot transmet la pente.")
+        tr("No tilt received: the gateway phone lying flat on the robot sends the slope.", "Aucune inclinaison reçue : le téléphone passerelle posé à plat sur le robot transmet la pente.")
     else tr("Tilts received but unusable: phone not flat (screen facing the sky) or wrong orientation.", "Inclinaisons reçues mais inexploitables : téléphone pas à plat (écran vers le ciel) ou orientation incorrecte.")
     val offset = if (relief.calibrated) tr("phone corrected by the flat-ground reference", "téléphone redressé par la référence sur sol plat") else if (relief.offsetEstimated) tr("phone mounting offset corrected (%.1f %% front, %.1f %% side)", "défaut de pose du téléphone corrigé (%.1f %% avant, %.1f %% côté)").format(relief.offsetForward * 100 + 0.0, relief.offsetRight * 100 + 0.0)
         .replace("-0.0 ", "0.0 ").replace("-0,0 ", "0,0 ")

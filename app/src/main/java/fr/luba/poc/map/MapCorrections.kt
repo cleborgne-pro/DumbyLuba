@@ -92,7 +92,9 @@ data class PrimitiveShape(
 
 /** Tool that produced a boundary edit (label and re-editing). */
 enum class CorrectionTool(private val en: String, private val fr: String) {
-    POINTS("Points", "Points"), EDGE("Edge", "Bord"), SHAPE("Shape", "Forme");
+    POINTS("Points", "Points"), EDGE("Edge", "Bord"), SHAPE("Shape", "Forme"),
+    /** Enlargement recorded by driving the robot ([DrivenRecording]). */
+    DRIVEN("Driven", "Piloté");
     val label: String get() = tr(en, fr)
 }
 
@@ -157,6 +159,38 @@ data class AddedNoGo(
     override fun withEnabled(on: Boolean) = copy(enabled = on)
 }
 
+/**
+ * New mowing zone that only exists on this phone (DumbyLuba zone): recorded by driving the robot ([DrivenRecording]).
+ * It joins the corrected map as an ordinary zone (planning, simulation, mowing, moves), with the stable identifier
+ * [shapeId]; its outline is the outer side of the chassis, like a Mammotion boundary.
+ */
+data class AddedZone(
+    override val id: Long,
+    override val createdAtMs: Long,
+    override val label: String,
+    val name: String,
+    val points: List<Point>,
+    override val enabled: Boolean = true,
+) : MapCorrection {
+    val shapeId: Long get() = MapCorrections.shapeId(id)
+    override fun withEnabled(on: Boolean) = copy(enabled = on)
+}
+
+/**
+ * New passage that only exists on this phone (DumbyLuba passage): axis followed by the robot centre while it was driven
+ * ([DrivenRecording]). Like a Mammotion passage, it connects zones with a conventional corridor and is never mowed.
+ */
+data class AddedPassage(
+    override val id: Long,
+    override val createdAtMs: Long,
+    override val label: String,
+    val points: List<Point>,
+    override val enabled: Boolean = true,
+) : MapCorrection {
+    val shapeId: Long get() = MapCorrections.shapeId(id)
+    override fun withEnabled(on: Boolean) = copy(enabled = on)
+}
+
 /** Effect of a correction on the current map. */
 enum class CorrectionStatus(private val en: String, private val fr: String, val applied: Boolean) {
     APPLIED("Applied", "Appliquée", true),
@@ -178,6 +212,11 @@ data class CorrectedMap(
     val edited: Map<Long, List<Long>> = emptyMap(),
 )
 
+/** Surface beyond the Mammotion boundaries: outer rings and holes ([rings]) and area. */
+data class BeyondArea(val rings: List<List<Point>>, val areaM2: Double) {
+    companion object { val NONE = BeyondArea(emptyList(), 0.0) }
+}
+
 /** Result of a boundary operation: normalized points, or the reason for the refusal. */
 sealed interface ShapeResult {
     data class Ok(val points: List<Point>) : ShapeResult
@@ -191,6 +230,7 @@ object MapCorrections {
     /** Minimum area of a no-go zone (shrinking it to nothing would in effect remove it) and of a zone. */
     const val MIN_NO_GO_AREA_M2 = 0.05
     const val MIN_ZONE_AREA_M2 = 0.5
+    const val MIN_PASSAGE_M = 1.0
     /** Ignored slivers: below this, a difference comes from the computation and not from an edit. */
     private const val SLIVER_M2 = 1e-4
     private val precision = PrecisionModel(1000.0)
@@ -226,6 +266,19 @@ object MapCorrections {
                         is ShapeResult.Refused -> { status[c.id] = CorrectionStatus.REFUSED; reasons[c.id] = r.reason }
                     }
                 }
+                is AddedZone, is AddedPassage -> {
+                    val shapeId = shapeOf(c)!!
+                    if (shapes.containsKey(shapeId)) { status[c.id] = CorrectionStatus.REFUSED; reasons[c.id] = tr("Identifier already used", "Identifiant déjà utilisé"); continue }
+                    val result = if (c is AddedZone) normalize({ polygon(c.points) }, ShapeKind.ZONE, null) else checkPath((c as AddedPassage).points)
+                    when (result) {
+                        is ShapeResult.Ok -> {
+                            shapes[shapeId] = if (c is AddedZone) MapShape(shapeId, 0, result.points, c.name) else MapShape(shapeId, 2, result.points, c.label)
+                            status[c.id] = CorrectionStatus.APPLIED
+                            edited.getOrPut(shapeId) { mutableListOf() }.add(c.id)
+                        }
+                        is ShapeResult.Refused -> { status[c.id] = CorrectionStatus.REFUSED; reasons[c.id] = result.reason }
+                    }
+                }
                 is ShapePatch, is ShapeOffset -> {
                     val targetId = target(c)!!
                     val fingerprint = if (c is ShapePatch) c.baseFingerprint else (c as ShapeOffset).baseFingerprint
@@ -256,18 +309,85 @@ object MapCorrections {
         return CorrectedMap(map, status, reasons, edited)
     }
 
-    /** Shape targeted by an edit or an offset; null for an added no-go zone. */
+    /** Shape targeted by an edit or an offset; null for an added shape. */
     fun target(c: MapCorrection): Long? = when (c) {
         is ShapePatch -> c.target
         is ShapeOffset -> c.target
-        is AddedNoGo -> null
+        is AddedNoGo, is AddedZone, is AddedPassage -> null
     }
 
-    /** List without [id], nor the edits of the no-go zone it added (they would have no target any more). */
+    /** Shape created by an addition (no-go, zone, passage); null for an edit. */
+    fun added(c: MapCorrection): Long? = when (c) {
+        is AddedNoGo -> c.shapeId
+        is AddedZone -> c.shapeId
+        is AddedPassage -> c.shapeId
+        is ShapePatch, is ShapeOffset -> null
+    }
+
+    /** Shape created or targeted by [c]. */
+    fun shapeOf(c: MapCorrection): Long? = added(c) ?: target(c)
+
+    /** List without [id], nor the edits of the shape it added (they would have no target any more). */
     fun remove(corrections: List<MapCorrection>, id: Long): List<MapCorrection> {
         val removed = corrections.firstOrNull { it.id == id } ?: return corrections
-        val orphan = (removed as? AddedNoGo)?.shapeId
+        val orphan = added(removed)
         return corrections.filter { it.id != id && (orphan == null || target(it) != orphan) }
+    }
+
+    /** Zone or passage that only exists on this phone (DumbyLuba), as opposed to a shape recorded in the robot. */
+    fun isDumbyLuba(shape: MapShape): Boolean = isAdded(shape.id) && shape.kind != ShapeKind.NO_GO
+
+    /** Displayed name of a zone, with the "DL" mark of a DumbyLuba zone. */
+    fun zoneTitle(shape: MapShape, fallback: String): String {
+        val name = shape.name.trim().ifEmpty { fallback }
+        return if (isDumbyLuba(shape)) "$name · DL" else name
+    }
+
+    /**
+     * Mowing surface beyond the Mammotion boundaries: zones of the corrected map (DumbyLuba zones, enlargements) minus the
+     * zones recorded by Mammotion. Computed once per map (single-entry cache: the map changes rarely).
+     */
+    fun beyondMammotion(map: RobotMap): BeyondArea {
+        val original = map.mammotionShapes ?: return BeyondArea.NONE
+        synchronized(this) { beyondCache.firstOrNull { it.first === map.shapes && it.second === original }?.let { return it.third } }
+        val value = runCatching {
+            val zones = map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
+            val before = original.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
+            val g = OverlayNGRobust.overlay(union(zones), union(before), OverlayNG.DIFFERENCE)
+            val area = g.area
+            if (area < 0.05) BeyondArea.NONE else BeyondArea(rings(write(clean(g))), area)
+        }.getOrDefault(BeyondArea.NONE)
+        synchronized(this) { beyondCache = (listOf(Triple(map.shapes, original, value)) + beyondCache).take(4) }
+        return value
+    }
+
+    /** Area (m²) of [zoneIds] beyond the Mammotion boundaries (mowing preparation). */
+    fun beyondMammotion(map: RobotMap, zoneIds: Collection<Long>): Double {
+        val original = map.mammotionShapes ?: return 0.0
+        val zones = map.shapes.filter { it.id in zoneIds && it.kind == ShapeKind.ZONE && it.points.size >= 3 }
+        if (zones.isEmpty()) return 0.0
+        return runCatching {
+            OverlayNGRobust.overlay(union(zones), union(original.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }), OverlayNG.DIFFERENCE).area
+        }.getOrDefault(0.0)
+    }
+
+    /** Last maps computed, compared by identity (the editor alternates between the corrected map and its preview). */
+    private var beyondCache: List<Triple<List<MapShape>, List<MapShape>, BeyondArea>> = emptyList()
+
+    private fun union(shapes: List<MapShape>): JtsGeometry =
+        if (shapes.isEmpty()) factory.createPolygon() else OverlayNGRobust.union(shapes.map { valid(polygon(it.points)) })
+
+    private fun valid(g: JtsGeometry): JtsGeometry = if (g.isValid) g else g.buffer(0.0)
+
+    /** Passage axis: at least two distinct finite points, bounded length. */
+    fun checkPath(points: List<Point>): ShapeResult {
+        if (points.any { !it.x.isFinite() || !it.y.isFinite() }) return ShapeResult.Refused(tr("Incomplete passage", "Passage incomplet"))
+        val distinct = points.filterIndexed { i, p -> i == 0 || p.distance(points[i - 1]) >= 0.001 }
+        if (distinct.size < 2) return ShapeResult.Refused(tr("Passage too short", "Passage trop court"))
+        val length = distinct.zipWithNext().sumOf { (a, b) -> a.distance(b) }
+        if (length < MIN_PASSAGE_M) return ShapeResult.Refused(tr("Passage too short (less than ${meters(MIN_PASSAGE_M)} m)", "Passage trop court (moins de ${meters(MIN_PASSAGE_M)} m)"))
+        if (length > 500) return ShapeResult.Refused(tr("Passage oversized (more than 500 m)", "Passage démesuré (plus de 500 m)"))
+        return ShapeResult.Ok(distinct)
     }
 
     /** Corrections that would disappear with [id] (including it). */

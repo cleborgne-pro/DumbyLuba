@@ -18,8 +18,17 @@ data class MapNavPlan(
     /** Move to a point: checks use the physical footprint of the LUBA 2 (as mowing does),
      * not the fixed margin of the map test. */
     val physicalGuard: Boolean = false,
+    /** Move to a point: navigable surface of the mapped zones alone, without the corridors opened beyond them
+     * ([fr.luba.poc.simulation.PointPlanner]); null for the other courses. */
+    val mapped: Area? = null,
+    /** Straight exit from the base to the link point, driven before [points] (robot on its base); null otherwise. */
+    val departure: fr.luba.poc.simulation.BaseDeparture.Exit? = null,
 ) {
     val meters: Double get() = points.zipWithNext().sumOf { (a, b) -> a.distance(b) }
+
+    /** Sections of the route beyond the mapped zones (shown dotted, driven without map checks). */
+    val offMap: List<List<Point>> by lazy { mapped?.let { fr.luba.poc.simulation.PointPlanner.offMapSections(it, points) }.orEmpty() }
+    val offMapMeters: Double get() = offMap.sumOf { s -> s.zipWithNext().sumOf { (a, b) -> a.distance(b) } }
 
     /** Cutting test: edge [edge] (points[edge] → points[edge+1]) is driven with the blades running. */
     fun cutting(edge: Int): Boolean = BladeCourse.cuts(labels[edge + 1])

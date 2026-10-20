@@ -64,7 +64,12 @@ object GatewayHealthStore {
     fun reached(now: Long = System.currentTimeMillis()) { reachMutable.value = GatewayReach(true, now) }
     /** Gateway unreachable or silent: its last health state is no longer meaningful. */
     fun unreachable(detail: String, now: Long = System.currentTimeMillis()) { mutable.value = null; reachMutable.value = GatewayReach(false, now, detail) }
-    fun clear() { mutable.value = null; reachMutable.value = null }
+    fun clear() { mutable.value = null; reachMutable.value = null; versionMutable.value = null }
+
+    private val versionMutable = MutableStateFlow<String?>(null)
+    /** App version announced by the gateway on the last accepted connection (Android gateway 1.6.0 onwards), else null. */
+    val gatewayVersion: StateFlow<String?> = versionMutable.asStateFlow()
+    fun version(value: String?) { versionMutable.value = value }
 }
 
 /** Reads the health state of THIS phone (gateway side, or local display on the gateway). */

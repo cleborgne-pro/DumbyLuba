@@ -20,7 +20,7 @@ import fr.luba.poc.i18n.tr
 import kotlinx.coroutines.delay
 
 @Composable
-fun JoystickPanel(robot: RobotBle, state: RobotUi) {
+fun JoystickPanel(robot: RobotBle, state: RobotUi, aboveControls: @Composable () -> Unit = {}) {
     var confirmed by remember { mutableStateOf(false) }
     // Last chosen maximum speed, restored each time manual control is opened (and after a restart).
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -72,6 +72,7 @@ fun JoystickPanel(robot: RobotBle, state: RobotUi) {
     // Large camera view above the joysticks: stream requested while the page is open (the view can be hidden).
     DisposableEffect(Unit) { fr.luba.poc.camera.LiveCamera.manualPage = true; onDispose { fr.luba.poc.camera.LiveCamera.manualPage = false } }
     fr.luba.poc.camera.LiveCameraView(Modifier.fillMaxWidth(), large = true)
+    aboveControls()
     SettingsGroup(tr("Controls", "Commandes")) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Md)) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
