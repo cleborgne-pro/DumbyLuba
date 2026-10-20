@@ -140,6 +140,7 @@ the displayed source and the map contents ("7 zones · 26 no-go zones").
 | Beyond the Mammotion boundaries | **orange hatching** with a thin orange outline: mowing surface added on the phone (DumbyLuba zones, enlargements) |
 | No-go zone | ochre fill, thin darker outline |
 | Map obstacle | grey, outlined |
+| Vision zone (LUBA 2 AWD X) | drawn like a map obstacle: rectangle of type 25/26 recorded by the robot's vision, avoided by moves; mowing computation refused on such a map ([details](supported-models.md#map-of-a-luba-2-awd-x-vision-zones-version-1121)) |
 | Passage | grey stripe dotted with white (path never mowed); **green** stripe for a DumbyLuba passage |
 | Passes to mow | white lines, translucent white band at the cutting width |
 | Borders to mow | white lines on a lighter band at the cutting width: the margin kept along the boundaries and around no-go zones reads as a light edging |

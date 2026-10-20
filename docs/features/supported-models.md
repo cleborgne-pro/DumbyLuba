@@ -89,6 +89,25 @@ A model moves from read-only to validated through a code change reviewed like an
    the joystick at low speed, then the blade test;
 3. the prefix is added to `ModelSupport.VALIDATED_PREFIXES`, with the tests and this table updated.
 
+## Map of a LUBA 2 AWD X: vision zones (version 1.12.1)
+
+Besides zones, no-go zones and passages, the map of a LUBA 2 AWD X (`Luba-VP…`, seen on a 3000X, firmware
+1.30.31.19, issue DumbyLuba#1) carries rectangles of **type 25**: zones recorded by the robot's vision
+(PyMammotion `VISUAL_SAFETY_ZONE`; **type 26**, `VISUAL_OBSTACLE_ZONE`, is their obstacle sibling). Before 1.12.1
+these types were unknown: the reading received every element, then waited for the 60 s timeout ("unsupported
+types"), the map was never cached and was read again at each connection, cloud reading included.
+
+Since 1.12.1 types 25 and 26 are recognized (`ShapeKind.VISION_ZONE`, `map/Geometry.kt`):
+
+- the map is complete and cached like any other;
+- vision zones are drawn like map obstacles and **avoided by every move** (links, return to base, move to a point);
+- their exact meaning (area to avoid, or area the robot may cross with its camera) is **not confirmed**, so the
+  mowing computation is **refused** on a map that contains them ("Map with vision zones (Luba 2 AWD X): meaning not
+  confirmed, planning disabled"). The model is read-only anyway until it is validated.
+
+Cloud failures now name the MQTT reason ("MQTT disconnected", "Cloud queue full") instead of
+`IllegalStateException`.
+
 ## Cutting heights by model (version 1.13.0)
 
 The "H" versions of the LUBA (high cut, sold in North America) raise the blade disc higher than the standard

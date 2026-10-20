@@ -511,4 +511,6 @@ connection the app asks the robot for its internal model code (`device_product_t
 to tell an H version apart (same Bluetooth name and product key), and remembers it per robot; a reported height above
 the standard maximum also identifies it. Height sliders, shortcuts, round trip and full travel, height passes, blade
 test, walk and routes use that range; the protocol accepts 20–100 mm. Not verified on an H robot yet. See
-[cutting heights by model](docs/features/supported-models.md#cutting-heights-by-model-version-1130).
+[cutting heights by model](docs/features/supported-models.md#cutting-heights-by-model-version-1130). The map screen was
+brought back under the Dalvik register limit checked before installing (225 to 221), which refused the first 1.13.0
+build.

@@ -154,6 +154,10 @@ and the deployment's `dex2oat` check cleared the log after installation, hence t
   an app method exceeds 224 registers (`tools/check-dex-registers.py`, dexdump).
 - `tools/deploy.sh` clears the log before installation, then opens the map (`--ez open_map true`)
   and fails if the app crashes.
+- Oct 20 (1.13.0): the cutting heights by model brought `MapScreen` to 225 registers and the check refused the
+  Fold build. The mowing task settings are now saved by their own composable (`SaveMowingTask`, one
+  `MowingTaskSettings` key instead of 12 captured values): 221 registers. Moving or inlining a few locals did not
+  help (227): D8 allocation is not linear, measure with `./gradlew :app:assembleFold` (about 20 s) after each try.
 
 ## Go-to-point: wrong heading at start (Oct 10, 11:18–11:21)
 
