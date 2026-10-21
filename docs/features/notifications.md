@@ -36,6 +36,7 @@ Mammotion cloud.
 | **Gateway disconnected** | Wi-Fi tunnel to the gateway silent for 2 s or cut; one alert until telemetry comes back | critical if the robot was moving, otherwise warning |
 | **Move beyond the mapped zones** | start of a [move to a point](station-and-moves.md#beyond-the-mapped-zones) whose path leaves the mapped zones: length of the dotted section, driven without border check | warning |
 | **Rain during mowing** | during a mowing or route, with weather monitoring on and a garden location set: rain observed, imminent or recent, or forecast within 30 min ([weather](rain-and-weather.md)); no command is sent to the robot | warning |
+| **Blades to replace** | robot blade counter (Bluetooth) beyond the interval chosen after the last change noted in [Maintenance](maintenance.md), or beyond the Mammotion threshold if no change was noted; once per connection while due | warning |
 | **Link restored** | telemetry received again after a loss | info |
 | **Mowing finished** | end of a real mowing run (blades), report available ([history](mowing-history.md)) | info |
 | **Notification test** | **Test reception** buttons in the settings; no robot command | chosen level |

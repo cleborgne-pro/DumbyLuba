@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -52,6 +53,30 @@ class HistoryComposeTest {
         toggle.assertIsOn().assertIsEnabled()
         toggle.performClick()
         assertEquals(listOf(true), excluded)
+    }
+
+    @Test fun `report shows the Mowing Score once the track is loaded`() {
+        val done = record("t1", reason = "Tonte terminée · contact de charge confirmé")
+        compose.setContent { LubaTheme(false) { MowingReportDialog(done, listOf(done), {}, {}, loadTrack = { null }) } }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("/ 100", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        // No track: coverage estimated on the route (100 %), 2 obstacles = 8 points.
+        compose.onNodeWithText("92 / 100").assertExists()
+        compose.onNodeWithText("2 incidents (obstacles seulement) · −8 / 20").assertExists()
+    }
+
+    @Test fun `history compares two mowings side by side`() {
+        val a = record("a", startedAt = 1_760_000_000_000L)
+        val b = record("b", outcome = MowingOutcome.INTERRUPTED, startedAt = 1_760_100_000_000L)
+        compose.setContent { LubaTheme(false) { MowingHistoryPage(listOf(b, a), null, "AA", {}, {}, loadTrack = { null }) } }
+        compose.onNodeWithText("Comparer deux tontes").performScrollTo().performClick()
+        compose.onNodeWithText("Choisir la première tonte").assertExists()
+        compose.onAllNodes(hasText("Tonte · Pelouse"))[0].performClick()
+        compose.onNodeWithText("Choisir la deuxième tonte").assertExists()
+        compose.onAllNodes(hasText("Tonte · Pelouse"))[0].performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("/ 100", substring = true)).fetchSemanticsNodes().size == 2 }
+        compose.onNodeWithText("92 / 100").assertExists()
+        compose.onNodeWithText("68 / 100").assertExists()                 // 40 % of the route: −24, obstacles −8
+        compose.onNodeWithText("Interrompue").assertExists()
     }
 
     @Test fun `report of an interrupted or running mowing`() {
@@ -108,5 +133,51 @@ class HistoryComposeTest {
         compose.onNodeWithText("Relevé des signaux terminé").assertExists()
         compose.onNodeWithText("Trajet lames arrêtées : il n'ajuste pas les estimations de durée des tontes.").performScrollTo().assertExists()
         compose.onNodeWithText("Obstacles contournés").performScrollTo().assertExists()
+    }
+
+    @Test fun `mowing detail shows the real coverage of each zone and its gaps`() {
+        val mowing = record("m1")
+        val zones = listOf(fr.luba.poc.map.MapShape(1, 0, listOf(Point(0.0, 0.0), Point(10.0, 0.0), Point(10.0, 4.0), Point(0.0, 4.0)), "Pelouse"),
+            fr.luba.poc.map.MapShape(2, 0, listOf(Point(12.0, 0.0), Point(16.0, 0.0), Point(16.0, 4.0), Point(12.0, 4.0)), "Fond"))
+        val map = fr.luba.poc.map.RobotMap(zones, true, "test")
+        // Two stripes in Pelouse, nothing in Fond.
+        val samples = (0..96).map { i -> TrackSample(mowing.startedAt + i * 1_000L, 0.2 + i * 0.1, 0.3, 0.0, TrackPhase.CUTTING, 90) } +
+            (0..96).map { i -> TrackSample(mowing.startedAt + 100_000L + i * 1_000L, 9.8 - i * 0.1, 0.65, 180.0, TrackPhase.CUTTING, 90) }
+        val track = TaskTrack(TrackMeta(map, zoneIds = listOf(1L, 2L)), samples)
+        compose.setContent { LubaTheme(false) { TaskDetailPage(mowing, listOf(mowing), map, { track }, {}, {}) } }
+        compose.waitForIdle()
+        compose.onNodeWithText("Couverture réelle", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("Fond").performScrollTo().assertExists()
+        compose.onNodeWithText("0 % · 0 m² sur 16 m²").performScrollTo().assertExists()
+        compose.onNodeWithText("Manques de 0,25 m² ou plus").performScrollTo().assertExists()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("au total", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test fun `black box of an incident opens and the replay jumps between incidents`() {
+        val mowing = record("m2")
+        val t0 = mowing.startedAt
+        val samples = (0..120).map { i -> TrackSample(t0 + i * 1_000L, i * 0.05, 0.0, 0.0, TrackPhase.CUTTING, 90) }
+        val events = listOf(TaskEvent(t0, TaskEventType.START, "Tonte"), TaskEvent(t0 + 30_000, TaskEventType.CONTACT, "Contact bumper (1005)"),
+            TaskEvent(t0 + 90_000, TaskEventType.LINK_LOST, "Perte BLE"))
+        val box = BlackBox(t0 + 30_000, listOf(TaskEventType.CONTACT, TaskEventType.STOP), "Contact bumper (1005)",
+            (0..10).map { i -> BlackBoxFrame(t0 + 20_000 + i * 1_000L, 1.0, 0.0, 0.0, 300, -40, 0.3, 90, 13, 0, 4, 30, TrackLinkState.BLUETOOTH, "FOLLOWING") },
+            listOf(BlackBoxCommand(t0 + 29_500, "NAV_STOP", 0, 0)), listOf(BlackBoxNote(t0 + 30_100, "route_contact", "Contact bumper : arrêt")))
+        val track = TaskTrack(null, samples, events, listOf(box))
+        compose.setContent { LubaTheme(false) { TaskDetailPage(mowing, listOf(mowing), null, { track }, {}, {}) } }
+        compose.waitForIdle()
+        // Replay at the end: the last incident is current.
+        compose.onNodeWithText("Incident 2 / 2 · Perte de liaison").performScrollTo().assertExists()
+        compose.onNodeWithContentDescription("Incident précédent").performClick()   // to the link loss
+        compose.onNodeWithText("Incident 2 / 2 · Perte de liaison").assertExists()
+        compose.onNodeWithContentDescription("Incident précédent").performClick()
+        compose.onNodeWithText("Incident 1 / 2 · Contact pare-chocs").assertExists()
+        val title = "${TaskText.clock(t0 + 30_000)} · Contact pare-chocs + STOP"
+        compose.onNodeWithText(title).performScrollTo().performClick()
+        compose.onNodeWithText("−0,5 s · NAV_STOP 0/0").performScrollTo().assertExists()
+        compose.onNodeWithText("+0,1 s · Contact bumper : arrêt").performScrollTo().assertExists()
+        compose.onNodeWithContentDescription("Incident suivant").performScrollTo().performClick()
+        compose.onNodeWithText("Incident 2 / 2 · Perte de liaison").assertExists()
+        compose.onNodeWithText("Voir dans le replay").performScrollTo().performClick()
+        compose.onNodeWithText("Incident 1 / 2 · Contact pare-chocs").performScrollTo().assertExists()
     }
 }

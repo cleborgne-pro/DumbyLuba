@@ -1,6 +1,7 @@
 package fr.luba.poc.history
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,9 @@ import androidx.compose.material.icons.rounded.PauseCircle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.ReportProblem
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,6 +61,7 @@ import fr.luba.poc.ui.components.KeyValueRow
 import fr.luba.poc.ui.components.NavRow
 import fr.luba.poc.ui.components.NoteTone
 import fr.luba.poc.ui.components.PushedPage
+import fr.luba.poc.ui.components.SecondaryPillButton
 import fr.luba.poc.ui.components.Segmented
 import fr.luba.poc.ui.components.SettingsGroup
 import fr.luba.poc.ui.components.StatusNote
@@ -157,9 +162,16 @@ fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMa
     androidx.activity.compose.BackHandler(onBack = onBack)
     var track by remember(record.id) { mutableStateOf<TaskTrack?>(null) }
     var loading by remember(record.id) { mutableStateOf(true) }
+    var coverage by remember(record.id) { mutableStateOf<CoverageMap?>(null) }
+    // Replay cursor asked by the journal or a black box (a new value at each tap, even on the same moment).
+    var jump by remember(record.id) { mutableStateOf<ReplayJump?>(null) }
+    val jumpTo: (Long) -> Unit = { at -> jump = ReplayJump(at, (jump?.nonce ?: 0) + 1) }
     LaunchedEffect(record.id, record.outcome, record.endedAt) {
         track = runCatching { loadTrack(record.id) }.getOrNull()
         loading = false
+        // Real coverage: mowings only (surveys and routes run with blades stopped).
+        coverage = track?.takeIf { record.kind == TaskKind.MOW }?.let { t ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { runCatching { CoverageMap.of(t, fallbackMap) }.getOrNull() } }
     }
     PushedPage(tr("${record.kind.label} of ${MowingText.date(record.startedAt)}", "${record.kind.label} du ${MowingText.date(record.startedAt)}"), onBack, modifier) {
         StatusNote(when (record.outcome) {
@@ -168,12 +180,16 @@ fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMa
                 "${record.kind.label} ${TaskText.outcome(record).lowercase()} à ${MowingText.percent(record.progress * 100)} : ${record.reason?.let(::reasonText) ?: "cause inconnue"}")
             MowingOutcome.RUNNING -> tr("${record.kind.label} in progress", "${record.kind.label} en cours")
         }, when (record.outcome) { MowingOutcome.COMPLETE -> NoteTone.SUCCESS; MowingOutcome.INTERRUPTED -> NoteTone.WARNING; else -> NoteTone.INFO })
-        TaskReplay(record, track, loading, fallbackMap)
+        TaskReplay(record, track, loading, fallbackMap, coverage, jump)
         if (!loading) TrackingQuality(record, track)
+        if (!loading) TaskJournal(track, jumpTo)
+        if (!loading) BlackBoxSection(track, jumpTo)
+        coverage?.let { RealCoverageSection(record, it) }
         if (record.kind == TaskKind.MOW) {
             val comparison = remember(record) { MowingComparison.of(record) }
             val calibration = remember(history, record.robotId) { MowingCalibration.from(history, record.robotId) }
-            MowingReportContent(record, comparison, calibration)
+            val score = remember(record, track, coverage, loading) { if (loading) null else MowingScore.of(record, track, coverage) }
+            MowingReportContent(record, comparison, calibration, score)
             SettingsGroup {
                 ToggleRow(tr("Use for estimates", "Utiliser pour les estimations"), !record.excluded, { onExcluded(!it) },
                     subtitle = tr("Turn off for a test or an abnormal mowing: it will not correct the next estimates.",
@@ -195,7 +211,8 @@ fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMa
 
 /** Map and replay controls for the actual positions. */
 @Composable
-private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean, fallbackMap: RobotMap?) {
+private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean, fallbackMap: RobotMap?, coverage: CoverageMap? = null,
+                       jump: ReplayJump? = null) {
     val colors = MammotionColors
     val samples = track?.samples.orEmpty()
     val map = track?.meta?.map ?: fallbackMap ?: RobotMap()
@@ -204,8 +221,12 @@ private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean
     val end = track?.endMs ?: 0L
     var cursor by remember(track) { mutableLongStateOf(end) }
     var playing by remember(track) { mutableStateOf(false) }
+    LaunchedEffect(jump, track) { jump?.let { playing = false; cursor = it.atMs.coerceIn(start, maxOf(start, end)) } }
+    val incidents = remember(track) { track?.events.orEmpty().filter { it.type.incident } }
     var speed by remember { mutableIntStateOf(60) }
     var showPlanned by remember { mutableStateOf(true) }
+    var showCoverage by remember { mutableStateOf(true) }
+    val coverageImage = remember(coverage, record.finished) { coverage?.let { CoverageLayerStyle.image(it, gaps = record.finished) } }
     LaunchedEffect(playing, speed, track) {
         if (!playing || samples.size < 2) return@LaunchedEffect
         if (cursor >= end) cursor = start
@@ -245,7 +266,8 @@ private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean
             MapLive(map, Modifier.fillMaxWidth().height(400.dp), x = pose?.x, y = pose?.y, heading = pose?.heading?.takeUnless { it.isNaN() },
                 trail = if (map.shapes.isEmpty()) samples.map { it.point } else emptyList(),
                 plannedBands = if (showPlanned) track?.meta?.cutting.orEmpty() else emptyList(),
-                interactive = true, cameraReset = record.id.hashCode(), overlays = overlays, publishedPosition = false)
+                interactive = true, cameraReset = record.id.hashCode(), overlays = overlays, publishedPosition = false,
+                coverage = if (showCoverage && coverage != null && coverageImage != null) coverage to coverageImage else null)
         }
         when {
             loading -> InfoNote(tr("Loading the track…", "Chargement de la piste…"))
@@ -267,13 +289,51 @@ private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean
                 Slider(value = if (end > start) ((cursor - start).toFloat() / (end - start)).coerceIn(0f, 1f) else 1f,
                     onValueChange = { playing = false; cursor = start + ((end - start) * it).toLong() })
                 Segmented(listOf(10 to "×10", 60 to "×60", 300 to "×300", 1000 to "×1000"), speed, { speed = it })
+                if (incidents.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+                    val previous = incidents.lastOrNull { it.atMs < cursor - 500 }
+                    val next = incidents.firstOrNull { it.atMs > cursor + 500 }
+                    IconButton(onClick = { previous?.let { playing = false; cursor = it.atMs.coerceIn(start, end) } }, enabled = previous != null) {
+                        Icon(Icons.Rounded.SkipPrevious, contentDescription = tr("Previous incident", "Incident précédent"))
+                    }
+                    Text(ReplayText.incident(incidents, cursor), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary)
+                    IconButton(onClick = { next?.let { playing = false; cursor = it.atMs.coerceIn(start, end) } }, enabled = next != null) {
+                        Icon(Icons.Rounded.SkipNext, contentDescription = tr("Next incident", "Incident suivant"))
+                    }
+                }
                 Legend(samples)
                 ToggleRow(tr("Prepared route", "Trajet préparé"), showPlanned, { showPlanned = it },
                     subtitle = tr("Cutting stripes and links computed at start, under the actual positions.", "Bandes de coupe et raccords calculés au lancement, sous les positions réelles."), enabled = track?.meta != null)
+                if (coverage != null) ToggleRow(tr("Real coverage", "Couverture réelle"), showCoverage, { showCoverage = it },
+                    subtitle = if (record.finished) tr("Mowed area in green, gaps left in orange.", "Surface tondue en vert, manques restants en orange.")
+                        else tr("Mowed area so far, in green.", "Surface tondue jusqu'ici, en vert."))
                 KeyValueRow(tr("Recorded positions", "Positions relevées"), tr("${samples.size} · ${MowingForecaster.num(distance(samples), 0)} m traveled", "${samples.size} · ${MowingForecaster.num(distance(samples), 0)} m parcourus"))
                 if (track?.meta == null) InfoNote(tr("Current robot map shown: the task map was not recorded.", "Carte actuelle du robot affichée : la carte de la tâche n'a pas été enregistrée."))
             }
         }
+    }
+}
+
+/**
+ * Real coverage of a mowing: share of each zone actually mowed according to the track (cutting width around the
+ * positions recorded with the blades running) and the gaps left, which a later pass can target.
+ */
+@Composable
+private fun RealCoverageSection(record: MowingRecord, coverage: CoverageMap) {
+    val gaps by androidx.compose.runtime.produceState<List<CoverageGap>?>(null, coverage) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { runCatching { coverage.gaps() }.getOrDefault(emptyList()) }
+    }
+    SettingsGroup(tr("Real coverage", "Couverture réelle")) {
+        if (coverage.coveredM2 <= 0.0) {
+            InfoNote(tr("No position recorded with the blades running: coverage not measured.", "Aucune position relevée lames en marche : couverture non mesurée."))
+            return@SettingsGroup
+        }
+        KeyValueRow(tr("Covered", "Couvert"), tr("${CoverageText.percent(coverage.fraction)} · ${CoverageText.area(coverage.coveredM2)} of ${CoverageText.area(coverage.areaM2)}",
+            "${CoverageText.percent(coverage.fraction)} · ${CoverageText.area(coverage.coveredM2)} sur ${CoverageText.area(coverage.areaM2)}"))
+        if (coverage.zones.size > 1) coverage.zones.forEach { z -> KeyValueRow(z.name.trim().ifBlank { tr("Unnamed zone", "Zone sans nom") }, CoverageText.zone(z)) }
+        KeyValueRow(tr("Mowed twice or more", "Tondu plusieurs fois"), CoverageText.area(coverage.repeatedM2))
+        if (record.finished) KeyValueRow(tr("Gaps of ${CoverageText.area(CoverageMap.MIN_GAP_M2)} or more", "Manques de ${CoverageText.area(CoverageMap.MIN_GAP_M2)} ou plus"), gaps?.let(CoverageText::gaps) ?: "…")
+        InfoNote(tr("Cutting width (${MowingForecaster.num(coverage.cutWidthM * 100, 0)} cm) swept around the positions received with the blades running, on a ${MowingForecaster.num(coverage.cellM * 100, 0)} cm grid; no-go zones excluded. Strips narrower than about 30 cm along the edges are not counted as gaps.",
+            "Largeur de coupe (${MowingForecaster.num(coverage.cutWidthM * 100, 0)} cm) balayée autour des positions reçues lames en marche, sur une grille de ${MowingForecaster.num(coverage.cellM * 100, 0)} cm ; zones interdites exclues. Les bandes de moins de 30 cm environ le long des bords ne comptent pas comme des manques."))
     }
 }
 
@@ -297,6 +357,143 @@ private fun TrackingQuality(record: MowingRecord, track: TaskTrack?) {
         InfoNote(tr("Measured on the positions received while mowing, against the stripes prepared at start: a bypass or a repaired route counts as a deviation. A hole means positions not received (Wi-Fi or link lost).",
             "Mesuré sur les positions reçues pendant la tonte, par rapport aux bandes préparées au lancement : un contournement ou un trajet réparé compte comme un écart. Un trou signale des positions non reçues (Wi-Fi ou liaison perdus)."))
     }
+}
+
+/**
+ * Typed journal of the task: start, recharges, obstacles, blockages, STOP, link losses… with the time and the
+ * elapsed time since the start. Incidents are highlighted.
+ */
+@Composable
+private fun TaskJournal(track: TaskTrack?, onJump: (Long) -> Unit) {
+    val events = track?.events.orEmpty()
+    if (events.isEmpty()) return
+    var all by remember(track) { mutableStateOf(false) }
+    val start = track?.startMs?.takeIf { it > 0 }?.let { minOf(it, events.first().atMs) } ?: events.first().atMs
+    SettingsGroup(tr("Task journal", "Journal de la tâche")) {
+        KeyValueRow(tr("Events", "Événements"), JournalText.summary(events))
+        val shown = if (all || events.size <= JOURNAL_PREVIEW) events else events.take(JOURNAL_PREVIEW)
+        shown.forEach { e ->
+            // An incident opens the replay at its moment.
+            Column(Modifier.fillMaxWidth().then(if (e.type.incident) Modifier.clickable { onJump(e.atMs) } else Modifier).padding(vertical = 2.dp)) {
+                Text("${TaskText.clock(e.atMs)} · +${TaskText.elapsed(e.atMs - start)} · ${e.type.label}",
+                    style = MaterialTheme.typography.titleSmall, color = if (e.type.incident) MammotionColors.Warning else MammotionColors.TextPrimary)
+                JournalText.detail(e)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary) }
+            }
+        }
+        if (events.size > JOURNAL_PREVIEW) ToggleRow(tr("Show all ${events.size} events", "Afficher les ${events.size} événements"), all, { all = it })
+    }
+}
+
+private const val JOURNAL_PREVIEW = 30
+
+/** Replay cursor asked from outside the replay; [nonce] changes at each request. */
+data class ReplayJump(val atMs: Long, val nonce: Int)
+
+/** Labels of the replay incident navigation. */
+object ReplayText {
+    /** "Incident 2 / 5 · Bumper contact" for the last incident before the cursor, or the count before the first one. */
+    fun incident(incidents: List<TaskEvent>, cursor: Long): String {
+        val i = incidents.indexOfLast { it.atMs <= cursor + 500 }
+        return if (i < 0) tr("${incidents.size} incident${if (incidents.size > 1) "s" else ""}", "${incidents.size} incident${if (incidents.size > 1) "s" else ""}")
+        else tr("Incident ${i + 1} / ${incidents.size} · ${incidents[i].type.label}", "Incident ${i + 1} / ${incidents.size} · ${incidents[i].type.label}")
+    }
+}
+
+/**
+ * Black boxes of the task: for each incident, what the robot and the phone did in the 45 s before it and the 3 s after
+ * (positions, commands, telemetry, link, log events). A tap opens it; "Show in the replay" moves the replay to it.
+ */
+@Composable
+private fun BlackBoxSection(track: TaskTrack?, onJump: (Long) -> Unit) {
+    val boxes = track?.boxes.orEmpty()
+    if (boxes.isEmpty()) return
+    var open by remember(track) { mutableStateOf<Int?>(null) }
+    SettingsGroup("Black Box") {
+        boxes.forEachIndexed { i, b ->
+            NavRow("${TaskText.clock(b.atMs)} · ${BlackBoxText.title(b)}", icon = Icons.Rounded.ReportProblem, subtitle = BlackBoxText.summary(b)) {
+                open = if (open == i) null else i
+            }
+            if (open == i) BlackBoxDetail(b, onJump)
+        }
+        InfoNote(tr("Frozen at each incident (blockage, bumper contact, obstacle, lift, robot error, STOP, link lost): 45 s before it and 3 s after, exported with the logs.",
+            "Figée à chaque incident (blocage, contact pare-chocs, obstacle, soulèvement, erreur robot, STOP, perte de liaison) : 45 s avant et 3 s après, exportée avec les journaux."))
+    }
+}
+
+@Composable
+private fun BlackBoxDetail(box: BlackBox, onJump: (Long) -> Unit) {
+    val mono = MaterialTheme.typography.labelSmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+    Column(Modifier.fillMaxWidth().padding(start = Dimens.Md), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        SecondaryPillButton(tr("Show in the replay", "Voir dans le replay"), { onJump(box.atMs) }, Modifier.fillMaxWidth())
+        if (box.detail.isNotBlank()) Text(box.detail, style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary)
+        Text(tr("Robot (every 2 s)", "Robot (toutes les 2 s)"), style = MaterialTheme.typography.titleSmall)
+        BlackBoxText.frames(box).forEach { Text(it, style = mono, color = MammotionColors.TextPrimary) }
+        if (box.commands.isNotEmpty()) {
+            Text(tr("Commands (last ${BlackBoxText.COMMANDS})", "Commandes (${BlackBoxText.COMMANDS} dernières)"), style = MaterialTheme.typography.titleSmall)
+            BlackBoxText.commands(box).forEach { Text(it, style = mono, color = MammotionColors.TextPrimary) }
+        }
+        if (box.notes.isNotEmpty()) {
+            Text(tr("Log", "Journal"), style = MaterialTheme.typography.titleSmall)
+            BlackBoxText.notes(box).forEach { Text(it, style = mono, color = MammotionColors.TextSecondary) }
+        }
+    }
+}
+
+/** Labels of the black boxes. */
+object BlackBoxText {
+    const val COMMANDS = 15
+    const val NOTES = 40
+
+    fun title(b: BlackBox): String = b.triggers.joinToString(" + ") { it.label }.ifBlank { "Incident" }
+
+    private fun offset(b: BlackBox, at: Long): String {
+        val s = (at - b.atMs) / 1000.0
+        return (if (s < 0) "−" else "+") + MowingForecaster.num(Math.abs(s), 1) + " s"
+    }
+
+    private fun command(linear: Int?, angular: Int?) = if (linear == null || angular == null) "—" else "$linear/$angular"
+
+    /** State at the incident: link, command, battery, RTK, then the size of the box. */
+    fun summary(b: BlackBox): String {
+        val f = b.frameAt(b.atMs)
+        val state = f?.let { listOfNotNull(it.link.label, tr("command ${command(it.linear, it.angular)}", "commande ${command(it.linear, it.angular)}"),
+            it.battery.takeIf { v -> v >= 0 }?.let { v -> tr("battery $v %", "batterie $v %") },
+            it.rtkStatus.takeIf { v -> v >= 0 }?.let { v -> "RTK $v" + (it.satellites.takeIf { s -> s >= 0 }?.let { s -> " ($s sat.)" } ?: "") }) }.orEmpty()
+        return (state + tr("${b.frames.size} states · ${b.commands.size} commands · ${b.notes.size} events", "${b.frames.size} états · ${b.commands.size} commandes · ${b.notes.size} événements"))
+            .joinToString(" · ")
+    }
+
+    /** One line every 2 s: time from the incident, position, heading, command, speed, robot state, RTK, link. */
+    fun frames(b: BlackBox): List<String> {
+        val out = mutableListOf<BlackBoxFrame>()
+        b.frames.forEach { f -> if (out.isEmpty() || f.atMs - out.last().atMs >= 2_000) out += f }
+        return out.map { f ->
+            listOf(offset(b, f.atMs),
+                if (f.x.isFinite() && f.y.isFinite()) "(${MowingForecaster.num(f.x, 2)}, ${MowingForecaster.num(f.y, 2)})" else "(—)",
+                if (f.heading.isFinite()) "${Math.round(f.heading)}°" else "—°",
+                tr("cmd", "cmd") + " " + command(f.linear, f.angular),
+                if (f.speedMps.isFinite()) "${MowingForecaster.num(f.speedMps, 2)} m/s" else "— m/s",
+                tr("state", "état") + " " + (f.robotState.takeIf { it >= 0 }?.toString() ?: "—"),
+                "RTK " + (f.rtkStatus.takeIf { it >= 0 }?.toString() ?: "—"),
+                f.link.label).joinToString(" · ")
+        }
+    }
+
+    fun commands(b: BlackBox): List<String> = b.commands.takeLast(COMMANDS).map { c ->
+        "${offset(b, c.atMs)} · ${c.label}" + if (c.linear != null || c.angular != null) " ${command(c.linear, c.angular)}" else "" }
+
+    fun notes(b: BlackBox): List<String> = b.notes.takeLast(NOTES).map { n -> "${offset(b, n.atMs)} · ${n.text}" }
+}
+
+/** Labels of the task journal. */
+object JournalText {
+    /** Count per type, incidents first: "2 Recharge · 1 Obstacle". */
+    fun summary(events: List<TaskEvent>): String = events.groupingBy { it.type }.eachCount().entries
+        .sortedWith(compareByDescending<Map.Entry<TaskEventType, Int>> { it.key.incident }.thenBy { it.key.ordinal })
+        .joinToString(" · ") { "${it.value} ${it.key.label}" }
+
+    fun detail(e: TaskEvent): String? = listOfNotNull(e.detail.takeIf { it.isNotBlank() && it != e.type.label },
+        e.battery.takeIf { it >= 0 }?.let { tr("battery $it %", "batterie $it %") }).joinToString(" · ").ifBlank { null }
 }
 
 /** Labels of the route tracking section. */

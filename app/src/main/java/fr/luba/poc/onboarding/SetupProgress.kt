@@ -60,12 +60,13 @@ data class ChecklistItem(val step: String, val title: String, val subtitle: Stri
  * [mapComplete] and [cutoffTested] are read live (per robot); the others come from [done].
  */
 object FirstMowingChecklist {
-    fun items(done: Set<SetupStep>, ready: Boolean, mapComplete: Boolean, cutoffTested: Boolean): List<ChecklistItem> = listOf(
+    fun items(done: Set<SetupStep>, ready: Boolean, mapComplete: Boolean, cutoffTested: Boolean,
+              localOnly: Boolean = fr.luba.poc.auth.AccountMode.localOnly): List<ChecklistItem> = listOf(
         ChecklistItem("robot", tr("Connect the robot", "Connecter le robot"), tr("Through the gateway or over direct Bluetooth", "Par la passerelle ou en Bluetooth direct"),
             ready || SetupStep.ROBOT_CONNECTED in done, SetupTarget.CONNECTION),
         ChecklistItem("check", tr("Check the setup", "Vérifier l'installation"), tr("Wi-Fi, gateway, placement, link by link", "Wi-Fi, passerelle, placement, maillon par maillon"),
             SetupStep.SETUP_CHECKED in done, SetupTarget.SETUP_CHECK),
-        ChecklistItem("map", tr("Read the map", "Lire la carte"), tr("From the robot or the Mammotion account", "Depuis le robot ou le compte Mammotion"),
+        ChecklistItem("map", tr("Read the map", "Lire la carte"), if (localOnly) tr("From the robot, over Bluetooth or the gateway", "Depuis le robot, en Bluetooth ou par la passerelle") else tr("From the robot or the Mammotion account", "Depuis le robot ou le compte Mammotion"),
             mapComplete, SetupTarget.MAP),
         ChecklistItem("cutoff", tr("Test the command cutoff", "Tester la coupure des commandes"), tr("Does the robot stop on its own if the app goes silent?", "Le robot s'arrête-t-il seul si l'application se tait ?"),
             cutoffTested, SetupTarget.COMMAND_CUTOFF),

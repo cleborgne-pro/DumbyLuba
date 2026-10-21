@@ -17,7 +17,9 @@ import fr.luba.poc.i18n.tr
 
 enum class CloudReturnPhase { IDLE, CONNECTING, WAKING, REQUESTED, RETURNING, DOCKED, CANCELLED, FAILED }
 
-data class CloudReturnUi(val phase: CloudReturnPhase = CloudReturnPhase.IDLE, val status: String = "", val updatedAt: Long? = null) {
+/** [presence]: robot on its base or not according to the latest account report (set by the screen, not by the tracker). */
+data class CloudReturnUi(val phase: CloudReturnPhase = CloudReturnPhase.IDLE, val status: String = "", val updatedAt: Long? = null,
+                         val presence: fr.luba.poc.map.StationPresence = fr.luba.poc.map.StationPresence.UNKNOWN) {
     val active: Boolean get() = phase in setOf(CloudReturnPhase.CONNECTING, CloudReturnPhase.WAKING, CloudReturnPhase.REQUESTED, CloudReturnPhase.RETURNING)
     /** The robot is running (or about to run) the return: cancelling through the account makes sense. */
     val cancellable: Boolean get() = phase in setOf(CloudReturnPhase.REQUESTED, CloudReturnPhase.RETURNING)

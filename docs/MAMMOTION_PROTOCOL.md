@@ -63,7 +63,8 @@ The POC sends requests: sender `DEV_MOBILEAPP=7`, attribute `REQ=1`, version 1, 
 - `MctlSys.todev_report_cfg` field 38: `report_info_cfg`.
 - `act`: START=0, STOP=1, KEEP=2; `timeout`, `period`, `no_change_period`, `count`, `sub` fields 2 to 6.
 - `count=0` requests a continuous stream. POC: timeout 10,000 ms, period 1,000 ms, no_change_period 1,000 ms (both 200 ms since then while a route, a navigation test, a bumper contact test or the command cutoff test runs; `Commands.reports`, `RobotBle.reportPeriodMs`). This last parameter differs from the 4,000 ms used in the upstream BLE loop; it requests a more regular stationary rate, without guaranteeing that it will be honored.
-- POC subscriptions: CONNECT=0, DEV_STA=1, RTK=2, DEV_LOCAL=3, FW_INFO=5; WORK=4 and CUTTER_INFO=11 added with the cutting extension (0.1.2). The sensor probe adds vision streams, maintenance and RTK base reports.
+- POC subscriptions: CONNECT=0, DEV_STA=1, RTK=2, DEV_LOCAL=3, FW_INFO=5; WORK=4 and CUTTER_INFO=11 added with the cutting extension (0.1.2); MAINTAIN=6 always requested since the maintenance page (mileage, working time, battery cycles, blade use). The sensor probe adds vision streams and the RTK base report.
+- **Measured rate: 1 Hz.** On 2026-10-20 (LUBA 2 AWD, firmware 1.30.31.19), after a 200 ms request (`ROUTE_REPORTS` at 17:16:33, `NAV_RPT_FAST` at 19:19:31) and no other request for 20 s, the positions stayed 1.0 s apart (median 1005–1010 ms; 1.01 Hz over the 109 s route handed to the gateway, whose `LegRunner` renews 200 ms every 8 s). The 200 ms request is kept in case another firmware honours it; the tracking already models 1 Hz positions.
 - `MctlSys.toapp_report_data` field 39: `report_info_data`.
 - Report: `connect=1`, `dev=2`, `rtk=3`, `locations=4`, `work=5`, `fw_info=6`.
 - `dev.battery_val` field 3, `sys_status` field 1, `sensor_status` field 4 and `self_check_status` field 12.

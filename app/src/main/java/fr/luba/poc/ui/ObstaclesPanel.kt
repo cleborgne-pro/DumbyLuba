@@ -311,6 +311,10 @@ private fun ObstacleRow(state: RobotUi, obstacle: LocalObstacle, edit: () -> Uni
 private fun DeleteObstacleDialog(robot: RobotBle, state: RobotUi, obstacle: LocalObstacle, dismiss: () -> Unit) {
     LubaDialog(onDismissRequest = dismiss, title = tr("Delete this obstacle?", "Supprimer cet obstacle ?"), content = {
         Text(tr("${obstacle.kind.label} and its history will be deleted from this phone. It will no longer be avoided by future routes.", "${obstacle.kind.label} et son historique seront supprimés de ce téléphone. Il ne sera plus évité par les prochains trajets."))
+        val contacts = fr.luba.poc.difficulty.PresumedObstacles.hiddenContacts(state.difficulties.events, obstacle,
+            state.obstacles.filter { it.id != obstacle.id }, System.currentTimeMillis()).size
+        if (contacts > 0) Text(tr("The $contacts bumper contacts recorded at this place will be dismissed too, so that it does not come back as a presumed obstacle.",
+            "Les $contacts contacts pare-chocs consignés à cet endroit seront écartés aussi, pour qu'il ne revienne pas en obstacle présumé."))
     }, footer = {
         DangerPillButton(tr("Delete", "Supprimer"), { robot.deleteObstacle(obstacle.id); dismiss() }, Modifier.fillMaxWidth(), enabled = !state.obstacleBusy())
     })
@@ -441,8 +445,11 @@ private fun ObstaclePhotosGroup(robot: RobotBle, state: RobotUi) {
     val photo = state.obstaclePhoto
     var shown by remember { mutableStateOf<fr.luba.poc.camera.ObstaclePhoto?>(null) }
     SettingsGroup(tr("Photos after contact (${photo.photos.size})", "Photos après contact (${photo.photos.size})")) {
-        ToggleRow(tr("Photograph the obstacle after the back-off", "Photographier l'obstacle après le recul"), photo.enabled, robot::setObstaclePhotoEnabled,
-            subtitle = tr("After a contact, the robot backs off then waits stationary, blades stopped, up to " +
+        // Local mode: no photo (the video only goes through the Mammotion cloud), the robot does not wait.
+        val localOnly = fr.luba.poc.auth.AccountMode.observe()
+        ToggleRow(tr("Photograph the obstacle after the back-off", "Photographier l'obstacle après le recul"), photo.enabled && !localOnly, robot::setObstaclePhotoEnabled,
+            enabled = !localOnly,
+            subtitle = if (localOnly) fr.luba.poc.auth.AccountMode.message else tr("After a contact, the robot backs off then waits stationary, blades stopped, up to " +
                 "${fr.luba.poc.camera.ObstaclePhotoUi.HOLD_MS / 1000} s for the photo from its camera. Requires a signed-in Mammotion account and the screen on.",
                 "Après un contact, le robot recule puis attend immobile, lames arrêtées, jusqu'à " +
                 "${fr.luba.poc.camera.ObstaclePhotoUi.HOLD_MS / 1000} s la photo de sa caméra. Compte Mammotion connecté et écran allumé nécessaires."))

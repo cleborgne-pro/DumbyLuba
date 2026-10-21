@@ -107,7 +107,8 @@ The pilot shows, in **Gateway health**, the **Version** row "gateway 1.6.0 · th
 1.6.0 onwards; nothing for an older gateway or the ESP32). Different app versions stay compatible as long as the
 protocol is the same; a note advises installing the same version on both phones to get the same fixes. A protocol
 mismatch is refused with both versions named: "Different gateway protocol (gateway v3, this phone v2): install the
-same DumbyLuba version on both phones (this phone: 1.6.0)".
+same DumbyLuba version on both phones (this phone: 1.6.0)". When the pilot has read a newer GitHub release than the
+gateway's version ([new versions](interface.md#new-versions)), a second note asks to update the gateway phone too.
 
 ### Gateway phone home screen
 
@@ -209,10 +210,19 @@ with the same tracking loop and its own guards (telemetry, errors, lift).
 ## Gateway health
 
 Every 5 s, the gateway sends battery, charging, temperature, Wi-Fi signal and throughput, thermal state, battery
-saver, battery exemption and screen. The pilot shows a summary line on the Service tab's robot card ("78 % (charging)
-· Wi-Fi −65 dBm · 31 °C", with a ⚠ and the first warning when needed), the warnings on the Home screen, and the detail
-in Service → Wi-Fi gateway (**Battery**, **Battery temperature**, **Wi-Fi**, **Thermal**, **Screen**, **Battery
-saver**, **Battery exemption**). Warnings: battery below 25 % while not charging ("very low" below 15 %), overheating
+saver, battery exemption and screen. The pilot shows:
+
+- on the Service tab's robot card, under a hairline, **GATEWAY ON THE ROBOT**: battery (icon by level, green, orange
+  below 25 %, red below 15 %), Wi-Fi with four signal bars and its quality ("Wi-Fi · weak"), rate and temperature side
+  by side, then the first warning in an orange band ("Gateway Wi-Fi weak (-72 dBm) (+1 more)");
+- the warnings on the Home screen;
+- the detail in Service → Wi-Fi gateway, also on the gateway phone itself: four tiles (**Battery** with a gauge,
+  **Wi-Fi** with its bars, quality, rate and a gauge, **Battery temperature**, **Heating**), the states as pills
+  (**Screen on/off**, **Battery saver on/off**, **Battery exemption** / **No battery exemption**, orange when they need
+  attention) and every warning below.
+
+Wi-Fi quality: excellent from −55 dBm, good from −63 dBm, fair above −70 dBm, weak from −70 dBm (the limit of the
+warning). Warnings: battery below 25 % while not charging ("very low" below 15 %), overheating
 (thermal level ≥ moderate, otherwise battery ≥ 45 °C), Wi-Fi ≤ −70 dBm, battery saver on, no battery exemption. An
 unknown Wi-Fi signal or battery level is shown as "unknown" (0.65.1). The gateway phone's tilt is sent
 every 500 ms for the [terrain](signal-surveys-and-terrain.md#terrain).

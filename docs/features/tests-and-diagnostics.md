@@ -67,6 +67,11 @@ unknown protobuf fields. No movement command; the capture keeps running in the b
 during a drive. Two toggles during a capture: **Robot debug reports** (`debug_enable=1`, reset on stop) and **Robot
 DDS → ZMQ bridge** (debug command of the Mammotion app): the robot republishes perception on its port 5555, listened
 to over local Wi-Fi.
+
+**Robot perception map** group: the local map the robot pushes by itself when it navigates on its own (seen 1.4 s
+after the official return to base was requested, without any capture): number received, time, format and size,
+robot state, number of colours and the image enlarged cell by cell. The only one received so far (2026-10-20) was a
+61 × 31 image, uniformly black. Each map is also written to the log (`perception_map` event, image in base64).
 [Details](../SENSORS_PROBE.md).
 
 ## Cutting height and blade test

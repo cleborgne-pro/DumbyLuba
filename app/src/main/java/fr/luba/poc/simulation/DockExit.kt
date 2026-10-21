@@ -58,6 +58,17 @@ class DockExit(private val base: Point, private val approach: Point) {
     }
 
     companion object {
+        /**
+         * Reason of an envelope refusal during the exit, with the pose: [overlapping] when the chassis already
+         * overlapped the free surface on its station and leaving straight ahead does not clear it.
+         */
+        fun envelopeRefusal(position: Point, base: Point, overlapping: Boolean): String {
+            val where = "(%.2f m, %.2f m ; %.0f cm)".format(position.x, position.y, position.distance(base) * 100)
+            return if (overlapping) tr("Station exit outside the safe envelope: the chassis on the base overlaps a no-go zone, an obstacle or the map edge, and leaving straight ahead does not clear it $where",
+                "Sortie de station hors enveloppe sûre : le châssis sur la base chevauche une zone interdite, un obstacle ou le bord de la carte, et la sortie tout droit ne l'en dégage pas $where")
+            else tr("Station exit outside the safe envelope: the next step leaves the free surface $where",
+                "Sortie de station hors enveloppe sûre : le pas suivant quitte la surface libre $where")
+        }
         const val LATERAL_M = 0.10
         /** Up to here the robot is still at rest on the base: its published heading must be the axis one. */
         const val START_M = 0.05

@@ -10,8 +10,8 @@ body:
         **read-only mode**: the app never sends motion or blade commands to them. Please do not try to bypass it.
         Steps: [supported models](https://github.com/cleborgne-pro/DumbyLuba/blob/main/docs/features/supported-models.md).
 
-        **Before attaching anything, remove personal data**: robot serial number, account credentials, garden
-        address or GPS coordinates, IMEI, Wi-Fi network names.
+        The log export of the app is **anonymized** (robot name and serial number, GPS position, Wi-Fi, IP and MAC
+        addresses, account data removed; photos left out): attach it as is. Screenshots are not filtered.
   - type: input
     id: model
     attributes:
@@ -68,4 +68,4 @@ body:
     id: logs
     attributes:
       label: Diagnostics
-      description: Attach the ZIP from Service → Logs → Export all (ZIP), after removing personal data.
+      description: Attach the ZIP from Service → Logs → Export all (ZIP). It is anonymized by the app, no editing needed.

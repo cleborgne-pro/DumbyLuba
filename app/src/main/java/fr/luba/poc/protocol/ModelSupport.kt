@@ -53,6 +53,8 @@ object ModelSupport {
  * Allowed: zero-speed motion (STOP), blades off (manual mowing 0/0, knife off), BLE sync, network information,
  * report subscription, read-only system query (`rw = 1`), self-check details, model query (`device_product_type_info`), cutter mode query, map and route reads
  * (hashes, data, acknowledgements), task pause / stop / cancel return (actions 2, 4, 12), camera video and encoder.
+ * Map data: only the read requests (`subCmd` 1, action 8) and the frame acknowledgements (`subCmd` 2); recording,
+ * erasing or deleting a map element (`subCmd` 0) is refused.
  */
 object ReadOnlyPolicy {
     private val STOP_TASK_ACTIONS = setOf(2, 4, 12)
@@ -88,8 +90,9 @@ object ReadOnlyPolicy {
             LubaMsg.LubaSubMsgCase.NAV -> {
                 val nav = message.nav
                 when (nav.subNavMsgCase) {
-                    MctlNav.SubNavMsgCase.TODEV_GETHASH, MctlNav.SubNavMsgCase.TODEV_GET_COMMONDATA,
-                    MctlNav.SubNavMsgCase.APP_REQUEST_COVER_PATHS -> true
+                    MctlNav.SubNavMsgCase.TODEV_GETHASH, MctlNav.SubNavMsgCase.APP_REQUEST_COVER_PATHS -> true
+                    MctlNav.SubNavMsgCase.TODEV_GET_COMMONDATA ->
+                        nav.todevGetCommondata.let { (it.subCmd == 1 && it.action == 8) || it.subCmd == 2 }
                     MctlNav.SubNavMsgCase.TODEV_TASKCTRL -> nav.todevTaskctrl.action in STOP_TASK_ACTIONS
                     else -> false
                 }

@@ -158,6 +158,20 @@ and the deployment's `dex2oat` check cleared the log after installation, hence t
   Fold build. The mowing task settings are now saved by their own composable (`SaveMowingTask`, one
   `MowingTaskSettings` key instead of 12 captured values): 221 registers. Moving or inlining a few locals did not
   help (227): D8 allocation is not linear, measure with `./gradlew :app:assembleFold` (about 20 s) after each try.
+- Oct 21: `MapScreen` brought well under the limit, without changing behaviour or display. Every
+  `var x by remember { mutableStateOf() }` kept one register live for the whole method and every lambda capturing it
+  copied it into a contiguous range: the states are grouped in holders (`MapScreenState.kt`: `MapSheets`,
+  `MowingTaskForm`, `RoutePreparationState`, `PointMoveState`/`PointTarget`, `MapLayersState`, `MapActionState`,
+  `MapViewState`, `MapFrameState`, `ResumeSkipState`, `PreviewStartState`, `ZoneStartsState`; same subset saved across
+  a configuration change). The 45 parameters, all live until the restart lambda at the end of the method, are passed
+  to the body as one object: `MapScreen` builds `MapScreenArgs` and composes `MapScreenContent`. The canvas, the
+  panels, the sheets and the task pages are named composables (`MapRouteCanvas.kt`, `MapPanels.kt`,
+  `MapSheetsHost.kt`, `MowingTaskPages.kt`), the signal survey values come from `rememberMapSignals`
+  (`MapSignals.kt`). Measured on the Fold APK: 222 → 183 (sheets and task settings) → 165 (other states) → 138
+  (parameter object) → 155 after the extractions (each named composable call needs its arguments in contiguous
+  registers) → 136 once rebased on the real coverage layer (D8 allocation varies from one build to the next). **Method to watch: `MapScreenKt;MapScreenContent`, threshold 224** (`checkFoldDexRegisters`); the
+  `MapScreen` wrapper stays under 120. To locate the widest ranges of a method, `dexdump -d` on the APK lists the
+  `invoke-*/range` and their registers.
 
 ## Go-to-point: wrong heading at start (Oct 10, 11:18–11:21)
 

@@ -24,12 +24,13 @@ import fr.luba.poc.i18n.tr
 @Composable
 fun ObstaclePhotoCameraChoice(robot: RobotBle, state: RobotUi) {
     val camera = state.obstaclePhoto.camera
+    val enabled = state.obstaclePhoto.enabled && !fr.luba.poc.auth.AccountMode.observe()
     Text(tr("Photo camera", "Caméra de la photo"), style = MaterialTheme.typography.bodyMedium)
     Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
         ChoiceTile(Icons.Rounded.Videocam, tr("Front / left", "Avant / gauche"), camera == ObstaclePhotoUi.CAMERA_FRONT,
-            { robot.setObstaclePhotoCamera(ObstaclePhotoUi.CAMERA_FRONT) }, Modifier.weight(1f), enabled = state.obstaclePhoto.enabled)
+            { robot.setObstaclePhotoCamera(ObstaclePhotoUi.CAMERA_FRONT) }, Modifier.weight(1f), enabled = enabled)
         ChoiceTile(Icons.Rounded.Videocam, tr("Right", "Droite"), camera == ObstaclePhotoUi.CAMERA_RIGHT,
-            { robot.setObstaclePhotoCamera(ObstaclePhotoUi.CAMERA_RIGHT) }, Modifier.weight(1f), enabled = state.obstaclePhoto.enabled)
+            { robot.setObstaclePhotoCamera(ObstaclePhotoUi.CAMERA_RIGHT) }, Modifier.weight(1f), enabled = enabled)
     }
     Text(if (camera == ObstaclePhotoUi.CAMERA_RIGHT) tr("The right camera is requested together with the front camera; without an image from it, the front camera is the fallback at the end of the wait.", "La caméra droite est demandée avec la caméra avant ; sans image d'elle, la caméra avant sert de secours en fin d'attente.")
         else tr("Front camera, like the Mammotion app.", "Caméra avant, comme l'app Mammotion."), style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)

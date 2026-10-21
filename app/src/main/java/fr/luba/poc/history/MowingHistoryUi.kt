@@ -10,8 +10,16 @@ import androidx.compose.material.icons.rounded.PauseCircle
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.rounded.CompareArrows
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import fr.luba.poc.map.RobotMap
 import androidx.compose.ui.Modifier
 import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
@@ -60,9 +68,11 @@ object MowingText {
 
 /** End-of-mowing report: actual figures compared with the estimate, battery measurements and effect on the next estimates. */
 @Composable
-fun MowingReportDialog(record: MowingRecord, history: List<MowingRecord>, onExcluded: (Boolean) -> Unit, onDismiss: () -> Unit) {
+fun MowingReportDialog(record: MowingRecord, history: List<MowingRecord>, onExcluded: (Boolean) -> Unit, onDismiss: () -> Unit,
+                       loadTrack: (suspend (String) -> TaskTrack?)? = null, fallbackMap: RobotMap? = null) {
     val comparison = remember(record) { MowingComparison.of(record) }
     val calibration = remember(history, record.robotId) { MowingCalibration.from(history, record.robotId) }
+    val score = loadTrack?.let { rememberMowingScore(record, it, fallbackMap) }
     LubaDialog(onDismissRequest = onDismiss, title = tr("Mowing report", "Rapport de tonte"), content = {
         val extra = record.reason?.let { if (finishedReason(it, withRoute = false)) "" else " · ${reasonText(it)}" } ?: ""
         val cause = record.reason?.let(::reasonText) ?: tr("unknown cause", "cause inconnue")
@@ -72,7 +82,7 @@ fun MowingReportDialog(record: MowingRecord, history: List<MowingRecord>, onExcl
                 "Tonte interrompue à ${MowingText.percent(record.progress * 100)} : $cause")
             MowingOutcome.RUNNING -> tr("Mowing in progress", "Tonte en cours")
         }, when (record.outcome) { MowingOutcome.COMPLETE -> NoteTone.SUCCESS; MowingOutcome.INTERRUPTED -> NoteTone.WARNING; else -> NoteTone.INFO })
-        MowingReportContent(record, comparison, calibration)
+        MowingReportContent(record, comparison, calibration, score)
         SettingsGroup {
             ToggleRow(tr("Use for estimates", "Utiliser pour les estimations"), !record.excluded, { onExcluded(!it) },
                 subtitle = tr("Turn off for a test or an abnormal mowing: it will not correct the next estimates.",
@@ -83,8 +93,9 @@ fun MowingReportDialog(record: MowingRecord, history: List<MowingRecord>, onExcl
 }
 
 @Composable
-internal fun MowingReportContent(record: MowingRecord, c: MowingComparison, calibration: MowingCalibration) {
+internal fun MowingReportContent(record: MowingRecord, c: MowingComparison, calibration: MowingCalibration, score: MowingScore? = null) {
     val partial = record.outcome != MowingOutcome.COMPLETE
+    score?.let { ScoreGroup(it) }
     SettingsGroup(tr("Mowing", "Tonte")) {
         KeyValueRow("Zones", MowingText.zones(record))
         KeyValueRow(tr("Start", "Début"), MowingText.date(record.startedAt))
@@ -118,6 +129,100 @@ internal fun MowingReportContent(record: MowingRecord, c: MowingComparison, cali
             "Durée / parcours théorique : temps hors charge divisé par la distance du trajet à la vitesse réglée. Il inclut pivots, raccords, retours à la base et ralentissements."))
     }
     CalibrationGroup(calibration, if (record.excluded) tr("This mowing is excluded from estimates.", "Cette tonte est écartée des estimations.") else null)
+}
+
+/**
+ * Mowing Score of a mowing: total out of 100 and the points taken off by each factor, with the value measured, so
+ * that the score explains itself.
+ */
+@Composable
+internal fun ScoreGroup(score: MowingScore) {
+    SettingsGroup("Mowing Score") {
+        KeyValueRow(tr("Score", "Score"), "${score.total} / 100", valueColor = scoreColor(score.total))
+        score.contributions.forEach { c ->
+            KeyValueRow(c.factor.label, ScoreText.contribution(c), valueColor = if (c.penalty >= 1.0) MammotionColors.Warning else MammotionColors.TextPrimary)
+        }
+        InfoNote(ScoreText.note(score))
+    }
+}
+
+@Composable
+private fun scoreColor(total: Int) = when {
+    total >= 80 -> MammotionColors.GreenDeep
+    total >= 60 -> MammotionColors.TextPrimary
+    else -> MammotionColors.Warning
+}
+
+/** Labels of the Mowing Score. */
+object ScoreText {
+    fun points(p: Double): String = if (p < 0.5) "0" else "−${Math.round(p)}"
+
+    fun contribution(c: ScoreContribution): String =
+        if (!c.measured) c.value else "${c.value} · ${points(c.penalty)} / ${Math.round(c.factor.maxPenalty)}"
+
+    fun note(score: MowingScore): String = tr(
+        "100 minus the points taken off: coverage up to 40, overlaps beyond 15 % up to 15, pivots beyond the planned ones up to 15, " +
+            "reversing beyond what leaving the base needs up to 10, 4 per incident up to 20." +
+            if (score.realCoverage) "" else " Real coverage not measured: coverage estimated from the route covered, overlaps left out.",
+        "100 moins les points retirés : couverture jusqu'à 40, chevauchements au-delà de 15 % jusqu'à 15, pivots au-delà des prévus jusqu'à 15, " +
+            "marches arrière au-delà de la sortie de base jusqu'à 10, 4 par incident jusqu'à 20." +
+            if (score.realCoverage) "" else " Couverture réelle non mesurée : couverture estimée sur le trajet parcouru, chevauchements non comptés.")
+}
+
+/** Track, real coverage and score of a mowing, computed in the background (null while loading or for a survey). */
+@Composable
+internal fun rememberMowingScore(record: MowingRecord, loadTrack: suspend (String) -> TaskTrack?, fallbackMap: RobotMap?): MowingScore? {
+    var score by remember(record.id) { mutableStateOf<MowingScore?>(null) }
+    LaunchedEffect(record.id, record.outcome, record.endedAt) {
+        if (record.kind != TaskKind.MOW) return@LaunchedEffect
+        // Loaded from the calling thread (the positions not yet written live on the main thread), computed aside.
+        val track = runCatching { loadTrack(record.id) }.getOrNull()
+        score = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val coverage = track?.let { runCatching { CoverageMap.of(it, fallbackMap) }.getOrNull() }
+            MowingScore.of(record, track, coverage)
+        }
+    }
+    return score
+}
+
+/** Two mowings side by side: settings, duration, recharges, coverage and score, factor by factor. */
+@Composable
+fun MowingComparePage(a: MowingRecord, b: MowingRecord, loadTrack: suspend (String) -> TaskTrack?, onBack: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    val (first, second) = if (a.startedAt <= b.startedAt) a to b else b to a
+    val left = rememberMowingScore(first, loadTrack, null)
+    val right = rememberMowingScore(second, loadTrack, null)
+    PushedPage(tr("Compare two mowings", "Comparer deux tontes"), onBack, modifier) {
+        SettingsGroup {
+            CompareRow("", MowingText.date(first.startedAt), MowingText.date(second.startedAt), header = true)
+            CompareRow("Zones", MowingText.zones(first), MowingText.zones(second))
+            CompareRow(tr("Outcome", "Issue"), TaskText.outcome(first), TaskText.outcome(second))
+            CompareRow(tr("Settings", "Réglages"), "${first.mode} · ${first.heightMm} mm", "${second.mode} · ${second.heightMm} mm")
+            CompareRow(tr("Duration", "Durée"), MowingText.duration(first.totals.totalSeconds), MowingText.duration(second.totals.totalSeconds))
+            CompareRow("Recharges", "${first.recharges}", "${second.recharges}")
+            CompareRow(tr("Battery used", "Batterie consommée"), MowingText.percent(first.totals.batteryUsed), MowingText.percent(second.totals.batteryUsed))
+        }
+        SettingsGroup("Mowing Score") {
+            CompareRow(tr("Score", "Score"), left?.let { "${it.total} / 100" } ?: "…", right?.let { "${it.total} / 100" } ?: "…", header = true)
+            ScoreFactor.entries.forEach { f ->
+                CompareRow(f.label, left?.of(f)?.let(ScoreText::contribution) ?: "…", right?.of(f)?.let(ScoreText::contribution) ?: "…")
+            }
+            if (left != null && right != null) InfoNote(ScoreText.note(if (left.realCoverage) right else left))
+        }
+    }
+}
+
+@Composable
+private fun CompareRow(label: String, left: String, right: String, header: Boolean = false) {
+    Column(Modifier.fillMaxWidth()) {
+        if (label.isNotEmpty()) Text(label, style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Md), verticalAlignment = Alignment.Top) {
+            listOf(left, right).forEach {
+                Text(it, Modifier.weight(1f), style = if (header) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                    color = MammotionColors.TextPrimary)
+            }
+        }
+    }
 }
 
 /** Parameters used for the next estimates, derived from recent mowings. */
@@ -154,8 +259,17 @@ private fun verdictColor(delta: Double?) = when {
  */
 @Composable
 fun MowingHistoryPage(history: List<MowingRecord>, current: MowingRecord?, robotId: String?, onBack: () -> Unit, onOpen: (String) -> Unit,
-                      modifier: Modifier = Modifier) {
+                      modifier: Modifier = Modifier, loadTrack: (suspend (String) -> TaskTrack?)? = null) {
     val calibration = remember(history, robotId) { MowingCalibration.from(history, robotId ?: history.firstOrNull()?.robotId) }
+    // Comparison: choose two finished mowings, then both side by side.
+    var picking by remember { mutableStateOf(false) }
+    var picked by remember { mutableStateOf<List<String>>(emptyList()) }
+    val mowings = history.filter { it.finished && it.kind == TaskKind.MOW }
+    val pair = picked.mapNotNull { id -> mowings.firstOrNull { it.id == id } }
+    if (loadTrack != null && pair.size == 2) {
+        MowingComparePage(pair[0], pair[1], loadTrack, onBack = { picked = emptyList() }, modifier = modifier)
+        return
+    }
     PushedPage(tr("Task history", "Historique des tâches"), onBack, modifier) {
         current?.let { r ->
             SettingsGroup(tr("In progress", "En cours")) {
@@ -166,6 +280,15 @@ fun MowingHistoryPage(history: List<MowingRecord>, current: MowingRecord?, robot
             }
         }
         CalibrationGroup(calibration)
+        if (loadTrack != null && mowings.size >= 2) SettingsGroup {
+            if (!picking) NavRow(tr("Compare two mowings", "Comparer deux tontes"), icon = Icons.Rounded.CompareArrows,
+                subtitle = tr("Score, coverage, duration and recharges side by side", "Score, couverture, durée et recharges côte à côte")) { picking = true; picked = emptyList() }
+            else {
+                StatusNote(if (picked.isEmpty()) tr("Choose the first mowing", "Choisir la première tonte") else tr("Choose the second mowing", "Choisir la deuxième tonte"))
+                mowings.filter { it.id !in picked }.forEach { r -> TaskRow(r) { id -> picked = picked + id; if (picked.size == 2) picking = false } }
+                SecondaryPillButton(tr("Cancel", "Annuler"), { picking = false; picked = emptyList() }, Modifier.fillMaxWidth())
+            }
+        }
         val finished = history.filter { it.finished }
         SettingsGroup(if (finished.isEmpty()) tr("Tasks", "Tâches") else tr("Tasks · ${finished.size}", "Tâches · ${finished.size}")) {
             if (finished.isEmpty()) InfoNote(tr("No task recorded. Every mowing, signal survey or run with blades stopped appears here with its report and its actual route.",

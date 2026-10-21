@@ -12,8 +12,10 @@ Open an issue stating:
 - steps to reproduce, expected and observed behavior;
 - relevant log excerpts (Service → **Logs** → **Export all (ZIP)**).
 
-Before attaching a log or a map, **remove personal data**: the robot's name and serial number, account credentials,
-the garden's address or GPS coordinates, IMEI, Wi-Fi network names.
+The ZIP and JSONL exports of the app are **anonymized** and can be attached as is: robot name and serial number, RTK base
+number and GPS position, Wi-Fi, IP and MAC addresses, mobile network and account data, raw frames are removed, obstacle
+photos are left out ([logs](docs/features/logs-and-data.md#anonymized-export)). Anything else you attach (screenshots, a map,
+the raw archive) is not filtered: remove personal data from it yourself.
 
 Report security vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 

@@ -11,8 +11,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,9 +36,13 @@ import fr.luba.poc.ui.components.NavRow
 import fr.luba.poc.ui.components.ScreenTitle
 import fr.luba.poc.ui.components.Segmented
 import fr.luba.poc.ui.components.SettingsGroup
+import fr.luba.poc.ui.components.ToggleRow
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
 import fr.luba.poc.ui.theme.ThemeMode
+import fr.luba.poc.update.ReleaseInfo
+import fr.luba.poc.update.UpdateCheck
+import fr.luba.poc.update.UpdateState
 
 /** Mammotion-style "Me" tab: account, app preferences and information. */
 @Composable
@@ -50,15 +56,33 @@ fun MeScreen(
     onOpenMap: () -> Unit,
     alertsSummary: String,
     modifier: Modifier = Modifier,
+    update: UpdateState = UpdateState(),
+    onCheckUpdate: () -> Unit = {},
+    onOpenRelease: (ReleaseInfo) -> Unit = {},
+    onAutomaticUpdates: (Boolean) -> Unit = {},
+    /** Local mode ([fr.luba.poc.auth.AccountMode]): no Mammotion account, its entries are hidden. */
+    localOnly: Boolean = false,
+    /** Native return or firmware update followed through the account: local mode cannot be entered. */
+    localOnlyLocked: Boolean = false,
+    onLocalOnly: (Boolean) -> Unit = {},
 ) {
     val colors = MammotionColors
     Column(modifier.fillMaxSize().background(colors.Background).verticalScroll(rememberScrollState()).padding(Dimens.Lg),
         verticalArrangement = Arrangement.spacedBy(Dimens.Lg)) {
         ScreenTitle(tr("Me", "Moi"), subtitle = tr("Account, preferences and information", "Compte, préférences et informations"))
-        // Profile: the whole card opens the Mammotion account (a single entry).
+        // Profile: the whole card opens the Mammotion account (a single entry); hidden in local mode.
         SettingsGroup {
-            ProfileRow(cloud, onAccount)
-            if (cloud.map.complete) NavRow(tr("Account map", "Carte du compte"), icon = Icons.Rounded.Map, onClick = onOpenMap)
+            if (!localOnly) {
+                ProfileRow(cloud, onAccount)
+                if (cloud.map.complete) NavRow(tr("Account map", "Carte du compte"), icon = Icons.Rounded.Map, onClick = onOpenMap)
+            }
+            ToggleRow(tr("Local mode (without Mammotion account)", "Mode local (sans compte Mammotion)"), localOnly, onLocalOnly,
+                subtitle = when {
+                    localOnly -> tr("No request to the Mammotion cloud. Bluetooth and the gateway are enough.", "Aucune requête au cloud Mammotion. Le Bluetooth et la passerelle suffisent.")
+                    localOnlyLocked -> tr("Unavailable while a native return or a firmware update is followed.", "Indisponible pendant le suivi d'un retour natif ou d'une mise à jour du firmware.")
+                    cloud.connected -> tr("Signs out of the account (saved credentials are kept) and hides its entries.", "Déconnecte le compte (les identifiants enregistrés sont gardés) et masque ses entrées.")
+                    else -> tr("Hides the account entries: account map, camera, obstacle photo, firmware.", "Masque les entrées du compte : carte du compte, caméra, photo d'obstacle, firmware.")
+                }, enabled = localOnly || !localOnlyLocked)
         }
         SettingsGroup(tr("App", "Application")) {
             Column(verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
@@ -74,8 +98,18 @@ fun MeScreen(
         // Connection, tests and logs: Service tab of the bottom bar (no second entry here).
         SettingsGroup(tr("About", "À propos")) {
             ValueRow(Icons.Rounded.Info, "Version", BuildConfig.VERSION_NAME)
+            // New version on GitHub: opens the release page when one is available, otherwise checks now.
+            val available = update.available
+            NavRow(tr("Updates", "Mises à jour"), icon = if (available != null) Icons.Rounded.NewReleases else Icons.Rounded.SystemUpdate,
+                subtitle = UpdateCheck.summary(update), enabled = !update.checking,
+                onClick = { if (available != null) onOpenRelease(available) else onCheckUpdate() })
+            if (update.publishedBuild) ToggleRow(tr("Check automatically", "Vérifier automatiquement"), update.automatic, onAutomaticUpdates,
+                subtitle = tr("Once a day, reads the latest release on GitHub. Nothing is installed without you.",
+                    "Une fois par jour, lit la dernière publication sur GitHub. Rien n'est installé sans vous."))
         }
-        InfoNote(tr("DumbyLuba controls the robot locally (Bluetooth or the Wi-Fi gateway). The Mammotion account adds remote reading (map, status, history), the native return to base, firmware updates and the camera.", "DumbyLuba pilote le robot en local (Bluetooth ou passerelle Wi-Fi). Le compte Mammotion ajoute la lecture à distance (carte, état, historique), le retour natif à la base, les mises à jour du firmware et la caméra."))
+        if (localOnly) InfoNote(tr("Local mode: map, planning, mowing, return to base, maintenance and alerts work over Bluetooth or the gateway. Unavailable: camera and obstacle photo, firmware updates, Mammotion history, remote reading and native return without Bluetooth.",
+            "Mode local : carte, planification, tonte, retour à la base, entretien et alertes fonctionnent en Bluetooth ou par la passerelle. Indisponibles : caméra et photo d'obstacle, mises à jour du firmware, historique Mammotion, lecture à distance et retour natif sans Bluetooth."))
+        else InfoNote(tr("DumbyLuba controls the robot locally (Bluetooth or the Wi-Fi gateway). The Mammotion account adds remote reading (map, status, history), the native return to base, firmware updates and the camera.", "DumbyLuba pilote le robot en local (Bluetooth ou passerelle Wi-Fi). Le compte Mammotion ajoute la lecture à distance (carte, état, historique), le retour natif à la base, les mises à jour du firmware et la caméra."))
     }
 }
 

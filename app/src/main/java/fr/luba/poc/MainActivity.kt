@@ -103,11 +103,15 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         fr.luba.poc.map.OuterOffsetSetting.init(applicationContext)
+        fr.luba.poc.maintenance.BladeMaintenanceSettings.init(applicationContext)
+        fr.luba.poc.auth.AccountMode.init(applicationContext)
         fr.luba.poc.mowing.WorkWindowSetting.init(applicationContext)
         fr.luba.poc.weather.WeatherService.init(applicationContext)
+        fr.luba.poc.update.UpdateCheck.init(applicationContext)
         fr.luba.poc.map.SurveyOffsetSetting.init(applicationContext)
         fr.luba.poc.map.MapExtraLayers.init(applicationContext)
         fr.luba.poc.map.MapDisplaySettings.init(applicationContext)
+        fr.luba.poc.map.BorderTypeRepository.init(applicationContext)
         robot = ViewModelProvider(application as fr.luba.poc.relay.RelayApplication, ViewModelProvider.AndroidViewModelFactory.getInstance(application))[RobotBle::class.java]
         // Card of an obstacle encountered on the map: save it as an obstacle or dismiss the contact.
         robot.let { pilot -> fr.luba.poc.map.MapExtraLayers.actions = { action ->
@@ -115,6 +119,7 @@ class MainActivity : ComponentActivity() {
                 is fr.luba.poc.map.DifficultyAction.Dismiss -> pilot.dismissDifficulty(action.id)
                 is fr.luba.poc.map.DifficultyAction.Register -> pilot.saveObstacle(action.obstacle)
                 is fr.luba.poc.map.DifficultyAction.Delete -> pilot.deleteObstacle(action.id)
+                is fr.luba.poc.map.DifficultyAction.DismissPresumed -> pilot.dismissPresumedObstacle(action.id)
             }
         } }
         simulation = ViewModelProvider(this)[fr.luba.poc.simulation.SimulationSession::class.java]
@@ -170,6 +175,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::robot.isInitialized) robot.refreshNotifications()
+        // New version on GitHub: at most once a day, published build only, if enabled (Me → About).
+        fr.luba.poc.update.UpdateCheck.maybeCheck()
     }
 
     override fun onStop() {
@@ -200,6 +207,7 @@ private fun RobotScreen(
     val cloudState by cloud.state.collectAsStateWithLifecycle()
     val state by robot.state.collectAsStateWithLifecycle()
     val alerts by robot.localAlerts.collectAsStateWithLifecycle()
+    val update by fr.luba.poc.update.UpdateCheck.flow.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     var showAlerts by remember { mutableStateOf(false) }
     LaunchedEffect(alertOpenToken) { if(alertOpenToken > 0) showAlerts=true }
@@ -297,7 +305,9 @@ private fun RobotScreen(
         view.keepScreenOn = state.campaign.running || state.bladeTestActive || state.navTest.running || state.mowing.active || (state.manualActive || state.robotRoute.running)
         onDispose { view.keepScreenOn = false }
     }
-    val displayCloud = !state.ready && (useCloudMap || (state.robotMap.shapes.isEmpty() && cloudState.map.complete))
+    val localOnly by fr.luba.poc.auth.AccountMode.flow.collectAsStateWithLifecycle()
+    val displayCloud = fr.luba.poc.auth.AccountMapDisplay.showAccountMap(state.ready, localOnly, useCloudMap, cloudState.map.shapes.size,
+        cloudState.map.complete, state.robotMap.shapes.size)
     // Account map: same local corrections as the Bluetooth map (shapes targeted by their Mammotion identifier).
     val shown = if (displayCloud) state.withMammotionMap(cloudState.map).copy(telemetry = fr.luba.poc.protocol.Telemetry(), lastKnown = cloudState.lastKnown, positionSaveError = cloudState.positionSaveError, connection = fr.luba.poc.ble.ConnectionState.Disconnected) else state
     // Mammotion account reading (position, battery, charging contact) every 30 s on the home screen
@@ -326,7 +336,7 @@ private fun RobotScreen(
     // to give the space back to the map. As soon as a movement or a test is running, the global STOP returns.
     val mapIdle = tab == Tab.Appareil && page == DevicePage.MAP && !robotActive
     val stopAvailable = (stopLive || stopGrace) && !mapIdle
-    val pushed = (tab == Tab.Appareil && page != DevicePage.HOME) || (tab == Tab.Moi && accountPage) || (tab == Tab.Service && robotTab.isNotEmpty())
+    val pushed = (tab == Tab.Appareil && page != DevicePage.HOME) || (tab == Tab.Moi && accountPage && !localOnly) || (tab == Tab.Service && robotTab.isNotEmpty())
     Scaffold(
         containerColor = MammotionColors.Background,
         bottomBar = {
@@ -356,7 +366,13 @@ private fun RobotScreen(
                         NavigationBarItem(
                             selected = tab == entry,
                             onClick = { tab = entry },
-                            icon = { Icon(entry.icon, contentDescription = entry.label) },
+                            icon = {
+                                // Me: dot when a new version is published on GitHub (Me → About → Updates).
+                                if (entry == Tab.Moi && update.available != null) androidx.compose.material3.BadgedBox(
+                                    badge = { androidx.compose.material3.Badge(containerColor = MammotionColors.Green) }) {
+                                    Icon(entry.icon, contentDescription = entry.label + tr(", new version available", ", nouvelle version disponible"))
+                                } else Icon(entry.icon, contentDescription = entry.label)
+                            },
                             label = { Text(entry.label, style = MaterialTheme.typography.labelMedium) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = MammotionColors.Ink,
@@ -410,7 +426,7 @@ private fun RobotScreen(
                                 onHide = { fr.luba.poc.onboarding.SetupProgress.hideChecklist(context) })
                         },
                     )
-                    DevicePage.MAP -> MapScreen(
+                    DevicePage.MAP -> { MapScreen(
                         simulation = simulation,
                         openMowing = openMowing,
                         onMowingOpened = { openMowing = false },
@@ -442,7 +458,9 @@ private fun RobotScreen(
                         onStopMammotionTask = robot::stopMammotionTask,
                         // Without BLE: native return through the account, if it follows this robot (or if no BLE robot is known).
                         cloudReturn = cloudState.nativeReturn.takeIf { cloudState.connected && cloudState.selected != null &&
-                            (matchingCloudRobot || (state.selected == null && state.lastKnown == null)) },
+                            (matchingCloudRobot || (state.selected == null && state.lastKnown == null)) }
+                            ?.copy(presence = fr.luba.poc.map.StationPresence.of(cloudState.telemetry,
+                                fr.luba.poc.ui.components.CLOUD_CHARGE_MAX_AGE_MS, System.currentTimeMillis())),
                         onCloudReturn = cloud::nativeReturnToBase,
                         onOpenTask = robot::showTaskDetail,
                         onOpenAllTasks = { openService(fr.luba.poc.ui.ServicePage.HISTORY.key) },
@@ -456,6 +474,11 @@ private fun RobotScreen(
                         onStop = robot::stop,
                         startDemo = demoMap,
                     )
+                        // Border types editor, opened from the Map sheet (kept outside MapScreen, at its register limit).
+                        fr.luba.poc.map.BorderTypeEditorHost(panels.robotMap)
+                        // Sync with the Mammotion app, opened from the Map sheet (same reason).
+                        fr.luba.poc.mapsync.MapSyncHost(robot, state)
+                    }
                     DevicePage.MANUAL -> fr.luba.poc.ui.ManualPage(robot, state, back = { page = DevicePage.HOME },
                         onOpenRecord = { recordFrom = DevicePage.MANUAL; page = DevicePage.RECORD })
                     DevicePage.RECORD -> fr.luba.poc.manual.DrivenRecordPage(robot, state, back = { page = recordFrom })
@@ -470,14 +493,27 @@ private fun RobotScreen(
                     onShowSignalsOnMap = { openDevice(DevicePage.MAP) },
                     onSignalSurveyRoute = { openSurvey = true; openDevice(DevicePage.MAP) },
                 )
-                Tab.Moi -> if (accountPage) fr.luba.poc.ui.components.PushedPage(tr("Mammotion account", "Compte Mammotion"), onBack = { accountPage = false }, contentPadding = 0.dp) {
+                Tab.Moi -> if (accountPage && !localOnly) fr.luba.poc.ui.components.PushedPage(tr("Mammotion account", "Compte Mammotion"), onBack = { accountPage = false }, contentPadding = 0.dp) {
                     AccountScreen(cloud, cloudState, onOpenMap = { useCloudMap = true; accountPage = false; openDevice(DevicePage.MAP) })
                 } else fr.luba.poc.ui.MeScreen(
                     cloud = cloudState, themeMode = themeMode, onThemeModeChange = onThemeModeChange,
                     onLanguageChange = onLanguageChange,
                     onAccount = { accountPage = true }, onAlerts = { showAlerts = true },
+                    localOnly = localOnly,
+                    // Local mode: session deleted (saved credentials kept); refused while a return or an update is followed.
+                    localOnlyLocked = cloudState.nativeReturn.active || cloudState.firmwareUpdate.active,
+                    onLocalOnly = { enabled ->
+                        if (!enabled) { fr.luba.poc.auth.AccountMode.setLocalOnly(false); cloud.leaveLocalMode() }
+                        else if (cloud.enterLocalMode()) { fr.luba.poc.auth.AccountMode.setLocalOnly(true); accountPage = false; useCloudMap = false }
+                    },
                     onOpenMap = { useCloudMap = true; openDevice(DevicePage.MAP) },
                     alertsSummary = if (!alerts.enabled) tr("Notifications blocked · allow", "Notifications bloquées · autoriser") else alerts.entries.firstOrNull()?.headline ?: tr("Local alerts enabled", "Alertes locales activées"),
+                    update = update,
+                    onCheckUpdate = fr.luba.poc.update.UpdateCheck::checkNow,
+                    onOpenRelease = { release ->
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(release.pageUrl))) }
+                    },
+                    onAutomaticUpdates = fr.luba.poc.update.UpdateCheck::setAutomatic,
                 )
             }
             // Shared video player: Camera page and obstacle photo after a bumper contact.
@@ -495,7 +531,9 @@ private fun RobotScreen(
             }
             state.mowingReport?.let { report ->
                 fr.luba.poc.history.MowingReportDialog(report, state.mowingHistory,
-                    onExcluded = { robot.setMowingExcluded(report.id, it) }, onDismiss = { robot.showMowingReport(null) })
+                    onExcluded = { robot.setMowingExcluded(report.id, it) }, onDismiss = { robot.showMowingReport(null) },
+                    loadTrack = robot::loadTaskTrack,
+                    fallbackMap = state.robotMap.takeIf { it.complete && state.selected?.address == report.robotId })
             }
         }
     }

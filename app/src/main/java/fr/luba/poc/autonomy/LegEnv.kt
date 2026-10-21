@@ -16,6 +16,7 @@ data class RobotView(val telemetry: Telemetry, val devicePrevious: Long, val pos
 class EnvelopeGuard(private val envelope: TrajectoryEnvelope) {
     fun motionCollision(from: RobotPose, to: RobotPose): EnvelopeCollision? = envelope.motionCollision(from, to)
     fun bodySafe(center: Point): Boolean = envelope.bodySafe(center)
+    fun poseSafe(pose: RobotPose): Boolean = envelope.poseSafe(pose)
     fun leavesStraight(from: Point, to: Point, heading: Double): Boolean = envelope.leavesStraight(from, to, heading)
 }
 

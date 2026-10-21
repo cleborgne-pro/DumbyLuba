@@ -92,8 +92,8 @@ class RobotAlertsTest {
         assertTrue(AlertDedup.decide(AlertRecord(Severity.CRITICAL,10000,3),Severity.WARNING,1000).audible)
     }
     @Test fun everyIncidentHasActionAndDistinctTitle() {
-        assertEquals(20,AlertKind.entries.size)
-        assertEquals(20,AlertKind.entries.map { it.title }.toSet().size)
+        assertEquals(21,AlertKind.entries.size)
+        assertEquals(21,AlertKind.entries.map { it.title }.toSet().size)
         assertTrue(AlertKind.entries.all { it.action.isNotBlank() })
     }
     @Test fun formattedAlertContainsContextAndUnknownFields() {

@@ -33,7 +33,10 @@ fun CloudStationDialog(ret: CloudReturnUi, robotName: String?, onReturn: () -> U
             "Le firmware Mammotion calcule le trajet et assure l’accostage, comme dans l’app Mammotion. " +
             "Restez à proximité : l’arrêt passe par le cloud (quelques secondes de latence) ou par le bouton STOP du robot."),
             style = MaterialTheme.typography.bodyMedium, color = colors.TextSecondary)
-        LubaCheckRow(tr("I am supervising the robot and the way to the station is clear", "Je supervise le robot et l’accès à la station est dégagé"), supervised, { supervised = it }, enabled = !ret.active)
+        // Robot already on its base (fresh account report): the native return has nothing to do.
+        val onBase = ret.presence == StationPresence.ON_BASE && !ret.active
+        if (onBase) InfoNote(tr("Robot on its base: no return needed.", "Robot sur sa base : aucun retour nécessaire."))
+        else LubaCheckRow(tr("I am supervising the robot and the way to the station is clear", "Je supervise le robot et l’accès à la station est dégagé"), supervised, { supervised = it }, enabled = !ret.active)
         if (ret.active) LubaProgress(Modifier.fillMaxWidth())
         if (ret.status.isNotBlank()) Text(ret.status, style = MaterialTheme.typography.bodySmall,
             color = when (ret.phase) {
@@ -43,8 +46,8 @@ fun CloudStationDialog(ret: CloudReturnUi, robotName: String?, onReturn: () -> U
             })
     }, footer = {
         if (ret.cancellable) DangerPillButton(tr("Stop the Mammotion return", "Arrêter le retour Mammotion"), onCancel, Modifier.fillMaxWidth())
-        PrimaryPillButton(tr("Recharge (native Mammotion)", "Recharger (Mammotion natif)"), { supervised = false; onReturn() }, Modifier.fillMaxWidth(),
-            enabled = supervised && !ret.active, icon = Icons.Rounded.EvStation)
+        if (ret.presence.canRecharge || ret.active) PrimaryPillButton(tr("Recharge (native Mammotion)", "Recharger (Mammotion natif)"),
+            { supervised = false; onReturn() }, Modifier.fillMaxWidth(), enabled = supervised && !ret.active, icon = Icons.Rounded.EvStation)
         TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(tr("Close", "Fermer")) }
     })
 }

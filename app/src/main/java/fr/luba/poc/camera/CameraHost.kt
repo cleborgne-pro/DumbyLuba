@@ -149,6 +149,7 @@ fun BoxScope.CameraHost(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, 
         val camera = latestCloud.camera
         if (latestCloud.connected) controller.select(r.camera)
         when {
+            fr.luba.poc.auth.AccountMode.localOnly -> robot.obstaclePhotoFailed(r.id, fr.luba.poc.auth.AccountMode.message)
             !latestCloud.connected -> robot.obstaclePhotoFailed(r.id, tr("Mammotion account not connected (Me tab)", "compte Mammotion non connecté (onglet Moi)"))
             camera.credentials == null && !camera.busy -> { controller.photoOwned = true; cloud.requestCamera(bothFront = r.camera == ObstaclePhotoUi.CAMERA_RIGHT) }
             // Stream already open without the right camera: restarted with both front cameras (the robot only publishes the requested ones).

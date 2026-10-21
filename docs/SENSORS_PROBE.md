@@ -64,6 +64,30 @@ To redo: bridge enabled, then robot **moving** (signal survey or joystick, blade
 
 Code: `diagnostics/ZmtpClient.kt`, `RobotBle.setSensorProbeZmq`, tests: `ZmtpTest`.
 
+## Logs of 2026-10-18 to 2026-10-20 (Fold, 19,648 frames received)
+
+Logs of the Fold pulled on 2026-10-20 (`Android/data/fr.luba.poc/files/diagnostics`), LUBA 2 AWD firmware
+1.30.31.19, control through the Redmi gateway: joystick drives, a route of 109 s handed to the gateway (17:16) and an
+official return to base (19:21:47 → docked 19:22:15). No sensor capture during these sessions, so no vision
+subscription.
+
+- **Perception map**: a single `MctlPept.perception_local_map_visualization` (sender `DEV_PERCEPTION`) at
+  19:21:49.4, 1.4 s after `NATIVE_RETURN_BLADES_OFF`: lossless WebP of 40 bytes, 61 × 31 pixels, entirely black.
+  Perception starts with the firmware's own navigation; nothing during the joystick drives or the app's route.
+  Now decoded and shown outside any capture (`diagnostics/PerceptionMap.kt`, group *Robot perception map*).
+- **Never received**: tunnels 25 and 26 (`systemRapidStateTunnel`, `systemTardStateTunnel`, ≈ 4 Hz during a task
+  according to PyMammotion), `toapp_devmotion_ctrl_ack`, `toapp_costmap`, `toapp_pos_up`, perception obstacles; not
+  even during the official return.
+- **Always zero (absent)**: `sensor_status` (ultrasonic sensors and bumper), `rtk.lat_std`, `lon_std`, `age`,
+  `work.cutter_width`, `cutter_offset`.
+- **Present, little used**: `vslam_status` = 257 (bits 8–15 = 1, fused localisation "RTK fixed" in PyMammotion),
+  empty `vio_survival_info`, `work.nav_heading_state` = 3, maintenance counters (now read, see
+  [maintenance](features/maintenance.md)).
+- **Report rate**: 1 Hz whatever the request (see [protocol](MAMMOTION_PROTOCOL.md#synchronization-and-telemetry)).
+
+Still to do on site: capture with the robot moving towards an obstacle (joystick, blades stopped), then a return
+to base during the capture, ZMQ bridge on.
+
 ## How it works
 
 - No motion command: only the telemetry subscription (read) is extended to the vision streams, plus the debug switch if enabled. The capture starts and stops manually, and also stops when a robot connects.
@@ -81,4 +105,5 @@ Robot connected, blades stopped, under supervision: start the capture, place an 
 
 Since Oct 13 (test without capture): the subscription is restarted with RPT_START at every renewal using the Mammotion app's full list, VIO and fast-tunnel statistics are counted, and the robot states (`sys_status`) seen during the capture are displayed. A capture made with the robot stationary says so: redo it during a drive (the capture continues in the background). No ultrasonic distance is known in the protocol (PyMammotion, Mammotion-HA): only 0/1/2+ states per sensor.
 
-Code: `diagnostics/SensorProbe.kt`, tests: `SensorProbeTest`, `SensorProbeActivityTest`.
+Code: `diagnostics/SensorProbe.kt`, `diagnostics/PerceptionMap.kt`, `ui/PerceptionMapGroup.kt`; tests: `SensorProbeTest`,
+`SensorProbeActivityTest`, `PerceptionMapTest`.

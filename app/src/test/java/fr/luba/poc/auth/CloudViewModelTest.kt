@@ -41,7 +41,9 @@ class CloudViewModelTest {
     private val invokePath = "/v1/mqtt/rpc/thing/service/invoke"
     private val devicesPath = "/v1/user/device/page"
 
-    private fun model() = CloudViewModel(app, MammotionCloud(sessionStore, server.open), accounts) { _, _ ->
+    /** Local mode read by the model ([AccountMode] by default, false here). */
+    private var localOnly = false
+    private fun model() = CloudViewModel(app, MammotionCloud(sessionStore, server.open), accounts, { localOnly }) { _, _ ->
         val events = Channel<CloudViewModel.CloudEvent>(64)
         synchronized(pendingEvents) { pendingEvents.forEach { events.trySend(CloudViewModel.CloudEvent.Proto(it)) }; pendingEvents.clear() }
         links += events
@@ -356,5 +358,55 @@ class CloudViewModelTest {
         assertEquals(FirmwarePhase.IDLE, vm.state.value.firmwareUpdate.phase)
         assertEquals("Suivi arrêté ; la mise à jour continue sur le robot", vm.state.value.firmwareUpdate.status)
         until("closing") { links.last().isClosedForSend }
+    }
+
+    @Test fun `local mode sends no request to the Mammotion cloud`() {
+        sessionStore.save(session().toString())
+        accounts.save(SavedAccount("moi@example.com", "secret"))
+        server.json(TOKEN_PATH, ok(session()))
+        server.json(devicesPath, robots(Triple("Luba-VS1", "iot1", "pk1")))
+        localOnly = true
+        val vm = model()
+        // Session kept on the phone but not used: nothing connected, no account map.
+        assertFalse(vm.state.value.connected); assertTrue(vm.state.value.map.shapes.isEmpty())
+        assertEquals(AccountMode.message, vm.state.value.status)
+        vm.login("moi@example.com", "secret"); vm.refresh(); vm.refreshPosition(); vm.refreshAccount()
+        vm.requestCamera(); vm.cloudCameraCommand(CameraCommand.VIDEO_ON); vm.nativeReturnToBase(); vm.startFirmwareUpdate(); vm.followFirmwareUpdate()
+        shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(200); shadowOf(Looper.getMainLooper()).idle()
+        assertTrue("no request: ${server.paths()}", server.requests.isEmpty())
+        assertFalse(vm.state.value.busy); assertFalse(vm.state.value.connected)
+        assertEquals(CloudReturnPhase.FAILED, vm.state.value.nativeReturn.phase)
+        assertEquals(AccountMode.message, vm.state.value.nativeReturn.status)
+        assertFalse(vm.state.value.camera.busy); assertNull(vm.state.value.camera.credentials)
+        assertTrue(vm.state.value.camera.status.endsWith(AccountMode.message))
+        assertTrue(vm.state.value.firmwareUpdate.status.endsWith(AccountMode.message))
+    }
+
+    @Test fun `entering local mode deletes the session and keeps the saved credentials`() {
+        accounts.save(SavedAccount("moi@example.com", "secret"))
+        val vm = connected()
+        assertTrue(vm.enterLocalMode())
+        localOnly = true
+        assertFalse(vm.state.value.connected); assertTrue(vm.state.value.robots.isEmpty()); assertTrue(vm.state.value.map.shapes.isEmpty())
+        assertNull(sessionStore.read())
+        assertTrue(vm.state.value.accountSaved); assertEquals(SavedAccount("moi@example.com", "secret"), accounts.read())
+        assertEquals(AccountMode.message, vm.state.value.status)
+        // Back to the account: signing in works again.
+        localOnly = false
+        vm.leaveLocalMode()
+        assertEquals("Compte non connecté", vm.state.value.status)
+        server.json(TOKEN_PATH, ok(session()))
+        vm.login("moi@example.com", "secret")
+        until("sign-in") { !vm.state.value.busy && vm.state.value.robots.isNotEmpty() }
+        assertTrue(vm.state.value.connected)
+    }
+
+    @Test fun `local mode refused while a firmware update is followed`() {
+        val vm = readyForUpdate()
+        vm.startFirmwareUpdate()
+        until("tracking") { links.size == 2 && vm.state.value.firmwareUpdate.active }
+        assertFalse(vm.enterLocalMode())
+        assertTrue(vm.state.value.connected); assertTrue(vm.state.value.firmwareUpdate.active)
+        vm.stopFirmwareFollow()
     }
 }

@@ -119,7 +119,8 @@ class RobotBleTonteTest {
         bench.sim.chargePerSecond = 2.0
         assertTrue(bench.dump(), bench.ble.startRobotRoute(engine, cutting = true, heightMm = 60))
         bench.until(30 * 60_000, "return at low threshold") { bench.state.robotRoute.phase == RoutePhase.RETURNING }
-        assertTrue(bench.state.robotRoute.status, bench.state.robotRoute.status.contains("Seuil bas"))
+        // 3 min runtime: the return alone costs about half the battery, so the return reserve decides before the low threshold.
+        assertTrue(bench.state.robotRoute.status, bench.state.robotRoute.status.contains("Seuil bas") || bench.state.robotRoute.status.contains("Réserve de retour"))
         assertEquals(1, bench.state.robotRoute.rechargeCycles)
         assertEquals(1, bench.state.missionCheckpoint?.rechargeCycles)
         bench.until(5 * 60_000, "recharging") { bench.state.robotRoute.phase == RoutePhase.CHARGING }

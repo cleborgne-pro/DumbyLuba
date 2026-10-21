@@ -105,6 +105,28 @@ While one of these actions is tracked, the 30 s polling is suspended (a single M
 
 The account also provides the token of the [live camera](camera.md) (Service → Robot → **Camera**).
 
+## Local mode (without account)
+
+Me → **Local mode (without Mammotion account)** (off by default, saved on the phone, code `auth/AccountMode.kt`).
+DumbyLuba then works over Bluetooth and the [gateway](gateway.md) only:
+
+- **no request to the Mammotion cloud**: `CloudViewModel` refuses sign-in, robot list, account reading and polling,
+  camera token and commands, native return through the account and firmware update, with "Local mode: Mammotion
+  account not used (Me tab)";
+- **hidden entries**: profile card and **Account map** in Me, "Read the map via the Mammotion account" on Home,
+  **Account map** on the empty map and in the Map sheet, **Camera** in Service, the live camera button and view;
+- **obstacle photo** treated as disabled: after the back-off the robot does not wait, the encounter is notified "local
+  mode, no photo" ([obstacles](obstacles.md));
+- turning it on while signed in deletes the session (saved credentials are kept, so turning it off then **Sign in**
+  is enough); refused while a native return or a firmware update is followed.
+
+Unchanged: map read over Bluetooth and its cache, planning, simulation, mowing, return to base over Bluetooth,
+maintenance (blade, mileage and battery counters read over Bluetooth), alerts, weather, logs. Unavailable: camera and
+obstacle photo, firmware update, Mammotion mowing history, remote reading and native return without Bluetooth.
+
+Whatever the mode, before the robot link the account map is shown only once it has content: an empty account map no
+longer hides the cached Bluetooth map and the last known position.
+
 ## "Read-only" safeguard
 
 `CloudReadOnly` filters every message sent through the cloud. It only accepts synchronization, map reading, the

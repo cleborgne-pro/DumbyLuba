@@ -235,6 +235,8 @@ object LiveCamera {
 /** Camera button at the top right of the map, always visible: shows or hides the live view. */
 @Composable
 fun LiveCameraButton(modifier: Modifier = Modifier, enabled: Boolean = true) {
+    // Local mode: the video only goes through the Mammotion cloud, no button.
+    if (fr.luba.poc.auth.AccountMode.observe()) return
     val context = LocalContext.current
     LaunchedEffect(Unit) { LiveCamera.load(context) }
     val shown = LiveCamera.shown
@@ -272,6 +274,7 @@ fun BoxScope.LiveCameraWindow(modifier: Modifier = Modifier, width: Dp = 168.dp)
 /** View to show? Otherwise, a button to show it if [button]. Counts the screen as a host of the view. */
 @Composable
 private fun liveCameraShown(button: Boolean, large: Boolean, modifier: Modifier): Boolean {
+    if (fr.luba.poc.auth.AccountMode.observe()) return false
     val context = LocalContext.current
     LaunchedEffect(Unit) { LiveCamera.load(context) }
     DisposableEffect(Unit) { LiveCamera.hostEnter(); onDispose { LiveCamera.hostLeave() } }

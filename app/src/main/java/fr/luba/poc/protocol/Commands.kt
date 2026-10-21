@@ -123,6 +123,37 @@ class Commands(private val userAccount: Int = 0) {
     fun mapData(hash: Long) = nav(MctlNav.newBuilder().setTodevGetCommondata(NavGetCommData.newBuilder().setPver(1).setAction(8).setSubCmd(1).setHash(hash)).build())
     fun mapDataAck(f: NavGetCommDataAck) = nav(MctlNav.newBuilder().setTodevGetCommondata(NavGetCommData.newBuilder().setPver(1).setSubCmd(2).setAction(f.action).setType(f.type).setHash(f.hash).setTotalFrame(f.totalFrame).setCurrentFrame(f.currentFrame)).build())
 
+    // ---------------------------------------------------------------- map writing (sync with the Mammotion app)
+    // APK 2.3.8 `MACommandHelper` (PyMammotion `navigation.py`): `todev_get_commondata` without `subCmd` (0), so that
+    // [ReadOnlyPolicy] and the cloud filter, which only let reads (subCmd 1 / 2) through, refuse them.
+
+    /** Starts recording a boundary by driving (APK `startDrawBorder` / `startDrawBarrier` / `startChannelLine`):
+     * [type] 0 zone, 1 no-go zone, 2 passage. The robot records its own positions until [endMapRecording]. */
+    fun startMapRecording(type: Int): ByteArray {
+        require(type in MAP_RECORD_TYPES) { tr("Map element type not allowed", "Type d'élément de carte non autorisé") }
+        return nav(MctlNav.newBuilder().setTodevGetCommondata(NavGetCommData.newBuilder().setPver(1).setAction(0).setType(type)).build())
+    }
+
+    /** Ends the recording started by [startMapRecording] (APK `endDrawBorder(type)`): the robot saves the element. */
+    fun endMapRecording(type: Int): ByteArray {
+        require(type in MAP_RECORD_TYPES) { tr("Map element type not allowed", "Type d'élément de carte non autorisé") }
+        return nav(MctlNav.newBuilder().setTodevGetCommondata(NavGetCommData.newBuilder().setPver(1).setAction(1).setType(type)).build())
+    }
+
+    /** Explicit save of the mapping (APK `saveTask`, BLE only): `todev_save_task = 1`. */
+    fun saveMapTask(): ByteArray = nav(MctlNav.newBuilder().setTodevSaveTask(1).build())
+
+    /** Abandons the recording in progress without saving anything (APK `cancelCurrentRecord`). */
+    fun cancelMapRecording(): ByteArray =
+        nav(MctlNav.newBuilder().setTodevGetCommondata(NavGetCommData.newBuilder().setPver(1).setAction(7).setSubCmd(0)).build())
+
+    /** Deletes one map element by its hash (APK `deleteMapElements(type, hash)`); never the whole map. */
+    fun deleteMapElement(type: Int, hash: Long): ByteArray {
+        require(type in MAP_RECORD_TYPES) { tr("Map element type not allowed", "Type d'élément de carte non autorisé") }
+        require(hash != 0L) { tr("Map element hash missing", "Hash d'élément de carte absent") }
+        return nav(MctlNav.newBuilder().setTodevGetCommondata(NavGetCommData.newBuilder().setPver(1).setAction(6).setType(type).setHash(hash)).build())
+    }
+
     /** Upstream get_error_code query: no change to the protections. */
     fun errorQuery(now: Long = System.currentTimeMillis()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
@@ -139,12 +170,13 @@ class Commands(private val userAccount: Int = 0) {
             .build().toByteArray()
 
     /**
-     * Telemetry subscription (read only). [vision] adds the camera perception streams
-     * RIT_VISION_POINT, RIT_VIO and RIT_VISION_STATISTIC (sensor probe only).
-     */
-    /**
-     * Subscription to the `report_info` reports. `account` adds maintenance (mileage, working time,
-     * battery cycles, blade wear) and the RTK base, read by the Mammotion account.
+     * Telemetry subscription to the `report_info` reports (read only). Maintenance (mileage, working time, battery
+     * cycles, blade use: blade reminder) is always requested. [vision] adds the camera perception streams
+     * RIT_VISION_POINT, RIT_VIO and RIT_VISION_STATISTIC (sensor probe only); `account` or [vision] add the RTK base.
+     *
+     * [periodMs]: 200 ms is requested during tracked movements, but the LUBA 2 (firmware 1.30.31.19) keeps publishing
+     * at 1 Hz: on 2026-10-20, 20 s after a 200 ms request with no other request, the positions were 1.0 s apart
+     * (median 1005-1010 ms, routes of 17:16 and 19:19). Kept in case another firmware honours it.
      */
     fun reports(keep: Boolean, now: Long = System.currentTimeMillis(), periodMs: Int = 1000, vision: Boolean = false, account: Boolean = false): ByteArray {
         require(periodMs in 200..1000)
@@ -155,10 +187,11 @@ class Commands(private val userAccount: Int = 0) {
                 .setAct(if (keep && !vision) rpt_act.RPT_KEEP else rpt_act.RPT_START)
                 .setTimeout(10000).setPeriod(periodMs).setNoChangePeriod(periodMs).setCount(0)
                 .addAllSub(listOf(rpt_info_type.RIT_CONNECT, rpt_info_type.RIT_DEV_STA,
-                    rpt_info_type.RIT_RTK, rpt_info_type.RIT_DEV_LOCAL, rpt_info_type.RIT_FW_INFO, rpt_info_type.RIT_WORK, rpt_info_type.RIT_CUTTER_INFO) +
+                    rpt_info_type.RIT_RTK, rpt_info_type.RIT_DEV_LOCAL, rpt_info_type.RIT_FW_INFO, rpt_info_type.RIT_WORK, rpt_info_type.RIT_CUTTER_INFO,
+                    rpt_info_type.RIT_MAINTAIN) +
                     (if (vision) listOf(rpt_info_type.RIT_VISION_POINT, rpt_info_type.RIT_VIO, rpt_info_type.RIT_VISION_STATISTIC) else emptyList()) +
                     // Full list of the Mammotion app during the probe (maintenance and RTK base included).
-                    if (account || vision) listOf(rpt_info_type.RIT_MAINTAIN, rpt_info_type.RIT_BASESTATION_INFO) else emptyList())))
+                    if (account || vision) listOf(rpt_info_type.RIT_BASESTATION_INFO) else emptyList())))
             .build().toByteArray()
     }
 
@@ -212,6 +245,9 @@ class Commands(private val userAccount: Int = 0) {
                 .setRxTopicName(PERCEPTION_TOPIC).setTxZmqUrl(PERCEPTION_ZMQ_URL)))
             .build().toByteArray()
 }
+
+/** Map element types the app may record or delete: 0 zone, 1 no-go zone, 2 passage. */
+val MAP_RECORD_TYPES = setOf(0, 1, 2)
 
 /** Values sent by the Mammotion app (`setZMQEnable`). */
 const val PERCEPTION_TOPIC = "perception_post_result"

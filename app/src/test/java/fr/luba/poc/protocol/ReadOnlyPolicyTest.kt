@@ -32,6 +32,32 @@ class ReadOnlyPolicyTest {
         ).forEachIndexed { index, payload -> assertFalse("motion, blade or native command #$index", ReadOnlyPolicy.allows(payload)) }
     }
 
+    @Test fun mapWritingIsRefusedButMapReadingStaysAllowed() {
+        listOf(commands.startMapRecording(0), commands.startMapRecording(1), commands.startMapRecording(2), commands.endMapRecording(0),
+            commands.cancelMapRecording(), commands.deleteMapElement(0, 42L), commands.deleteMapElement(1, 42L), commands.saveMapTask())
+            .forEachIndexed { index, payload -> assertFalse("map write #$index", ReadOnlyPolicy.allows(payload)) }
+        val ack = fr.luba.poc.proto.MctrlNavProto.NavGetCommDataAck.newBuilder().setAction(8).setType(0).setHash(42L).setTotalFrame(2).setCurrentFrame(1).build()
+        assertTrue(ReadOnlyPolicy.allows(commands.mapDataAck(ack)))
+        assertTrue(ReadOnlyPolicy.allows(commands.mapData(42L)))
+    }
+
+    @Test fun mapWritingCommandsCarryTheApkFields() {
+        fun data(payload: ByteArray) = LubaMsg.parseFrom(payload).nav.todevGetCommondata
+        data(commands.startMapRecording(1)).let { assertEquals(listOf(1, 0, 1, 0), listOf(it.pver, it.action, it.type, it.subCmd)) }
+        data(commands.endMapRecording(2)).let { assertEquals(listOf(1, 1, 2, 0), listOf(it.pver, it.action, it.type, it.subCmd)) }
+        data(commands.cancelMapRecording()).let { assertEquals(listOf(1, 7, 0), listOf(it.pver, it.action, it.subCmd)) }
+        data(commands.deleteMapElement(0, 7L)).let { assertEquals(listOf(6, 0), listOf(it.action, it.type)); assertEquals(7L, it.hash) }
+        assertEquals(fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_NAVIGATION, LubaMsg.parseFrom(commands.startMapRecording(0)).rcver)
+        listOf({ commands.startMapRecording(6) }, { commands.endMapRecording(-1) }, { commands.deleteMapElement(6, 1L) }, { commands.deleteMapElement(0, 0L) })
+            .forEach { build -> assertTrue(runCatching { build() }.isFailure) }
+    }
+
+    @Test fun mapWritingNeverGoesThroughTheCloud() {
+        listOf(commands.startMapRecording(0), commands.endMapRecording(0), commands.cancelMapRecording(), commands.deleteMapElement(0, 42L), commands.saveMapTask())
+            .forEach { payload -> assertTrue(runCatching { fr.luba.poc.auth.CloudReadOnly.requireAllowed(payload) }.isFailure) }
+        assertEquals(1, LubaMsg.parseFrom(commands.saveMapTask()).nav.todevSaveTask)
+    }
+
     @Test fun writeSystemQueryEmptyAndGarbageMessagesAreRefused() {
         val query = LubaMsg.parseFrom(commands.errorQuery())
         val write = query.toBuilder().setSys(query.sys.toBuilder().setBidireCommCmd(query.sys.bidireCommCmd.toBuilder().setRw(0))).build()

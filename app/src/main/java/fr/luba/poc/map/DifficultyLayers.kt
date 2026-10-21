@@ -27,6 +27,7 @@ import fr.luba.poc.camera.ObstaclePhoto
 import fr.luba.poc.difficulty.DifficultyEvent
 import fr.luba.poc.difficulty.DifficultyKind
 import fr.luba.poc.difficulty.DifficultyUi
+import fr.luba.poc.difficulty.PresumedObstacles
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleKind
@@ -43,11 +44,13 @@ import kotlin.math.abs
 
 /** Map layers independent of the signal surveys. Labels are evaluated at display time (interface language). */
 enum class MapExtraLayer(private val labelEn: String, private val labelFr: String, private val descriptionEn: String,
-                         private val descriptionFr: String) {
+                         private val descriptionFr: String, val defaultOn: Boolean = false) {
     ENCOUNTERS("Obstacles", "Obstacles", "Encountered obstacles (bumper contacts, photo) and presumed obstacles",
-        "Obstacles rencontrés (contacts pare-chocs, photo) et obstacles présumés"),
+        "Obstacles rencontrés (contacts pare-chocs, photo) et obstacles présumés", defaultOn = true),
     DIFFICULTIES("Difficulties", "Difficultés", "Difficulties heatmap: contacts, blockages, slipping, lifts, deviations",
-        "Heatmap des difficultés : contacts, blocages, patinage, soulèvements, écarts");
+        "Heatmap des difficultés : contacts, blocages, patinage, soulèvements, écarts"),
+    COVERAGE("Real coverage", "Couverture réelle", "Area actually mowed (cutting width around the track, blades running) and gaps left",
+        "Surface réellement tondue (largeur de coupe autour de la trace, lames en marche) et manques restants", defaultOn = true);
     val label: String get() = tr(labelEn, labelFr)
     val description: String get() = tr(descriptionEn, descriptionFr)
 }
@@ -58,15 +61,17 @@ sealed interface DifficultyAction {
     data class Register(val obstacle: LocalObstacle) : DifficultyAction
     /** Saved obstacle deleted from its sheet on the map. */
     data class Delete(val id: String) : DifficultyAction
+    /** Presumed obstacle dismissed with all its contacts. */
+    data class DismissPresumed(val id: String) : DifficultyAction
 }
 
 /**
- * Encountered obstacles and Difficulties layers: visibility kept between two launches, sheet opened when an
+ * Encountered obstacles, Difficulties and Real coverage layers: visibility kept between two launches, sheet opened when an
  * encountered obstacle is tapped. State kept outside the map screen (MapScreen register limit).
  */
 object MapExtraLayers {
     private var prefs: android.content.SharedPreferences? = null
-    private val visible = MutableStateFlow(setOf(MapExtraLayer.ENCOUNTERS))
+    private val visible = MutableStateFlow(MapExtraLayer.entries.filter { it.defaultOn }.toSet())
     val flow: StateFlow<Set<MapExtraLayer>> get() = visible
     private val opened = MutableStateFlow<DifficultyEvent?>(null)
     val openedEncounter: StateFlow<DifficultyEvent?> get() = opened
@@ -83,7 +88,7 @@ object MapExtraLayers {
     fun init(context: Context) {
         if (prefs != null) return
         prefs = context.applicationContext.getSharedPreferences("map_layers", Context.MODE_PRIVATE).also { p ->
-            visible.value = MapExtraLayer.entries.filter { p.getBoolean(it.name, it == MapExtraLayer.ENCOUNTERS) }.toSet()
+            visible.value = MapExtraLayer.entries.filter { p.getBoolean(it.name, it.defaultOn) }.toSet()
         }
     }
 
@@ -207,6 +212,20 @@ fun EncounterSheet(ui: DifficultyUi, photos: List<ObstaclePhoto>, obstacles: Lis
         val around = ui.encounters.count { it.point.distance(event.point) <= fr.luba.poc.difficulty.PresumedObstacles.CLUSTER_M }
         if (around > 1) KeyValueRow(tr("Contacts at this place", "Contacts à cet endroit"), "$around")
         if (event.note.isNotBlank()) Text(event.note, style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
+        // Contact under a saved obstacle: its sheet (size, deletion) is one tap away.
+        obstacles.firstOrNull { Point(it.x, it.y).distance(event.point) <= it.exclusionRadiusM + 0.3 }?.let { saved ->
+            Text(tr("This contact is covered by the saved obstacle “${saved.label.ifBlank { saved.kind.label }}”.",
+                "Ce contact est couvert par l'obstacle enregistré « ${saved.label.ifBlank { saved.kind.label }} »."),
+                style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
+            SecondaryPillButton(tr("Open the saved obstacle", "Ouvrir l'obstacle enregistré"), { MapExtraLayers.openObstacle(saved.id) }, Modifier.fillMaxWidth())
+        }
+        // Presumed obstacle (several contacts): dismissed as a whole, otherwise it stays as long as two contacts remain.
+        ObstacleSelection.presumedFor(event, ui.presumed)?.let { presumed ->
+            val count = PresumedObstacles.contactsOf(ui.events, presumed.id, System.currentTimeMillis()).size
+            if (count > 1) SecondaryPillButton(tr("Dismiss this presumed obstacle ($count contacts)", "Écarter cet obstacle présumé ($count contacts)"), {
+                MapExtraLayers.actions?.invoke(DifficultyAction.DismissPresumed(presumed.id)); MapExtraLayers.close()
+            }, Modifier.fillMaxWidth())
+        }
         Text(tr("Save the obstacle: size of the zone that routes will avoid around it (pole hit: choose Pole and a wider margin).", "Enregistrer l'obstacle : taille de la zone que les trajets éviteront autour de lui (poteau touché : choisir Poteau et une marge plus large)."),
             style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
         ObstacleSizeEditor(kind, { kind = it }, radius, { radius = it }, margin, { margin = it })

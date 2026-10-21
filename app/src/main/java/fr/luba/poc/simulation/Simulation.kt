@@ -792,7 +792,9 @@ data class SimEdge(val a: Point, val b: Point, val cutting: Boolean, val escape:
                    val heightMm: Int? = null) { val meters get()=a.distance(b) }
 data class SimConfig(val initialProgress: Double=0.0, val initialBattery: Double=100.0, val autonomyMinutes: Double=60.0,
                      val speedMps: Double=0.3, val returnPercent: Double=20.0, val resumePercent: Double=90.0, val chargeMinutes: Double=30.0, val turnDegreesPerSecond: Double=45.0,
-                     val baseEntryHeadingDegrees: Double?=null, val baseApproachMeters: Double=1.5, val dockingSpeedMps: Double=0.1, val instantCharging: Boolean=false)
+                     val baseEntryHeadingDegrees: Double?=null, val baseApproachMeters: Double=1.5, val dockingSpeedMps: Double=0.1, val instantCharging: Boolean=false,
+                     /** Battery aimed for on arrival by the dynamic return ([ReturnReserve]). */
+                     val returnReservePercent: Double=ReturnReserve.DEFAULT_PERCENT.toDouble())
 enum class SimPhase(private val labelEn: String, private val labelFr: String) {
     LEAVING_DOCK("Leaving the base · slow forward", "Sortie de base · marche avant lente"), DEPARTING("Start / resume", "Départ / reprise"),
     MOWING("Mowing", "Tonte"), RETURNING("Return to base", "Retour à la base"), ALIGNING("Alignment before recharge", "Alignement avant recharge"),
@@ -1240,7 +1242,20 @@ class MowingSimulation private constructor(val routes: TrajectoryPlanner, val ba
                 s=event(s.copy(finishing=true),tr("Return threshold: battery enough to finish the mowing then return", "Seuil bas : batterie suffisante pour finir la tonte puis rentrer"))
             }
             if(s.finishing && s.battery<=FinishPolicy.ARRIVAL_FLOOR_PERCENT) return returning(s.copy(finishing=false),false)
-            val back=returnSeconds(s)*drain
+            val backSeconds=returnSeconds(s)
+            // Never Die Outside ([ReturnReserve]): far from the base, return as soon as the battery nears the return cost
+            // plus the reserve, even above the low threshold; same choice as at the low threshold (finish or recharge).
+            if(!s.finishing) {
+                val low=config.returnPercent.roundToInt(); val high=config.resumePercent.roundToInt()
+                val watch=ReturnReserve.threshold(low,high,FinishPolicy.neededPercent(backSeconds,config.autonomyMinutes),
+                    ReturnReserve.sanitize(config.returnReservePercent.roundToInt(),low))
+                if(watch>low && s.battery<=watch) {
+                    if(!FinishPolicy.finishWithoutRecharge(s.battery,FinishPolicy.neededPercent(restSeconds(s.edge,s.offset),config.autonomyMinutes)))
+                        return event(returning(s,false),tr("Return reserve: battery near the return cost plus the reserve ($watch %)", "Réserve de retour : batterie proche du coût du retour plus la réserve ($watch %)"))
+                    s=event(s.copy(finishing=true),tr("Return reserve: battery enough to finish the mowing then return", "Réserve de retour : batterie suffisante pour finir la tonte puis rentrer"))
+                }
+            }
+            val back=backSeconds*drain
             if(s.battery<=back+dt*drain) return event(returning(s,false),tr("Early return: energy needed to reach the base", "Retour anticipé : énergie nécessaire pour atteindre la base"))
             var distance=dt*config.speedMps
             while(distance>1e-8 && s.edge<edges.size) {

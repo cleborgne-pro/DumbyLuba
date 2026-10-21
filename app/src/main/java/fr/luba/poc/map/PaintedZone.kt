@@ -90,8 +90,10 @@ object PaintedZone {
     }
 
     /** Simple boundaries kept: paint ∩ existing zones, fringes removed, small pieces ignored. */
-    fun pieces(map: RobotMap, strokes: List<PaintStroke>): List<List<Point>> {
-        val painted = painted(strokes)
+    fun pieces(map: RobotMap, strokes: List<PaintStroke>): List<List<Point>> = pieces(map, painted(strokes))
+
+    /** Simple boundaries kept from any target area (paint, gaps of the real coverage): same clipping and filtering. */
+    fun pieces(map: RobotMap, painted: JtsGeometry): List<List<Point>> {
         if (painted.isEmpty) return emptyList()
         val clipped = valid(painted.intersection(zonesArea(map)))
         val opened = clipped.buffer(-OPENING_M, 8).buffer(OPENING_M, 8).intersection(clipped)
@@ -140,13 +142,22 @@ object PaintedZone {
      */
     fun prepare(map: RobotMap, strokes: List<PaintStroke>, start: Point, base: MapBase, accesses: List<List<Point>>,
                 obstacles: List<LocalObstacle>, spacingM: Double, borders: Boolean, speedMps: Double,
+                checkpoint: () -> Unit = {}, progress: (String) -> Unit = {}): PaintedMission =
+        prepare(map, painted(strokes), start, base, accesses, obstacles, spacingM, borders, speedMps, checkpoint, progress)
+
+    /**
+     * Same preparation for a target [area] in map metres, e.g. the gaps of a real coverage
+     * ([fr.luba.poc.history.CoverageMap.gapArea]): only its part inside the zones is mowed.
+     */
+    fun prepare(map: RobotMap, area: JtsGeometry, start: Point, base: MapBase, accesses: List<List<Point>>,
+                obstacles: List<LocalObstacle>, spacingM: Double, borders: Boolean, speedMps: Double,
                 checkpoint: () -> Unit = {}, progress: (String) -> Unit = {}): PaintedMission {
         require(map.complete && !map.source.contains("DÉMONSTRATION", true)) { tr("A complete real map is required", "Carte réelle complète obligatoire") }
         requireNotNull(base.entryHeadingDegrees) { tr("Base axis unknown: observe the robot while charging", "Axe de la base inconnu : observer le robot en charge") }
         // Start nearest to the robot (nearest free point if it stopped inside a reserve).
         val routes = RoutePlanning.mission(map, obstacles, accesses, base)
         val from = RoutePlanning.missionStart(routes, start, docked = false, base = base.point) ?: base.point
-        val zones = zones(map, pieces(map, strokes), from)
+        val zones = zones(map, pieces(map, area), from)
         require(zones.isNotEmpty()) { tr("No painted area inside the zones (minimum ${MIN_PIECE_M2} m²)", "Aucune surface peinte à l'intérieur des zones (minimum ${MIN_PIECE_M2} m²)") }
         val planningMap = map.copy(shapes = map.shapes + zones)
         val config = PlanningConfig(spacingM = spacingM, marginM = 0.6, cutWidthM = Geometry.CUT_WIDTH_M, minimumCoverage = MIN_COVERAGE,

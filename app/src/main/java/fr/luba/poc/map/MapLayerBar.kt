@@ -121,12 +121,15 @@ internal fun LayerChip(signal: SurveySignal, active: Boolean, onClick: () -> Uni
     }
 }
 
-/** Obstacles or Difficulties layer: independent toggle, colored dot when shown. */
+/** Obstacles, Difficulties or Real coverage layer: independent toggle, colored dot when shown. */
 @Composable
 private fun ExtraChip(layer: MapExtraLayer, active: Boolean, onClick: () -> Unit) {
     val colors = MammotionColors
-    val accent = if (layer == MapExtraLayer.ENCOUNTERS) MapExtraLayers.kindColor(fr.luba.poc.difficulty.DifficultyKind.CONTACT)
-        else androidx.compose.ui.graphics.Color(0xFFF59E0B)
+    val accent = when (layer) {
+        MapExtraLayer.ENCOUNTERS -> MapExtraLayers.kindColor(fr.luba.poc.difficulty.DifficultyKind.CONTACT)
+        MapExtraLayer.COVERAGE -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
+        MapExtraLayer.DIFFICULTIES -> androidx.compose.ui.graphics.Color(0xFFF59E0B)
+    }
     Surface(onClick = onClick, shape = CircleShape, color = if (active) accent.copy(alpha = 0.16f) else Color.Transparent,
         contentColor = if (active) colors.TextPrimary else colors.TextSecondary,
         border = BorderStroke(1.dp, if (active) accent else colors.Hairline),

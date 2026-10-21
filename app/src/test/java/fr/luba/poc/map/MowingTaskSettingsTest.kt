@@ -38,6 +38,17 @@ class MowingTaskSettingsTest {
         assertEquals(80f, high.chargeLow); assertEquals(95f, high.chargeHigh)
     }
 
+    @Test fun returnReserveIsKeptAndBoundedByTheLowThreshold() {
+        val store = MowingTaskStore(context)
+        store.write(MowingTaskSettings(chargeLow = 25f, chargeHigh = 90f, returnReserve = 15f))
+        assertEquals(15f, MowingTaskStore(context).read().returnReserve)
+        // Never above the low threshold, never below the tracking safety reserve.
+        assertEquals(12f, MowingTaskSettings(chargeLow = 12f, returnReserve = 20f).sanitized().returnReserve)
+        assertEquals(5f, MowingTaskSettings(returnReserve = 1f).sanitized().returnReserve)
+        assertEquals(30f, MowingTaskSettings(chargeLow = 40f, returnReserve = 80f).sanitized().returnReserve)
+        assertEquals(10f, MowingTaskSettings(returnReserve = Float.NaN).sanitized().returnReserve)
+    }
+
     @Test fun outerOffsetGoesUpToOneMetreAndIsKept() {
         OuterOffsetSetting.init(context)
         OuterOffsetSetting.set(1.0)

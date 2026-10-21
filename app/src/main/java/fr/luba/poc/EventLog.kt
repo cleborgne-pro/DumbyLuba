@@ -3,6 +3,7 @@ package fr.luba.poc
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
+import fr.luba.poc.diagnostics.LogSanitizer
 import fr.luba.poc.i18n.tr
 import org.json.JSONObject
 import java.io.File
@@ -95,18 +96,50 @@ class EventLog(private val context: Context, private val onError: (String) -> Un
                 val r = JSONObject(it.readText()); "${r.optString("id")} · ${r.optString("outcome")} · ${r.optString("step")}" }
         done(reports.joinToString("\n").ifBlank { tr("No campaign recorded", "Aucune campagne enregistrée") })
     }
-    fun export(uri: Uri, archive: Boolean, done: (String) -> Unit) = submit {
+    /**
+     * Exports the current launch's log (JSONL) or the whole diagnostics folder (ZIP), with the task records, their
+     * tracks and typed events ([fr.luba.poc.history.TaskExport]). [anonymize] (default) filters
+     * every file with [LogSanitizer] and leaves the obstacle photos out, so the file can go to a public ticket as is;
+     * the raw export is for the user's own analysis.
+     */
+    fun export(uri: Uri, archive: Boolean, anonymize: Boolean = true, done: (String) -> Unit) = submit {
         try {
+            val sanitizer = if (anonymize) LogSanitizer() else null
             requireNotNull(context.contentResolver.openOutputStream(uri)).use { output ->
                 if (archive) ZipOutputStream(output).use { zip ->
-                    directory.walkTopDown().filter { it.isFile && it.extension in listOf("json", "jsonl", "jpg") }.forEach { file ->
+                    val files = directory.walkTopDown().filter { it.isFile && it.extension in listOf("json", "jsonl", "jpg") }.toList()
+                    val photos = files.count { it.extension == "jpg" }
+                    files.filter { sanitizer == null || it.extension != "jpg" }.forEach { file ->
                         zip.putNextEntry(ZipEntry(file.relativeTo(directory).invariantSeparatorsPath))
-                        file.inputStream().use { it.copyTo(zip) }; zip.closeEntry()
+                        copy(file, zip, sanitizer); zip.closeEntry()
                     }
-                } else run.listFiles().orEmpty().filter { it.extension == "jsonl" }.sortedBy { it.name }.forEach { file -> file.inputStream().use { it.copyTo(output) } }
+                    // Task records, tracks and typed events (history), filtered like the reports.
+                    fr.luba.poc.history.TaskExport.entries(context.filesDir).forEach { (name, content) ->
+                        zip.putNextEntry(ZipEntry(name))
+                        val text = if (sanitizer != null && name.endsWith(".json")) sanitizer.document(content) else content
+                        zip.write(text.toByteArray(Charsets.UTF_8)); zip.closeEntry()
+                    }
+                    if (sanitizer != null) {
+                        zip.putNextEntry(ZipEntry("ANONYMIZED.json")); zip.write(sanitizer.report(photos).toByteArray(Charsets.UTF_8)); zip.closeEntry()
+                    }
+                } else run.listFiles().orEmpty().filter { it.extension == "jsonl" }.sortedBy { it.name }.forEach { file -> copy(file, output, sanitizer) }
             }
-            done(if (archive) tr("Full archive exported (reports + kept logs)", "Archive complète exportée (rapports + journaux conservés)") else tr("JSONL log exported", "Journal JSONL exporté"))
+            done(when {
+                archive && sanitizer != null -> tr("Anonymized archive exported (reports + kept logs + tasks, without photos)", "Archive anonymisée exportée (rapports + journaux conservés + tâches, sans photos)")
+                archive -> tr("Raw archive exported (reports + kept logs + tasks + photos), not anonymized", "Archive brute exportée (rapports + journaux conservés + tâches + photos), non anonymisée")
+                sanitizer != null -> tr("Anonymized JSONL log exported", "Journal JSONL anonymisé exporté")
+                else -> tr("JSONL log exported", "Journal JSONL exporté")
+            })
         } catch (error: Exception) { done(tr("Export failed: ${error.javaClass.simpleName}", "Échec export : ${error.javaClass.simpleName}")) }
+    }
+    private fun copy(file: File, output: java.io.OutputStream, sanitizer: LogSanitizer?) {
+        when {
+            sanitizer == null || file.extension == "jpg" -> file.inputStream().use { it.copyTo(output) }
+            file.extension == "jsonl" -> file.bufferedReader(Charsets.UTF_8).useLines { lines ->
+                lines.forEach { output.write((sanitizer.line(it) + "\n").toByteArray(Charsets.UTF_8)) }
+            }
+            else -> output.write(sanitizer.document(file.readText(Charsets.UTF_8)).toByteArray(Charsets.UTF_8))
+        }
     }
     private fun atomicWrite(file: File, content: String) {
         val temp = File(file.parentFile, file.name + ".tmp")

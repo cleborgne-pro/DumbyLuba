@@ -68,6 +68,13 @@ class UiShotsServiceTest {
     @Test fun hub() { role(GatewayRole.OFF); page("service-hub", "") }
     @Config(qualifiers = "w412dp-h2400dp-xxhdpi")
     @Test fun hubDark() { role(GatewayRole.OFF); page("service-hub-dark", "", state(false), dark = true) }
+    /** Pilot through the gateway: robot card with the gateway health strip (weak Wi-Fi warning). */
+    private fun gatewayHealth() = fr.luba.poc.gateway.GatewayHealthStore.update(fr.luba.poc.gateway.GatewayHealth(batteryPercent = 93,
+        batteryTempDeciC = 186, wifiRssiDbm = -72, wifiMbps = 65, thermalStatus = 0, batteryExempt = true, screenOn = false))
+    @Test fun hubGateway() { role(GatewayRole.CLIENT); gatewayHealth(); page("service-hub-passerelle", "") }
+    @Test fun hubGatewayDark() { role(GatewayRole.CLIENT); gatewayHealth(); page("service-hub-passerelle-dark", "", dark = true) }
+    @Config(qualifiers = "w412dp-h2400dp-xxhdpi")
+    @Test fun gatewayPage() { role(GatewayRole.CLIENT); gatewayHealth(); page("service-passerelle", "Passerelle", state(false)) }
     @Test fun connectionConnected() { role(GatewayRole.OFF); page("service-connexion", "Robot") }
     @Test fun connectionScan() {
         role(GatewayRole.OFF)

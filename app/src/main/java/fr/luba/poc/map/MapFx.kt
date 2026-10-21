@@ -83,7 +83,8 @@ private fun LubaColors.isDark() = Background.luminance() < 0.5f
 /**
  * Lawn drawn like the Mammotion app (capture of 2026-10-17): pale green fills outlined in green, ochre no-go zone fills,
  * passages as a grey band dotted with white. Zone boundaries are drawn after all the fills: a boundary shared by two
- * zones stays a sharp line. [unit] = 1 dp on screen in the current layer.
+ * zones stays a sharp line, then the typed border portions ([borders], see [BorderTypes]). [unit] = 1 dp on screen in
+ * the current layer.
  */
 fun DrawScope.drawLawn(
     map: RobotMap,
@@ -91,6 +92,19 @@ fun DrawScope.drawLawn(
     path: (List<Point>, Boolean) -> Path,
     unit: Float,
     colors: LubaColors,
+) = drawLawnLayers(map, active, path, unit, colors, borders = true)
+
+/**
+ * [drawLawn] with the typed border portions optional (the border types editor draws its own list). Kept apart so the
+ * callers of [drawLawn] keep a call without default arguments (MapScreen is at the Dalvik register limit).
+ */
+internal fun DrawScope.drawLawnLayers(
+    map: RobotMap,
+    active: (MapShape) -> Boolean,
+    path: (List<Point>, Boolean) -> Path,
+    unit: Float,
+    colors: LubaColors,
+    borders: Boolean,
 ) {
     val dark = colors.isDark()
     val shapes = map.shapes.filter { it.points.size >= 2 }.sortedBy { it.type }
@@ -130,6 +144,8 @@ fun DrawScope.drawLawn(
             }
         }
     }
+    // Border types (OPEN, CURB, WALL, DANGER) over the outlines; reading the list here redraws the map when it changes.
+    if (borders) drawBorderPortions(BorderTypeRepository.portions(map), path, unit)
 }
 
 /** Orange hatching (and thin outline) over the surface beyond the Mammotion boundaries. */

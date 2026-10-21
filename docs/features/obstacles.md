@@ -156,7 +156,8 @@ Data and tests are kept apart:
     (confirmation; saved obstacles and photos are kept);
   - **Use in routes**: **Avoid obstacles hit several times** and **Bypass difficult areas when moving** (both on by
     default);
-  - **Map layers**: **"Obstacles" layer** and **"Difficulties" layer** toggles;
+  - **Map layers**: **"Obstacles" layer**, **"Difficulties" layer** and **"Real coverage" layer**
+    ([map](map.md#real-coverage-layer)) toggles;
   - **Photos after contact**: **Photograph the obstacle after the back-off** toggle, **Photo camera** choice, last
     photo status and the 12 latest photos (a tap enlarges; nearest saved obstacle named);
   - **Simulation**: entry to **Obstacle simulation**.

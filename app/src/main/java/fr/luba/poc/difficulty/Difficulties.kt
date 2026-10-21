@@ -238,13 +238,29 @@ object PresumedObstacles {
 
     private fun centroid(g: List<DifficultyEvent>) = Point(g.sumOf { it.point.x } / g.size, g.sumOf { it.point.y } / g.size)
 
+    /** A saved obstacle hides the presumed obstacle of [cluster] (same place). */
+    fun covers(obstacle: LocalObstacle, cluster: Cluster): Boolean =
+        Point(obstacle.x, obstacle.y).distance(cluster.center) <= obstacle.exclusionRadiusM + 0.3
+
+    /** Identifier of the presumed obstacle made by [cluster]. */
+    fun id(cluster: Cluster): String = ID_PREFIX + cluster.contacts.minBy { it.atMs }.id
+
+    /** Contacts making the presumed obstacle [id] (empty if it no longer exists). */
+    fun contactsOf(events: List<DifficultyEvent>, id: String, now: Long): List<DifficultyEvent> =
+        clusters(events, now).firstOrNull { id(it) == id }?.contacts.orEmpty()
+
+    /**
+     * Contacts hidden by the saved obstacle [obstacle] and by none of [others]: deleting it without dismissing them
+     * brought the same obstacle back as a presumed obstacle, at the same place, without any way to delete it.
+     */
+    fun hiddenContacts(events: List<DifficultyEvent>, obstacle: LocalObstacle, others: List<LocalObstacle>, now: Long): List<DifficultyEvent> =
+        clusters(events, now).filter { cluster -> covers(obstacle, cluster) && others.none { covers(it, cluster) } }.flatMap { it.contacts }
+
     /** Presumed obstacles outside the already saved obstacles ([known]). */
     fun obstacles(events: List<DifficultyEvent>, known: List<LocalObstacle>, now: Long): List<LocalObstacle> =
-        clusters(events, now).filter { cluster ->
-            known.none { o -> Point(o.x, o.y).distance(cluster.center) <= o.exclusionRadiusM + 0.3 }
-        }.map { cluster ->
+        clusters(events, now).filter { cluster -> known.none { o -> covers(o, cluster) } }.map { cluster ->
             val first = cluster.contacts.minOf { it.atMs }; val last = cluster.contacts.maxOf { it.atMs }
-            LocalObstacle(ID_PREFIX + cluster.contacts.minByOrNull { it.atMs }!!.id, ObstacleKind.OTHER,
+            LocalObstacle(id(cluster), ObstacleKind.OTHER,
                 cluster.center.x, cluster.center.y, cluster.radiusM, fr.luba.poc.simulation.ObstacleBypass.CONTACT_MARGIN_M,
                 createdAtMs = first, updatedAtMs = last, label = if (cluster.contacts.size == 1) tr("Recently hit obstacle", "Obstacle touché récemment")
                     else tr("Presumed obstacle (${cluster.contacts.size} contacts)", "Obstacle présumé (${cluster.contacts.size} contacts)"))

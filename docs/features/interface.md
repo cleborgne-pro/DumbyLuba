@@ -68,7 +68,7 @@ page (back arrow, bottom bar hidden).
 | Group | Entries |
 |---|---|
 | **Connection** | [Bluetooth connection](bluetooth-connection.md) · [Check the setup](getting-started.md#check-the-setup) · [Wi-Fi gateway](gateway.md) · [Home server](home-server.md) |
-| **Robot** | [Manual control](manual-control.md) · [Cutting height](tests-and-diagnostics.md#cutting-height-and-blade-test) · [Camera](camera.md) |
+| **Robot** | [Manual control](manual-control.md) · [Cutting height](tests-and-diagnostics.md#cutting-height-and-blade-test) · [Camera](camera.md) · [Maintenance](maintenance.md) |
 | **Garden and history** | [Task history](mowing-history.md) · [Obstacles](obstacles.md) (list, difficulties, photos, [simulation](obstacles.md#obstacle-simulation)) · [Signal surveys](signal-surveys-and-terrain.md) · [Rain and weather](rain-and-weather.md) |
 | **Supervised tests** | [Command cutoff](safety.md#command-cutoff-motor-watchdog) · [Navigation test](tests-and-diagnostics.md#navigation-test) · [Border following](tests-and-diagnostics.md#border-following) · [Obstacle tests](obstacles.md) · [Blade test](tests-and-diagnostics.md#cutting-height-and-blade-test) · [Trial mowing (painted zone)](tests-and-diagnostics.md#trial-mowing-painted-zone) |
 | **Diagnostics** | [Bluetooth diagnostics](tests-and-diagnostics.md#bluetooth-diagnostics) · [Detailed telemetry](tests-and-diagnostics.md#detailed-telemetry) · [Sensors and perception](tests-and-diagnostics.md#sensors-and-perception) · [Logs](logs-and-data.md) · [Advanced settings](bluetooth-connection.md#advanced-settings) |
@@ -89,10 +89,32 @@ again.".
   **Language** (System / English / Français, System by default, remembered between launches, [language](#language)) and
   **Notifications** ([local alerts](notifications.md)), whose subtitle is the latest notification, "Local alerts
   enabled" or "Notifications blocked · allow".
-- **About**: **Version** (the `versionName` to include in a ticket). Connection, tests and logs are in the Service
-  tab.
+- **About**: **Version** (the `versionName` to include in a ticket) and **Updates** ([new versions](#new-versions)).
+  Connection, tests and logs are in the Service tab.
 - Note at the bottom: "DumbyLuba controls the robot locally (Bluetooth or the Wi-Fi gateway). The Mammotion account
   adds remote reading (map, status, history), the native return to base, firmware updates and the camera."
+
+#### New versions
+
+The app detects a new version published on GitHub; it downloads and installs nothing by itself.
+
+- **What is read**: the `release.json` file of the latest
+  [GitHub release](https://github.com/cleborgne-pro/DumbyLuba/releases) (link
+  `releases/latest/download/release.json`, which skips drafts and pre-releases). No GitHub account and no API call:
+  only GitHub sees the request (the phone's IP address and the app version in the User-Agent).
+- **When**: with **Check automatically** on (default), at most once a day, when the app comes to the foreground; at
+  any time by touching **Updates**.
+- **Comparison**: the `versionCode` of the release against the installed one, for the published app only
+  (`io.github.cleborgne_pro.dumbyluba`). Builds made from source (debug, `fold`, identifier `fr.luba.poc`) never check
+  by themselves and never offer the update: a manual check only shows "Development build · latest published X.Y.Z".
+- **Display**: the **Updates** row reads "Version X.Y.Z available · open the release", "Up to date · checked 3 h ago",
+  "Checking GitHub…" or "Check failed (reason) · try again"; a green dot marks the **Me** tab while a newer version is
+  available. Touching the row then opens the release page (notes, signed APK, checksums) in the browser; install the
+  APK from there, or let [Obtainium](https://github.com/ImranR98/Obtainium) follow the releases.
+- **Gateway phone**: on the pilot, Service → Gateway → **Gateway health** adds "Version X.Y.Z is published on GitHub:
+  update the gateway phone too (1.13.0)." when the Android gateway announces an older version than the latest release
+  read by this phone ([gateway versions](gateway.md#versions)).
+- The last release read and the setting are kept between launches; a failed check keeps the last release read.
 
 ## Global STOP bar
 

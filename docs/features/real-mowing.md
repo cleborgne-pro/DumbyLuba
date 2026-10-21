@@ -34,6 +34,8 @@ During mowing, the bottom bar of the map shows, on a first line "Local mowing ·
 - **Battery** and **duration** (actual / estimated, "1 h 05 / ≈ 2 h 10");
 - **Recharge n/total** (0.62.0): recharges started since the task began, resumes included, out of the total planned
   at launch (raised if the task needs more); absent for a task that plans no recharge;
+- **Covered x %**: share of the task zones actually mowed so far according to the track
+  ([real coverage](mowing-history.md#real-coverage)), once something is mowed;
 - then the current step, a **STOP** button and "⋯", with a progress bar below.
 
 "⋯" (or a tap on the bar) opens the **Local mowing** sheet: **State** (current step), **Height**, **Recharge**
@@ -257,6 +259,30 @@ final field of the tracking description, ignored by an older gateway). It sends 
    calibration kept: kept from the return, it took the route from the base to the exit point for a straight line and
    "confirmed" a heading wrong by 150°, leading to a pivot in the wrong direction and a stop in the base zone
    (end-to-end test bench).
+
+### Return reserve ("Never Die Outside")
+
+Far from the base, waiting for the low threshold could leave too little battery to come back. During a mowing, the
+threshold watched is therefore raised to **the estimated cost of the return plus the return reserve** (Task settings,
+10 % by default), whenever that is above the low threshold:
+
+- return cost: distance from the robot to the approach point in front of the base × detour of the real return path,
+  plus the docking corridor, at the estimate speed and duration factor, docking time and the 25 % energy margin
+  included ([remainder estimate](#estimating-the-energy-for-the-remainder-0480)); the detour (real path / straight
+  line, 1 to 4, 1.5 before the first measure) is measured at the start of each blade range on the mission's
+  navigation (no-go zones, obstacles), off the tracking loop; the threshold is refreshed every 5 s;
+- the threshold never goes below the low threshold (near the base nothing changes) nor above the resume threshold
+  minus 15 points (each recharge then buys some mowing, instead of leaving at 60 % to come back at 55 %) or 80 %; it is shown next to the battery like the 10 % floor ("↓ 34 %");
+- when it is reached above the low threshold, the robot makes the same choice as at the low threshold: finish then go
+  home if the remainder allows it (10 % floor), otherwise return to recharge ("Return reserve (34 %) · BLE return ·
+  blades OFF"; log `route_return_reserve` with the battery, the threshold, the reserve and the detour);
+- with the gateway, the threshold in force when a tracking job is handed over is sent with it (the gateway stops at
+  it on its own);
+- surveys, runs with blades stopped and debug mowings keep the fixed low threshold (no mowing measurement).
+
+The simulation applies the same rule (`ReturnReserve`, the reserve of the task settings): on the reference map, every
+zone with a 20 min runtime and a low threshold of 10 or 20 % ends at the base, with several returns decided by the
+reserve and every arrival at least at the reserve (`ReturnReserveTest`).
 
 Since 0.47.0, the return route (low threshold) and the resume link (high threshold) get the same recoveries as
 mowing: bypass after a contact, recovery from a trajectory exit, pause on robot protection. A tracking job **lost by

@@ -47,6 +47,7 @@ internal fun DifficultiesGroup(robot: RobotBle, state: RobotUi) {
                         Text(tr("${Format.num(o.x, 1)} / ${Format.num(o.y, 1)} m · radius ${Format.num(o.radiusM, 2)} m", "${Format.num(o.x, 1)} / ${Format.num(o.y, 1)} m · rayon ${Format.num(o.radiusM, 2)} m"),
                             style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
                     }
+                    SecondaryPillButton(tr("Dismiss", "Écarter"), { robot.dismissPresumedObstacle(o.id) })
                     SecondaryPillButton(tr("Save", "Enregistrer"), {
                         robot.saveObstacle(o.copy(id = java.util.UUID.randomUUID().toString(), label = tr("Encountered obstacle (${o.label.substringAfter("(").removeSuffix(")")})", "Obstacle rencontré (${o.label.substringAfter("(").removeSuffix(")")})")))
                     })

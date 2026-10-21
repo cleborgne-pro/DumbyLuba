@@ -122,6 +122,7 @@ class LegRunner(
         val exit = DockExit(path[0].a, path[0].b)
         val begin = env.now()
         val motionProgress = MotionProgressGuard()
+        var exitOverlapLogged = false
         var nextSync = begin; var nextReports = begin
         var seq = 0L
         if (spec.shown) env.progress(LegProgress(spec.legId, 1, 1, tr("Station exit", "Sortie de station"), false))
@@ -152,7 +153,19 @@ class LegRunner(
             val reach = minOf(0.10, position.distance(path[0].b))
             val next = RobotPose(Point(position.x + reach * kotlin.math.cos(rad), position.y + reach * kotlin.math.sin(rad)), step.heading)
             val envelopeGuard = physicalGuard ?: guard
-            check(envelopeGuard == null || envelopeGuard.motionCollision(RobotPose(position, step.heading), next) == null) { tr("Station exit outside the safe envelope", "Sortie de station hors enveloppe sûre") }
+            if (envelopeGuard != null && envelopeGuard.motionCollision(RobotPose(position, step.heading), next) != null) {
+                // Chassis already overlapping the free surface on its station (learnt obstacle or no-go zone near the
+                // base, RTK offset): same rule as a robot overlapping a border, the remaining straight exit must only
+                // move it away and end inside the free surface ([TrajectoryEnvelope.leavesStraight]).
+                val overlapping = !envelopeGuard.poseSafe(RobotPose(position, step.heading))
+                check(overlapping && envelopeGuard.leavesStraight(position, path[0].b, step.heading)) { DockExit.envelopeRefusal(position, path[0].a, overlapping) }
+                if (!exitOverlapLogged) {
+                    exitOverlapLogged = true
+                    env.event("route_dock_exit_overlap", tr("Chassis overlapping the free surface on the base: straight exit allowed while it only moves away",
+                        "Châssis débordant de la surface libre sur la base : sortie tout droit admise tant qu'elle ne fait que s'en éloigner"),
+                        mapOf("x" to position.x, "y" to position.y, "heading" to step.heading, "baseDistanceM" to position.distance(path[0].a)))
+                }
+            }
             check(obstacleHits(position, next.position, false).isEmpty()) { tr("Obstacle on the station exit", "Obstacle sur la sortie de station") }
             env.send(commands.movement(step.linear, 0), "ROUTE_DOCK_EXIT #${++seq}")
             env.delay(200)

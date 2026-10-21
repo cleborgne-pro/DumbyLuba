@@ -25,7 +25,8 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 | [Supported models](features/supported-models.md) | LUBA 2 AWD validated; LUBA 1, LUBA 3, LUBA mini, Yuka… in read-only mode, how to test your model |
 | [Bluetooth connection](features/bluetooth-connection.md) | scanning, connection, link loss, link kept in the background, advanced settings |
 | [Mammotion account](features/mammotion-account.md) | optional: map and status through the cloud, camera, native return, firmware update |
-| [Map](features/map.md) | BLE or cloud reading, cache, map sheet (background, layers, legend, source), local corrections (zones, no-go zones, obstacles), DumbyLuba zones and passages recorded by driving, beyond the Mammotion boundaries hatched, base and manual accesses, device status, last known position |
+| [Map](features/map.md) | BLE or cloud reading, cache, map sheet (background, layers, legend, source), local corrections (zones, no-go zones, obstacles), border types per boundary portion, DumbyLuba zones and passages recorded by driving, beyond the Mammotion boundaries hatched, base and manual accesses, device status, last known position |
+| [Sync with the Mammotion app](features/map-sync.md) | differences between the corrected map and the map stored in the robot, chosen one by one, written into the robot by driving each outline on its own while it records it (zones, passages and no-go zones created, corrected ones replaced), live progress and STOP |
 
 ## Mowing
 
@@ -48,6 +49,7 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 | [Local alerts](features/notifications.md) | robot stuck or lifted, battery, link or RTK loss, rain… no cloud; notification list and settings |
 | [Rain and weather](features/rain-and-weather.md) | RainViewer radar, Open-Meteo forecast, warnings |
 | [Robot camera](features/camera.md) | live video, movable and resizable thumbnail, photo of the obstacle after a contact |
+| [Maintenance](features/maintenance.md) | robot counters read over Bluetooth (distance, hours, battery cycles, blades), blade change reminder |
 
 ## Measuring and diagnosing
 

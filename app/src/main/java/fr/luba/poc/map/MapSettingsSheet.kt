@@ -23,12 +23,15 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Landscape
 import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.BorderStyle
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Gamepad
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material.icons.rounded.Grass
 import androidx.compose.material.icons.rounded.Whatshot
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -122,7 +125,8 @@ fun MapSettingsSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.Background, scrimColor = Color.Black.copy(alpha = 0.25f)) {
         MapSettingsContent(source, summary, heat, mapLoading, fetchEnabled, accountEnabled, demoEnabled, onSignal, onHeatVisible,
             onLayerBar, onFetch, onAccount, onToggleDemo, onHistory, onCalibration, corrections, correctionsEnabled, onCorrections,
-            recordEnabled, onRecord)
+            recordEnabled, onRecord, onBorderTypes = { onDismiss(); BorderTypeRepository.editorOpen = true },
+            onSync = { onDismiss(); fr.luba.poc.mapsync.MapSyncScreen.open = true })
     }
 }
 
@@ -149,6 +153,8 @@ fun MapSettingsContent(
     onCorrections: () -> Unit = {},
     recordEnabled: Boolean = false,
     onRecord: () -> Unit = {},
+    onBorderTypes: () -> Unit = {},
+    onSync: () -> Unit = {},
 ) {
     val colors = MammotionColors
     val display = MapDisplaySettings.current
@@ -182,6 +188,8 @@ fun MapSettingsContent(
                 subtitle = tr("Bumper contacts and presumed obstacles; a tap opens their sheet", "Contacts du pare-chocs et obstacles présumés ; un toucher ouvre leur fiche"), icon = Icons.Rounded.WarningAmber)
             ToggleRow(tr("Difficulties", "Difficultés"), MapExtraLayer.DIFFICULTIES in extras, { MapExtraLayers.toggle(MapExtraLayer.DIFFICULTIES) },
                 subtitle = tr("Blockages, slipping, lifts and route deviations", "Blocages, patinages, soulèvements et écarts de trajectoire"), icon = Icons.Rounded.Whatshot)
+            ToggleRow(tr("Real coverage", "Couverture réelle"), MapExtraLayer.COVERAGE in extras, { MapExtraLayers.toggle(MapExtraLayer.COVERAGE) },
+                subtitle = tr("Area actually mowed by the current or last mowing; gaps in orange once it ends", "Surface réellement tondue par la tonte en cours ou la dernière ; manques en orange une fois terminée"), icon = Icons.Rounded.Grass)
         }
 
         SettingsGroup(tr("Signal heatmap", "Heatmap des signaux")) {
@@ -203,17 +211,29 @@ fun MapSettingsContent(
                 subtitle = tr("Zones, no-go zones and obstacles corrected on the phone, without touching the Mammotion map", "Zones, no-go et obstacles corrigés sur le téléphone, sans toucher à la carte Mammotion"),
                 value = if (corrections > 0) tr("$corrections active", "$corrections active${if (corrections > 1) "s" else ""}") else null,
                 enabled = correctionsEnabled, onClick = onCorrections)
+            val borderCount = BorderTypeRepository.annotations.size
+            NavRow(tr("Border types", "Types de bordure"), icon = Icons.Rounded.BorderStyle,
+                subtitle = tr("Open lawn, curb, wall or danger, portion by portion of the boundaries; kept on this phone",
+                    "Pelouse ouverte, bordure, mur ou danger, portion par portion des contours ; gardés sur ce téléphone"),
+                value = if (borderCount > 0) tr("$borderCount portion${if (borderCount > 1) "s" else ""}", "$borderCount portion${if (borderCount > 1) "s" else ""}") else null,
+                enabled = correctionsEnabled, onClick = onBorderTypes)
             NavRow(tr("Record by driving", "Enregistrer en pilotant"), icon = Icons.Rounded.Gamepad,
                 subtitle = tr("New DumbyLuba zone, passage or no-go zone, driven with the joystick like in the Mammotion app; kept on this phone only",
                     "Nouvelle zone DumbyLuba, passage ou no-go, parcourus au joystick comme dans l'app Mammotion ; gardés sur ce téléphone uniquement"),
                 enabled = recordEnabled, onClick = onRecord)
+            NavRow(tr("Sync with the Mammotion app", "Synchroniser avec l'app Mammotion"), icon = Icons.Rounded.Sync,
+                subtitle = tr("Writes the corrections into the map stored in the robot: the robot drives each outline on its own while it records it",
+                    "Écrit les corrections dans la carte enregistrée dans le robot : le robot parcourt seul chaque contour en l'enregistrant"),
+                value = if (corrections > 0) tr("$corrections to review", "$corrections à examiner") else null,
+                enabled = correctionsEnabled && corrections > 0, onClick = onSync)
         }
 
         SettingsGroup(tr("Map source", "Source de la carte")) {
             NavRow(if (mapLoading) tr("Reading…", "Lecture en cours…") else tr("Read the robot map", "Lire la carte du robot"), icon = Icons.Rounded.Bluetooth,
                 subtitle = tr("Bluetooth or gateway", "Bluetooth ou passerelle"), value = tr("Shown", "Affichée").takeIf { source == MapSource.ROBOT },
                 enabled = fetchEnabled, onClick = onFetch)
-            NavRow(tr("Mammotion account map", "Carte du compte Mammotion"), icon = Icons.Rounded.Cloud, subtitle = tr("Viewing and simulation, no mowing", "Consultation et simulation, sans tonte"),
+            // Local mode: no account map entry.
+            if (!fr.luba.poc.auth.AccountMode.observe()) NavRow(tr("Mammotion account map", "Carte du compte Mammotion"), icon = Icons.Rounded.Cloud, subtitle = tr("Viewing and simulation, no mowing", "Consultation et simulation, sans tonte"),
                 value = tr("Shown", "Affichée").takeIf { source == MapSource.ACCOUNT }, enabled = accountEnabled, onClick = onAccount)
             NavRow(if (source == MapSource.DEMO) tr("Back to the real map", "Revenir à la carte réelle") else tr("Try the demo", "Essayer la démonstration"), icon = Icons.Rounded.Map,
                 subtitle = tr("Built-in fictional map", "Carte fictive embarquée"), enabled = demoEnabled, onClick = onToggleDemo)

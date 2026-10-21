@@ -134,6 +134,13 @@ fun ObstacleEditSheet(obstacles: List<LocalObstacle>) {
     LubaDialog(onDismissRequest = { MapExtraLayers.close() }, title = obstacle.label.ifBlank { obstacle.kind.label }, content = {
         KeyValueRow("Position", "${Format.num(obstacle.x, 2)} / ${Format.num(obstacle.y, 2)} m")
         if (obstacle.incidents.isNotEmpty()) KeyValueRow("Incidents", "${obstacle.incidents.size}")
+        if (confirmDelete) {
+            val contacts = PresumedObstacles.hiddenContacts(MapExtraLayers.latest.events, obstacle, obstacles.filter { it.id != obstacle.id },
+                System.currentTimeMillis()).size
+            if (contacts > 0) Text(tr("The $contacts bumper contacts recorded at this place will be dismissed too, so that it does not come back as a presumed obstacle.",
+                "Les $contacts contacts pare-chocs consignés à cet endroit seront écartés aussi, pour qu'il ne revienne pas en obstacle présumé."),
+                style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
+        }
         Text(tr("Size of the zone that routes avoid around this obstacle. Mowing and moves are recomputed.", "Taille de la zone que les trajets évitent autour de cet obstacle. La tonte et les déplacements sont recalculés."),
             style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
         ObstacleSizeEditor(kind, { kind = it }, radius, { radius = it }, margin, { margin = it })

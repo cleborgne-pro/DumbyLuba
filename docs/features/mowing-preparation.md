@@ -77,9 +77,13 @@ boundary is driven") or **Grid** (merged boundary and crossed grid), **Grid spac
 | *Advanced settings* · Perimeter first | on / off ("Mow the borders before the inside of the zones.") | on |
 | *Advanced settings* · No-go zones on the way | on: "Their loop is done when the route passes nearby, then mowing resumes."; off: "All the no-go zone loops are grouped before the perimeter." | on |
 | *Advanced settings* · Battery: return / resume | 10 to 100 %, return ≤ 80 %, gap ≥ 5 points | 20 % / 90 % |
+| *Advanced settings* · Return reserve | 5 to 30 %, never above the return threshold (brought back under it when the threshold is lowered) | 10 % |
 
 The *Advanced settings* group is collapsed; its header summarizes spacing and loops ("25 cm · 1 + 1 loops"). The
-battery range recalls "Mowing stops at 20 % to recharge, then resumes at the interrupted point at 90 %." With 2 or 3
+battery range recalls "Mowing stops at 20 % to recharge, then resumes at the interrupted point at 90 %." The return
+reserve recalls "Far from the base, the robot returns as soon as its battery nears the cost of the return plus 10 %,
+even above 20 %. Between 5 and 20 % (never above the low threshold)." (see
+[return reserve](real-mowing.md#return-reserve-never-die-outside)). With 2 or 3
 cutting passes, a note gives the heights ("Tall grass: 70 → 55 → 40 mm. Every other pass is driven in reverse;
 duration multiplied by 3."); a cutting height too high for several passes shows "Cutting height too high for several
 passes (at least 5 mm apart, 70 mm at most)." (100 mm on an H version)

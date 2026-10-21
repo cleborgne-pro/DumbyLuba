@@ -100,6 +100,33 @@ class DifficultiesTest {
         assertTrue(PresumedObstacles.obstacles(listOf(first, contact("d", now - day, 8.0, 5.0)), emptyList(), now).isEmpty())
     }
 
+    @Test fun deletingASavedObstacleDismissesTheContactsThatWouldBringItBack() {
+        // 2026-10-21: obstacle saved from contacts in front of the base exit; once deleted, the same contacts made it come
+        // back at once as a presumed obstacle, still avoided, with no way to delete it.
+        val contacts = listOf(contact("a", now - 2 * day, 5.0, 5.0), contact("b", now - day, 5.3, 5.1), contact("far", now - day, 9.0, 5.0),
+            contact("far2", now - 2 * day, 9.1, 5.0))
+        val saved = LocalObstacle("k", ObstacleKind.OTHER, 5.15, 5.05, 0.3, 0.3)
+        assertEquals(1, PresumedObstacles.obstacles(contacts, listOf(saved), now).size)
+        val hidden = PresumedObstacles.hiddenContacts(contacts, saved, emptyList(), now).map { it.id }.toSet()
+        assertEquals(setOf("a", "b"), hidden)
+        val after = contacts.map { if (it.id in hidden) it.copy(dismissed = true) else it }
+        assertEquals("only the distant obstacle stays", listOf(9.05), PresumedObstacles.obstacles(after, emptyList(), now).map { it.x })
+        // Another saved obstacle still covering the place: its contacts are kept.
+        val other = saved.copy(id = "o")
+        assertTrue(PresumedObstacles.hiddenContacts(contacts, saved, listOf(other), now).isEmpty())
+    }
+
+    @Test fun presumedObstacleIsDismissedWithAllItsContacts() {
+        val contacts = listOf(contact("a", now - 3 * day, 5.0, 5.0), contact("b", now - 2 * day, 5.3, 5.1), contact("c", now - day, 5.1, 4.9))
+        val presumed = PresumedObstacles.obstacles(contacts, emptyList(), now).single()
+        val ids = PresumedObstacles.contactsOf(contacts, presumed.id, now).map { it.id }.toSet()
+        assertEquals(setOf("a", "b", "c"), ids)
+        // Dismissing a single contact is not enough: two remain, the obstacle stays.
+        assertEquals(1, PresumedObstacles.obstacles(contacts.map { if (it.id == "a") it.copy(dismissed = true) else it }, emptyList(), now).size)
+        assertTrue(PresumedObstacles.obstacles(contacts.map { if (it.id in ids) it.copy(dismissed = true) else it }, emptyList(), now).isEmpty())
+        assertTrue(PresumedObstacles.contactsOf(contacts, "presume-unknown", now).isEmpty())
+    }
+
     @Test fun logDeduplicatesAndJsonRoundTrips() {
         val stop = DifficultyEvent("s", now, DifficultyKind.BLOCKED, 3.0, 4.0, code = 1201, note = "Erreur robot", source = "tonte")
         val log = DifficultyLog.add(emptyList(), stop)

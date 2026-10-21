@@ -199,9 +199,35 @@ object PointPlanner {
     fun beyond(surface: Area, p: Point, toleranceM: Double = 0.1): Boolean =
         runCatching { surface.distance(point(p)) > toleranceM }.getOrDefault(false)
 
+    /**
+     * Exact outline to drive ([points], robot centre), without any computed bypass: same surface, holes and footprint
+     * checks as a move to a point. Used to record a map element in the robot (sync with the Mammotion app), where a
+     * detour would be drawn into the element. The station is not a routing exclusion here: [MapSyncPlanner] keeps the
+     * outline away from it. Throws if a section leaves the safe surface or the chassis cannot pivot at a corner.
+     */
+    fun tracePlan(map: RobotMap, points: List<Point>, obstacles: List<LocalObstacle>, accesses: List<List<Point>> = emptyList(),
+                  routes: TrajectoryPlanner? = null): MapNavPlan {
+        require(points.size >= 2 && points.all { it.x.isFinite() && it.y.isFinite() }) { tr("Invalid outline", "Tracé invalide") }
+        val planner = routes ?: traceRoutes(map, obstacles, accesses)
+        val zones = map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
+        val passages = map.shapes.filter { it.kind == ShapeKind.PASSAGE && it.points.size >= 2 }
+        return build(zones, passages, holes(map, obstacles), RobotEnvelope.LUBA2.halfWidthM + 0.05, planner, points.first(), points.last(),
+            planner.navigableSurface, preset = points)
+    }
+
+    /** Surface of [tracePlan], built once to check several candidate outlines ([TrajectoryPlanner.requirePath]). */
+    fun traceRoutes(map: RobotMap, obstacles: List<LocalObstacle>, accesses: List<List<Point>> = emptyList()): TrajectoryPlanner {
+        require(map.complete && !map.source.contains("DÉMONSTRATION", true)) { tr("A complete real map is required", "Carte réelle complète obligatoire") }
+        val zones = map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
+        require(zones.isNotEmpty()) { tr("No mapped zone", "Aucune zone cartographiée") }
+        val passages = map.shapes.filter { it.kind == ShapeKind.PASSAGE && it.points.size >= 2 }
+        return fr.luba.poc.planning.RoutePlanning.navigation(map.copy(shapes = zones + passages), RobotEnvelope.LUBA2.halfWidthM + 0.05,
+            holes(map, obstacles), accesses, recordedBoundary = true)
+    }
+
     private fun build(zones: List<MapShape>, passages: List<MapShape>, holes: List<List<Point>>, margin: Double,
-                      routes: TrajectoryPlanner, start: Point, target: Point, mapped: Area): MapNavPlan {
-        val points = try { routes.between(start, target) }
+                      routes: TrajectoryPlanner, start: Point, target: Point, mapped: Area, preset: List<Point>? = null): MapNavPlan {
+        val points = preset ?: try { routes.between(start, target) }
             catch (e: IllegalArgumentException) { throw IllegalArgumentException(noPath(), e) }
         routes.requirePath(points)
         // Single outline for the tracking checks: union of the zones and passage corridors

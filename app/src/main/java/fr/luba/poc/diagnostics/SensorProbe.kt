@@ -290,11 +290,11 @@ class SensorProbe {
     private fun acceptTunnels(message: LubaMsg) {
         val sys = message.sys
         if (sys.hasSystemRapidStateTunnel() && sys.systemRapidStateTunnel.rapidStateDataCount > 0)
-            noteArray(tr("Fast tunnel (25)", "Tunnel rapide (25)"), sys.systemRapidStateTunnel.rapidStateDataList)
+            noteArray(tr("State tunnel (25)", "Tunnel d'état (25)"), sys.systemRapidStateTunnel.rapidStateDataList)
         if (sys.hasSystemTardStateTunnel() && sys.systemTardStateTunnel.tardStateDataCount > 0) {
             val data = sys.systemTardStateTunnel.tardStateDataList
-            noteArray(tr("Slow tunnel (26)", "Tunnel lent (26)"), data)
-            // PyMammotion RapidState: index 16 = fuse_status (bits 8-15) and vision_state (bits 24-31).
+            noteArray(tr("State tunnel (26)", "Tunnel d'état (26)"), data)
+            // PyMammotion RapidState (tunnel 26, ≈ 4 Hz during a task according to PyMammotion; not received over BLE on 2026-10-18..20, native return included): index 16 = fuse_status (bits 8-15) and vision_state (bits 24-31).
             data.getOrNull(16)?.let { v -> extras = extras.copy(fuseStatus = ((v and 0xFF00L) shr 8).toInt(), visionState = ((v and 0xFF000000L) shr 24).toInt()) }
         }
         if (sys.hasSystemTmpCycleTx() && sys.systemTmpCycleTx.cycleTxDataCount > 0)

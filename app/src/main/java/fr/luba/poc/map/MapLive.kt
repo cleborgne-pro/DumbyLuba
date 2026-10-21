@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.history.drawRealCoverage
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.ui.theme.MammotionColors
 import java.util.IdentityHashMap
@@ -85,6 +86,8 @@ fun MapLive(
     onTap: ((Point) -> Unit)? = null,
     /** [x], [y]: point published by the robot (8 cm behind its rotation center); false for an already centered pose (simulation). */
     publishedPosition: Boolean = true,
+    /** Real coverage layer and its image ([fr.luba.poc.history.CoverageLayerStyle.image]), over the planned stripes. */
+    coverage: Pair<fr.luba.poc.history.CoverageMap, androidx.compose.ui.graphics.ImageBitmap>? = null,
 ) {
     val colors = MammotionColors
     val robot = if (x != null && y != null) Point(x, y) else null
@@ -208,6 +211,7 @@ fun MapLive(
                 style = Stroke(0.75.dp.toPx() / lineScale,cap = StrokeCap.Round,join = StrokeJoin.Round)) }
         }
         plannedBorders.forEach { drawPath(path(it,false), colors.LineBorder, style = Stroke(1.5.dp.toPx() / lineScale,cap = StrokeCap.Round,join = StrokeJoin.Round)) }
+        coverage?.let { (c, image) -> drawRealCoverage(c, image, ::screen) }
         overlays.forEach { overlay ->
             if (overlay.points.isEmpty()) return@forEach
             val width = overlay.widthDp.dp.toPx() / lineScale

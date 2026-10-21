@@ -1,6 +1,7 @@
 package fr.luba.poc.autonomy
 
 import fr.luba.poc.map.Point
+import fr.luba.poc.map.TrajectoryEnvelope
 import fr.luba.poc.simulation.DockExit
 import fr.luba.poc.simulation.RouteRecharge
 import fr.luba.poc.simulation.SimEdge
@@ -24,7 +25,44 @@ class DockExitLegTest {
 
     private fun docked(heading: Double = 90.0) = SimulatedRobotEnv(base, heading, noiseM = 0.005).also { it.dock = base }
 
-    private fun run(env: SimulatedRobotEnv) = runBlocking { LegRunner(env, spec(), path, null, null).run() }
+    private fun run(env: SimulatedRobotEnv, guard: EnvelopeGuard? = null) = runBlocking { LegRunner(env, spec(), path, guard, null).run() }
+
+    /** Free surface: rectangle [x0, x1] × [y0, y1], minus the optional rectangle [hole]. */
+    private fun guard(x0: Double, y0: Double, x1: Double, y1: Double, hole: DoubleArray? = null): EnvelopeGuard {
+        val f = org.locationtech.jts.geom.GeometryFactory()
+        fun box(a: Double, b: Double, c: Double, d: Double) = f.toGeometry(org.locationtech.jts.geom.Envelope(a, c, b, d))
+        val area = hole?.let { box(x0, y0, x1, y1).difference(box(it[0], it[1], it[2], it[3])) } ?: box(x0, y0, x1, y1)
+        return EnvelopeGuard(TrajectoryEnvelope(area))
+    }
+
+    @Test fun chassisOverlappingTheFreeSurfaceOnTheBaseStillLeavesStraight() {
+        // Rear of the chassis on the station beyond the free surface (learnt obstacle or no-go zone behind the base, RTK
+        // offset): every exit stopped at once with "Sortie de station hors enveloppe sûre" (2026-10-21).
+        val surface = guard(0.0, 0.85, 4.0, 5.0)
+        val env = docked()
+        val result = run(env, surface)
+        assertEquals(result.text, LegOutcome.DONE, result.outcome)
+        assertTrue("arrived in front of the base: ${env.position}", env.position.distance(approach) < 0.15)
+        assertTrue(env.events.toString(), "route_dock_exit_overlap" in env.events)
+    }
+
+    @Test fun forbiddenGroundAheadOfTheStationStillStopsTheExit() {
+        // Same overlap on the base, but a no-go box across the corridor: leaving straight ahead would enter it.
+        val env = docked()
+        val result = run(env, guard(0.0, 0.85, 4.0, 5.0, hole = doubleArrayOf(1.7, 1.75, 2.3, 1.95)))
+        assertEquals(LegOutcome.FAILED, result.outcome)
+        assertTrue(result.text, result.text!!.contains("hors enveloppe sûre"))
+        assertTrue("stopped before the box: ${env.position}", env.position.y < 1.75)
+    }
+
+    @Test fun chassisFreeOnTheBaseKeepsTheStepCheck() {
+        // Chassis inside the surface at the start, edge 30 cm ahead: refused at the step, no straight-exit allowance.
+        val env = docked()
+        val result = run(env, guard(0.0, 0.0, 4.0, 1.75))
+        assertEquals(LegOutcome.FAILED, result.outcome)
+        assertTrue(result.text, result.text!!.contains("pas suivant"))
+        assertTrue(env.events.toString(), "route_dock_exit_overlap" !in env.events)
+    }
 
     @Test fun dockExitFlagSurvivesTheWire() {
         assertTrue(LegSpec.decode(spec().encode()).dockExit)

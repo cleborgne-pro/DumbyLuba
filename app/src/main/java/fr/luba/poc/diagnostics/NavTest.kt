@@ -13,7 +13,14 @@ data class NavConfig(
     val segments: Int = 6, val linearSpeed: Int = 50, val angularSpeed: Int = 30,
     val tonte: Boolean = false, val heightMm: Int = 60, val automatic: Boolean = false,
     val pointDestination: Boolean = false, val maxDurationMs: Long = 60_000, val maxRadiusM: Double = 5.0, val batteryFloor: Int = 30,
+    /**
+     * Outline driven while the robot records a map element (sync with the Mammotion app): robot state expected during
+     * the whole drive (31 zone, 32 no-go zone, 34 passage). The manual mode is never sent (it would end the recording),
+     * and any recovery, bypass or replanning stops the drive instead (it would draw a detour into the element).
+     */
+    val drawState: Int? = null,
 ) {
+    val tracing: Boolean get() = drawState != null
     init {
         require(segments in 3..20) { tr("Number of segments outside the 3–20 range", "Nombre de segments hors plage 3–20") }
         require(linearSpeed in 1..Commands.MAX_LINEAR_SPEED) { tr("Linear speed outside 1–${Commands.MAX_LINEAR_SPEED}", "Vitesse linéaire hors bornes 1–${Commands.MAX_LINEAR_SPEED}") }
@@ -22,10 +29,13 @@ data class NavConfig(
         require(maxDurationMs in 10_000..MAX_DURATION_MS) { tr("Duration outside the 10–600 s range", "Durée hors plage 10–600 s") }
         require(maxRadiusM in 1.0..(if (pointDestination) 200.0 else 20.0)) { tr("Radius outside the 1–20 m range", "Rayon hors plage 1–20 m") }
         require(batteryFloor in 10..80) { tr("Battery floor outside the 10–80 % range", "Plancher batterie hors plage 10–80 %") }
+        require(drawState == null || (drawState in DRAW_STATES && !tonte)) { tr("Recording drive: blades stopped, state 31, 32 or 34", "Tracé enregistré : lames arrêtées, état 31, 32 ou 34") }
     }
     companion object {
         /** The map course (≈ 20–30 m, pivots included) often exceeds 2 min at reduced speed. */
         const val MAX_DURATION_MS = 600_000L
+        /** Robot states while it records a zone (31), a no-go zone (32) or a passage (34) (APK `DeviceWorkState`). */
+        val DRAW_STATES = setOf(31, 32, 34)
     }
 }
 

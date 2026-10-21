@@ -8,8 +8,8 @@ observed deviations correct the following estimates.
 | | |
 |---|---|
 | **Access** | Map → **History** (latest tasks); Service → Garden and history → **Task history**; report shown at the end of mowing |
-| **Status** | Implemented and covered by JVM tests (`MowingHistoryTest`, `TaskTrackTest`, `TaskHistoryTextTest`, `RouteDeviationTest`, `HistoryComposeTest`, `MowingEstimateTest`, `FinishPolicyTest`; screenshots `UiShotsHistoriqueTest`); replay to be validated on long real mowings |
-| **Code** | `history/MowingHistory.kt` (measurement, comparison, calibration, storage), `history/TaskTrack.kt` (timestamped track, sorting, storage), `history/TaskHistoryUi.kt` (latest tasks sheet, detail, replay), `history/MowingHistoryUi.kt` (report, Task history page), `ble/RobotBle.kt` (`historyBegin`, `trackBegin`, `historyEnd`) |
+| **Status** | Implemented and covered by JVM tests (`MowingHistoryTest`, `TaskTrackTest`, `TaskJournalTest`, `BlackBoxTest`, `MowingScoreTest`, `TaskHistoryTextTest`, `RouteDeviationTest`, `CoverageMapTest`, `HistoryComposeTest`, `MowingEstimateTest`, `FinishPolicyTest`; screenshots `UiShotsHistoriqueTest`); replay to be validated on long real mowings |
+| **Code** | `history/MowingHistory.kt` (measurement, comparison, calibration, storage), `history/TaskTrack.kt` (timestamped track, sorting, storage), `history/TaskEvent.kt` (typed task journal), `history/BlackBox.kt` (incident black boxes), `history/TaskExport.kt` (export), `history/TaskHistoryUi.kt` (latest tasks sheet, detail, replay), `history/CoverageMap.kt` and `history/RealCoverage.kt` (real coverage), `history/MowingScore.kt` (Mowing Score), `history/MowingHistoryUi.kt` (report, score, comparison, Task history page), `ble/RobotBle.kt` (`historyBegin`, `trackBegin`, `historyEnd`) |
 
 ## What is recorded
 
@@ -54,6 +54,8 @@ report; their detail stays available in the history.
 
 The report starts with a status line ("Mowing finished", or "Mowing interrupted at 45 %: cause") and shows:
 
+- **Mowing Score** (once the track is loaded, see [below](#mowing-score)): score out of 100 and the points taken off
+  by each factor.
 - **Mowing**: zones, start and end, area (with the share mowed if interrupted), **Cutting covered** (meters covered /
   planned), **Settings** (route mode, height, speed) and **Incidents** (obstacles bypassed, resumes).
 - **Duration** (**Duration (part mowed)** if interrupted): estimated and actual, with "of which mowing and travel" and
@@ -71,6 +73,29 @@ The report starts with a status line ("Mowing finished", or "Mowing interrupted 
 
 For an interrupted mowing, the estimated duration and recharges are scaled down to the part mowed (a planned recharge
 is only expected if the mowed part reaches it); the full estimate is shown after "of".
+
+## Mowing Score
+
+The **Mowing Score** sums up the quality of a mowing out of 100: 100 minus the points taken off by five factors, each
+shown with the value measured and its points ("82 % of the zones mowed · −7 / 40"), points taken off in orange. It is
+computed when the report or the detail opens, from the record, the track, the task journal and the real coverage
+(`history/MowingScore.kt`):
+
+| Factor | Measure | Points taken off |
+| --- | --- | --- |
+| **Coverage** | share of the zones really mowed ([real coverage](#real-coverage)); without it, share of the route covered, marked "(estimate)" | (1 − share) × 40 |
+| **Overlaps** | area mowed twice or more / area mowed (real coverage only; "not measured" otherwise) | beyond 15 %, 0.5 point per %, 15 at most |
+| **Rotations** | pivots on the spot in the track (60° or more while the rotation centre moves less than 15 cm; recharging and docking left out) against the pivots of the prepared route (corners of the stripes, two per zigzag turn) | 0.3 point per % beyond the planned pivots, 15 at most |
+| **Reversing** | distance driven against the heading (moves of 3 cm or more) | 0.5 point per metre beyond 1.5 m per run (leaving the base, resumes), 10 at most |
+| **Incidents** | incidents of the [task journal](#replay-of-the-actual-route) (obstacle, contact, blockage, lift, robot error, STOP not asked by the user, link lost), those less than 10 s apart counting once; without a journal, the obstacles bypassed, marked "(obstacles only)" | 4 per incident, 20 at most |
+
+A note under the score recalls these rules and, without real coverage, that coverage is estimated and overlaps are
+left out: a task recorded before the real coverage or the journal therefore scores with what it has.
+
+**Compare two mowings** (Task history page, from two finished mowings): choose the first then the second mowing (the
+rows of the other mowings; **Cancel** goes back), then both are shown side by side, the older on the left: date,
+zones, outcome, settings, duration, recharges, battery used, then the score and each factor. The back gesture returns
+to the history.
 
 ## Adjusted estimates
 
@@ -116,6 +141,8 @@ actual routes" when empty) contains:
 - **Next estimates**: duration factor, runtime and recharge 0 → 100 % currently used ("setting" when not adjusted),
   with the number of mowings used; without enough measurements, a note says that each real mowing of at least 5 min
   adjusts them;
+- **Compare two mowings** ("Score, coverage, duration and recharges side by side"), from two finished mowings, see
+  [Mowing Score](#mowing-score);
 - **Tasks · N**: every finished task, newest first ("No task recorded…" when empty);
 - a note: the last 200 tasks are kept on the phone, with the actual route of the 40 most recent.
 
@@ -149,16 +176,64 @@ since the start, the activity and the battery. **Recorded positions** gives thei
 covered (jumps between unjoined pieces excluded). Two-finger zoom, rotation and panning. Without a recorded map, the
 robot's current map is shown with a note.
 
+When the task journal holds incidents, a row under the speeds jumps between them: **Previous incident** / **Next
+incident** move the replay (paused) to the incident before or after the cursor, and the text gives the incident at
+the cursor ("Incident 2 / 5 · Bumper contact", or "5 incidents" before the first one). Tapping an incident of the
+**Task journal**, or **Show in the replay** in a black box, does the same.
+
 Recording (track):
 
 - every position received from the robot (center of rotation, like the map trace), timestamped, with heading,
   activity and battery; a position is kept after 8 cm of movement, 6° of rotation or a change of activity, and every
-  10 s when stationary; a 3 h mowing fits in a few hundred KB;
-- written in batches every 10 s (or every 300 positions) to `task-tracks/` (one binary file per task, extended on each
-  resume, plus a JSON context file: map and prepared route at start time); the detail of a task in progress also
-  includes the positions not yet written; a last position truncated by a crash is ignored;
+  10 s when stationary;
+- since track format 2, each position also keeps the **last speed command** written by the phone (raw linear and
+  angular units of the protocol, empty when the phone did not drive the robot in the last 3 s: route handed to the
+  gateway, native return), the **measured speed** between two received positions (m/s), the **RTK status** (4 = FIX)
+  and the number of **satellites**, and the **link state** (direct Bluetooth, gateway relay, gateway autonomous
+  tracking, gateway Wi-Fi cut);
+- written in batches every 10 s (or every 300 positions) to `task-tracks/` (raw `.trk` file while the run goes on,
+  extended on each resume, plus a JSON context file: map and prepared route at start time); the detail of a task in
+  progress also includes the positions not yet written; a last position truncated by a crash is ignored;
+- at the end of each run (end or interruption of the task), the raw positions are **compressed** into a `.trkz` file
+  (gzip; a 3 h mowing takes a few hundred KB raw, less once compressed); a resume writes a new raw file, merged at the next
+  end. Tracks recorded in format 1 stay readable (the new values are then unknown);
 - two positions more than 3 m or 60 s apart are not joined (connection lost, robot moved);
-- only the tracks of the **40 most recent tasks** are kept; older ones keep their report.
+- size bounds: the tracks of the **40 most recent tasks** at most, 12 MB of raw positions, 512 KB of events and
+  2 MB of black boxes per task (beyond that, "Track size limit reached: further positions of this task are not saved" in the log), 64 MB for
+  all tasks together (the oldest tracks are deleted first); older tasks keep their report.
+
+Task journal: each task also records its **typed, timestamped events** (`.evt` file next to the track, one JSON line
+each, with the robot position, the battery and a few raw values: error code, route phase, reason). They are shown in
+the **Task journal** section of the detail (time, time since the start, type, text and battery; incidents in orange;
+30 events, then **Show all N events**), and exported with the logs:
+
+| Type | Recorded on |
+| --- | --- |
+| Start / Resume | start of the task, resume of an interrupted task, resume after a recharge, resume after the gateway was lost during charging |
+| Return to base / Recharge | route phase changing to return or to charging (once per change), return at the end of the working hours |
+| Obstacle / Bumper contact / Obstacle bypassed | obstacle handled during the route (counted in **Obstacles**), bumper contact, remaining route repaired |
+| Blockage | terrain difficulty recorded as a blockage, no progress or wheel slip; robot protection during mowing |
+| Lift / Robot error | lift detected; robot error code; incident during docking or charging |
+| STOP | every stop request during the task (user, failure or safety, with `intentional`), STOP signalled by the gateway |
+| Link lost / Link restored | Bluetooth or gateway lost, gateway Wi-Fi cut and its end, link keep-alive lost, motion setpoints starved |
+| End | finished or interrupted, with the reason |
+
+A same event repeated within 2 s is kept once, and a run keeps at most 1,500 events (the end always).
+
+Black Box: while a task runs, the phone keeps a sliding memory of the last minute: the robot state every 0.4 s at
+most (rotation centre, heading, last speed command, measured speed, battery, robot state, sensor bits, RTK status,
+satellites, link state, route phase, Bluetooth and Wi-Fi signal), every command written to the robot (label and
+setpoint), and the app log events (raw frames, write acknowledgements and periodic telemetry left out). Each incident
+of the journal (obstacle, bumper contact, blockage, lift, robot error, STOP, link lost) **freezes a black box** 3 s
+after it: the 45 s before the incident and the 3 s after. Incidents less than 10 s apart go in the same box ("Link
+lost + STOP"); a task keeps its first 30 boxes. Each box is written to a `.box` file next to the track (one JSON line
+each), logged as `task_black_box`, and exported with the task (`blackBoxes` of the task JSON file).
+
+The **Black Box** section of the detail lists the boxes ("14:02:31 · Bumper contact + STOP", with the link, command,
+battery and RTK at the incident and the number of states, commands and events). A tap opens one: **Show in the
+replay**, the text of the incident, **Robot (every 2 s)** (time from the incident, position, heading, command, speed,
+robot state, RTK, link), **Commands** (the last 15) and **Log** (the last 40 events), times relative to the incident
+("−12.0 s", "+1.2 s").
 
 A task recorded before version 0.53.0 has no track: the detail says "Positions not recorded: replay covers tasks
 started since version 0.53.0." and only shows the robot's current map.
@@ -181,10 +256,38 @@ counts as a deviation. Tasks recorded before 1.2.0 show the deviation (their tra
 the tracking link. The start and end-of-task log events carry the link (`trackingLink`, `trackingLinks`) and the
 number of trackings handed to the gateway (`gatewayLegs`).
 
+## Real coverage
+
+For a mowing, the detail also shows the **Real coverage** section: what was actually mowed according to the track,
+not according to the prepared route. The cutting width (40 cm) is swept around every position recorded **with the
+blades running** (green trace), on a 10 cm grid restricted to the task zones minus the no-go zones; two positions
+are joined only within the same piece of track (more than 3 m or 60 s apart, they are not: a lost link does not draw
+a stripe).
+
+| Row | Meaning |
+|---|---|
+| **Covered** | share of the task zones mowed, rounded down ("96 % · 152 m² of 159 m²") |
+| one row per zone | the same for each zone when the task has several ("Fond · 0 % · 0 m² of 16 m²") |
+| **Mowed twice or more** | area swept again by a later pass (overlaps, U-turns, resumes) |
+| **Gaps of 0.25 m² or more** | finished task only: number and total area of the portions left unmowed, wide enough for a pass |
+
+Strips narrower than about 30 cm (unreachable edges along the boundaries, raster noise between two passes) are not
+counted as gaps. On the replay map, the **Real coverage** toggle (on by default) draws the mowed area in green (darker
+where it was mowed twice) and, once the task is finished, the gaps in orange.
+
+The same layer is drawn on the main map ([Real coverage layer](map.md#real-coverage-layer)) during the mowing and
+after it, and the mowing bar shows "Covered x %" ([real mowing](real-mowing.md)). The gaps are polygons in map
+metres that the planner accepts as a target, like a painted area (`CoverageMap.gapArea` →
+`PaintedZone.prepare`): technical details in [REAL_COVERAGE.md](../REAL_COVERAGE.md). A track recorded before this
+version has no task zones: all the zones of its map are measured.
+
 ## Limitations
 
 - The track only contains the positions received by the phone: during a gateway Wi-Fi outage, the route followed does
-  not appear in the replay (the map trace, however, is filled in by the gateway).
+  not appear in the replay (the map trace, however, is filled in by the gateway), and the real coverage misses it
+  when the hole is longer than 3 m or 60 s.
+- Real coverage trusts the reported position (RTK) and the blade state: a wrong position or a cut wider or narrower
+  than 40 cm (tall grass, height pass) shifts it accordingly.
 - Battery is read in whole points: a short mowing measures runtime poorly, hence the minimum thresholds.
 - Recharging is not linear (slower near full): the recharge time used is an average over the recharges actually made,
   between the set return and resume thresholds.

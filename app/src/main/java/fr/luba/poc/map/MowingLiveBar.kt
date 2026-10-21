@@ -17,6 +17,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +57,7 @@ fun MowingLiveBar(state: RobotUi, onStop: () -> Unit, onDetails: () -> Unit) {
                         stats.battery?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = colors.TextSecondary) }
                         stats.duration?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = colors.TextSecondary) }
                         stats.recharges?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = colors.TextSecondary) }
+                        LiveCoverageLabel(state.mowingRecord?.id)
                     }
                     Text(route.status, style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -64,4 +67,12 @@ fun MowingLiveBar(state: RobotUi, onStop: () -> Unit, onDetails: () -> Unit) {
             stats.fraction?.let { LubaProgress(it, Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(4.dp)) }
         }
     }
+}
+
+/** Share of the task zones actually mowed so far ([fr.luba.poc.history.RealCoverage]), once something is mowed. */
+@Composable
+private fun LiveCoverageLabel(taskId: String?) {
+    val view by fr.luba.poc.history.RealCoverage.flow.collectAsState()
+    val coverage = view?.takeIf { it.running && it.taskId == taskId && it.coverage.coveredM2 > 0 }?.coverage ?: return
+    Text(fr.luba.poc.history.CoverageText.live(coverage), style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary)
 }

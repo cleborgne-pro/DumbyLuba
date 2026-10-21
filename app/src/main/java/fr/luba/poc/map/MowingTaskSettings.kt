@@ -25,6 +25,8 @@ data class MowingTaskSettings(
     /** Successive passes down to [heightMm] (1 = a single pass), the first one at [firstPassHeightMm]. */
     val heightPasses: Int = 1,
     val firstPassHeightMm: Float = 70f,
+    /** Battery left on arrival that the dynamic return aims for ([fr.luba.poc.simulation.ReturnReserve]). */
+    val returnReserve: Float = fr.luba.poc.simulation.ReturnReserve.DEFAULT_PERCENT.toFloat(),
 ) {
     /** Pass heights, from the first to the last ([heightMm]), within the cutting heights of the robot. */
     fun passHeights(range: CutHeightRange = CutHeightRange.STANDARD): List<Int> =
@@ -50,6 +52,8 @@ data class MowingTaskSettings(
             noGoPasses = noGoPasses.coerceIn(0, MAX_PASSES),
             chargeLow = if (chargeValid) low else default.chargeLow,
             chargeHigh = if (chargeValid) high else default.chargeHigh,
+            returnReserve = fr.luba.poc.simulation.ReturnReserve.sanitize(
+                returnReserve.within(0f..100f, default.returnReserve).roundToInt(), (if (chargeValid) low else default.chargeLow).roundToInt()).toFloat(),
         )
     }
 
@@ -87,6 +91,7 @@ class MowingTaskStore(context: Context) {
             chargeHigh = prefs.getFloat("charge_high", d.chargeHigh),
             heightPasses = prefs.getInt("height_passes", d.heightPasses),
             firstPassHeightMm = prefs.getFloat("first_pass_height_mm", d.firstPassHeightMm),
+            returnReserve = prefs.getFloat("return_reserve", d.returnReserve),
         ).sanitized()
     }
 
@@ -98,6 +103,7 @@ class MowingTaskStore(context: Context) {
             .putBoolean("borders_first", s.bordersFirst).putBoolean("nearby_no_go", s.nearbyNoGo)
             .putFloat("charge_low", s.chargeLow).putFloat("charge_high", s.chargeHigh)
             .putInt("height_passes", s.heightPasses).putFloat("first_pass_height_mm", s.firstPassHeightMm)
+            .putFloat("return_reserve", s.returnReserve)
             .apply()
     }
 }

@@ -32,7 +32,7 @@ class MapSettingsTest {
         MapExtraLayers::class.java.getDeclaredField("prefs").apply { isAccessible = true }.set(null, null)
         @Suppress("UNCHECKED_CAST")
         (MapExtraLayers::class.java.getDeclaredField("visible").apply { isAccessible = true }.get(null) as MutableStateFlow<Set<MapExtraLayer>>)
-            .value = setOf(MapExtraLayer.ENCOUNTERS)
+            .value = setOf(MapExtraLayer.ENCOUNTERS, MapExtraLayer.COVERAGE)
         for (setting in listOf(OuterOffsetSetting, SurveyOffsetSetting))
             OffsetSetting::class.java.getDeclaredField("prefs").apply { isAccessible = true }.set(setting, null)
     }
@@ -44,11 +44,12 @@ class MapSettingsTest {
         relaunch()
     }
 
-    @Test fun `Obstacles and Difficulties layers, Obstacles only by default, choice kept`() {
+    @Test fun `Obstacles, Difficulties and Real coverage layers, Obstacles and coverage by default, choice kept`() {
         MapExtraLayers.init(context)
-        assertEquals(setOf(MapExtraLayer.ENCOUNTERS), MapExtraLayers.flow.value)
+        assertEquals(setOf(MapExtraLayer.ENCOUNTERS, MapExtraLayer.COVERAGE), MapExtraLayers.flow.value)
         MapExtraLayers.toggle(MapExtraLayer.DIFFICULTIES)
         MapExtraLayers.toggle(MapExtraLayer.ENCOUNTERS)
+        MapExtraLayers.toggle(MapExtraLayer.COVERAGE)
         assertEquals(setOf(MapExtraLayer.DIFFICULTIES), MapExtraLayers.flow.value)
         relaunch()
         MapExtraLayers.init(context)

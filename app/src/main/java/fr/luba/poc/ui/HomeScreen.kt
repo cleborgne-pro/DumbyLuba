@@ -130,6 +130,8 @@ fun HomeScreen(
     // Displayed model (photo and label): Bluetooth or account name, account product key if it is the same robot.
     val robotName = state.selected?.name?.takeIf { it.isNotBlank() } ?: link.robotName?.takeIf { it.isNotBlank() }
         ?: state.lastKnown?.robotName?.takeIf { it.isNotBlank() } ?: cloudState.selected?.name
+    // Local mode: no account entry ([fr.luba.poc.auth.AccountMode]).
+    val localOnly = fr.luba.poc.auth.AccountMode.observe()
     val model = RobotModel.detect(robotName, cloudState.selected?.takeIf { robotName == null || it.name.equals(robotName, ignoreCase = true) }?.productKey)
 
     Box(modifier.fillMaxSize().background(colors.Background), contentAlignment = Alignment.TopCenter) {
@@ -217,6 +219,7 @@ fun HomeScreen(
                             Text(when {
                                 working && state.robotRoute.count > 0 -> tr("${state.robotRoute.index * 100 / state.robotRoute.count} % mowed · tap to open", "${state.robotRoute.index * 100 / state.robotRoute.count} % tondu · touchez pour ouvrir")
                                 map.complete -> tr("${Format.num(area, 0)} m² · tap to open", "${Format.num(area, 0)} m² · touchez pour ouvrir")
+                                localOnly -> tr("Read the map from the robot", "Lisez la carte du robot")
                                 else -> tr("Read the map from the robot or the account", "Lisez la carte du robot ou du compte")
                             },
                                 style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
@@ -247,7 +250,7 @@ fun HomeScreen(
                     else -> tr("Read the robot map over Bluetooth", "Lire la carte du robot en Bluetooth")
                 }, onFetch, Modifier.fillMaxWidth().padding(top = Dimens.Sm), enabled = fr.luba.poc.map.mapFetchAllowed(state, false))
             }
-            if (!cloudState.connected && cloudState.map.shapes.isEmpty() && !map.complete) {
+            if (!localOnly && !cloudState.connected && cloudState.map.shapes.isEmpty() && !map.complete) {
                 TextAction(tr("Read the map via the Mammotion account", "Lire la carte via le compte Mammotion"), onAccount, Modifier.fillMaxWidth().padding(top = Dimens.Sm))
             }
             Spacer(Modifier.height(Dimens.Md))

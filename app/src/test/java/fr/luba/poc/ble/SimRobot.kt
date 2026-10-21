@@ -162,7 +162,96 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
         nativeReturn || returnSettle > 0 -> 14
         charging -> chargingState
         manual -> 20
+        drawing != null -> DRAW_STATES.getValue(requireNotNull(drawing))
         else -> idleState
+    }
+
+    // ───── Map stored in the robot: reading, recording by driving, deletion (APK `DeviceWorkState` 31/32/34) ─────
+    /** Elements of the robot map by hash: upstream type (0 zone, 1 no-go, 2 passage) and points. */
+    val mapElements = linkedMapOf<Long, Pair<Int, List<Point>>>()
+    var nextHash = 7_000_000_001L
+    /** Elements the robot deletes together with an element (no-go zones attached to a zone). */
+    var deletedWith: Map<Long, List<Long>> = emptyMap()
+    /** Type being recorded, null outside a recording. */
+    var drawing: Int? = null; private set
+    /** Published positions recorded during the current recording. */
+    val drawn = mutableListOf<Point>()
+    /** Recordings broken by the manual mode (the firmware leaves the recording state when it receives it). */
+    var drawsBrokenByManual = 0; private set
+    /** Recordings started while the robot was not READY (refused, as the firmware does). */
+    var drawsRefused = 0; private set
+    /** The element is only kept after `todev_save_task` (false: saved by the end of the recording itself). */
+    var saveNeeded = false
+    private var unsaved: Pair<Long, Pair<Int, List<Point>>>? = null
+    /** Map commands received: "draw-start 0", "draw-end 0", "draw-cancel", "delete <hash>", "save". */
+    val mapCommands = mutableListOf<String>()
+
+    /** The robot answers the map reading (off by default: the other tests check a robot that does not answer it). */
+    var servesMap = false
+
+    fun loadMap(map: fr.luba.poc.map.RobotMap) { servesMap = true; mapElements.clear(); map.shapes.forEach { mapElements[it.id] = it.type to it.points } }
+
+    /** Robot map as it would be read now. */
+    fun storedMap(): List<fr.luba.poc.map.MapShape> = mapElements.map { (h, e) -> fr.luba.poc.map.MapShape(h, e.first, e.second) }
+
+    private fun reply(nav: fr.luba.poc.proto.MctrlNavProto.MctlNav.Builder) {
+        val message = LubaMsg.newBuilder().setNav(nav).build()
+        handler.postDelayed({ link?.notify(message) }, 100)
+    }
+
+    private fun receiveNav(nav: fr.luba.poc.proto.MctrlNavProto.MctlNav, now: Long) {
+        if (nav.hasTodevSaveTask()) {
+            mapCommands += "save"; trace += now to "map-save"
+            unsaved?.let { (h, e) -> mapElements[h] = e }; unsaved = null
+        }
+        if (nav.hasTodevGethash() && nav.todevGethash.subCmd == 0 && servesMap) {
+            reply(fr.luba.poc.proto.MctrlNavProto.MctlNav.newBuilder().setToappGethashAck(fr.luba.poc.proto.MctrlNavProto.NavGetHashListAck.newBuilder()
+                .setPver(1).setSubCmd(0).setResult(0).setTotalFrame(1).setCurrentFrame(1).addAllDataCouple(mapElements.keys.toList())))
+        }
+        if (!nav.hasTodevGetCommondata()) return
+        val data = nav.todevGetCommondata
+        when {
+            data.subCmd == 1 && data.action == 8 -> mapElements[data.hash]?.takeIf { servesMap }?.let { (type, points) ->
+                reply(fr.luba.poc.proto.MctrlNavProto.MctlNav.newBuilder().setToappGetCommondataAck(fr.luba.poc.proto.MctrlNavProto.NavGetCommDataAck.newBuilder()
+                    .setPver(1).setSubCmd(1).setResult(0).setAction(8).setType(type).setHash(data.hash).setTotalFrame(1).setCurrentFrame(1)
+                    .addAllDataCouple(points.map { fr.luba.poc.proto.CommonProto.CommDataCouple.newBuilder().setX(it.x.toFloat()).setY(it.y.toFloat()).build() })))
+            }
+            data.subCmd != 0 -> Unit
+            data.action == 0 -> {
+                mapCommands += "draw-start ${data.type}"; trace += now to "draw-start ${data.type}"
+                if (robotState == 11 && data.type in DRAW_STATES.keys) { drawing = data.type; drawn.clear(); drawn += published } else drawsRefused++
+            }
+            data.action == 1 -> {
+                mapCommands += "draw-end ${data.type}"; trace += now to "draw-end ${data.type}"
+                if (drawing == data.type) {
+                    stored(data.type, drawn.toList())?.let { element ->
+                        val hash = nextHash++
+                        if (saveNeeded) unsaved = hash to element else mapElements[hash] = element
+                    }
+                }
+                drawing = null; drawn.clear()
+            }
+            data.action == 7 -> { mapCommands += "draw-cancel"; trace += now to "draw-cancel"; drawing = null; drawn.clear() }
+            data.action == 6 -> {
+                mapCommands += "delete ${data.hash}"; trace += now to "delete ${data.hash}"
+                if (mapElements.remove(data.hash) != null) deletedWith[data.hash].orEmpty().forEach { mapElements.remove(it) }
+            }
+        }
+    }
+
+    /** What the firmware stores for a recorded trace of the published point: outer side of the chassis for a zone,
+     * inner side for a no-go zone, the axis for a passage. */
+    private fun stored(type: Int, trace: List<Point>): Pair<Int, List<Point>>? {
+        val points = trace.fold(mutableListOf<Point>()) { acc, p -> if (acc.isEmpty() || acc.last().distance(p) >= 0.1) acc += p; acc }
+        if (type == 2) return if (points.size >= 2) type to points else null
+        if (points.size < 4 || points.first().distance(points.last()) > 1.0) return null
+        val factory = org.locationtech.jts.geom.GeometryFactory()
+        val ring = (points + points.first()).map { org.locationtech.jts.geom.Coordinate(it.x, it.y) }.toTypedArray()
+        val half = fr.luba.poc.obstacles.RobotEnvelope.LUBA2.halfWidthM
+        val area = factory.createPolygon(ring).buffer(0.0).buffer(if (type == 0) half else -half)
+        val polygon = (0 until area.numGeometries).map { area.getGeometryN(it) }.filterIsInstance<org.locationtech.jts.geom.Polygon>()
+            .maxByOrNull { it.area } ?: return null
+        return type to polygon.exteriorRing.coordinates.dropLast(1).map { Point(it.x, it.y) }
     }
     val sensorStatus: Int get() = ((if (bladesOn) 1 else 0) shl 9) or sensorLow
 
@@ -186,6 +275,8 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
             val driver = message.driver
             if (driver.hasMowCtrlByHand()) {
                 val hand = driver.mowCtrlByHand
+                // Manual mode during a recording: the firmware leaves the recording state, the trace is lost.
+                if (hand.mainCtrl == 1 && drawing != null) { drawing = null; drawn.clear(); drawsBrokenByManual++; trace += now to "draw-broken" }
                 manual = hand.mainCtrl == 1
                 bladesOn = (hand.cutKnifeCtrl == 1 && manual) || (stuckBlades && bladesOn)
                 if (manual && !freezeHeight && hand.cutKnifeHeight in 25..70) heightMm = hand.cutKnifeHeight
@@ -207,6 +298,7 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
                 trace += now to if (bladesOn) "knife-on" else "knife-off"
             }
         }
+        if (message.hasNav()) receiveNav(message.nav, now)
         if (message.hasNav() && message.nav.hasTodevTaskctrl()) {
             when (val action = message.nav.todevTaskctrl.action) {
                 5 -> {
@@ -274,6 +366,7 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
             } else { latchFrom = null; latchClearAt = 0L }
         }
         track += position
+        if (drawing != null) published.let { p -> if (drawn.isEmpty() || drawn.last().distance(p) >= 0.05) drawn += p }
         if (debug) println("SIMTICK t=$now x=%.3f y=%.3f h=%.1f v=%.3f state=$robotState charging=$charging".format(x, y, heading, v))
         if (!charging && !nativeReturn) driven += position
         if (bladesOn && (charging || nativeReturn)) bladesWhileDocked++
@@ -314,6 +407,8 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
         .setToappErrCode(SysDevErrCode.newBuilder().setErrorCode(code))).build()
 
     companion object {
+        /** Robot state while it records a zone, a no-go zone or a passage. */
+        val DRAW_STATES = mapOf(0 to 31, 1 to 32, 2 to 34)
         const val STEP_MS = 200L
         const val DELAY_MS = 600L
         const val METERS_PER_UNIT = 0.00108

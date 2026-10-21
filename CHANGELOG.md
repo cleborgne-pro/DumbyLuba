@@ -1,6 +1,7 @@
 # Version history
 
-The current version is the `versionName` in `app/build.gradle.kts`. Details of recent versions are in the documents under [docs/](docs).
+The current version is the `versionName` in `app/build.gradle.kts`. The version is only bumped for a GitHub release; changes made since the last version are
+listed in the `Unreleased:` entry at the end of this file until then. Details of recent versions are in the documents under [docs/](docs).
 
 Version 0.3.0: touch zoom/rotation/panning, Lines and Checkerboard modes, outer border and no-go passes (orange). Computation compared across several orientations and directions, with safe links only. STOP in the Debug panel. See `docs/MAP_PREVIEW_TEST.md`.
 
@@ -514,3 +515,163 @@ test, walk and routes use that range; the protocol accepts 20–100 mm. Not veri
 [cutting heights by model](docs/features/supported-models.md#cutting-heights-by-model-version-1130). The map screen was
 brought back under the Dalvik register limit checked before installing (225 to 221), which refused the first 1.13.0
 build.
+
+Version 1.14.0 (182): **border types**. Each portion of a zone or no-go boundary can be marked Open lawn, Curb, Wall or Danger
+from Map sheet → Local corrections → **Border types**: tap a boundary, tap the other end (shorter part, or **Other
+side**) or take the **Whole boundary**, choose the type and validate; a coloured portion tapped can be retyped or
+deleted (with Undo). Portions are drawn in the colour of their type over the outlines on every map (route preview
+included), kept on the phone (`border-types.json`) and reprojected onto a redrawn boundary within 30 cm, otherwise
+listed "to review". No effect on the route computation yet: this is the base of the border strategies. See
+[border types](docs/features/map.md#border-types).
+
+**New versions detected in the app**. The published app reads the `release.json` file of the latest
+GitHub release (no account, no API call), at most once a day when it comes to the foreground or on demand from Me → About →
+**Updates**, and compares its `versionCode` with the installed one. A newer version shows "Version X.Y.Z available ·
+open the release" and a green dot on the Me tab; touching the row opens the release page in the browser. Nothing is
+downloaded or installed by the app. **Check automatically** (on by default) turns the daily check off. Builds made
+from source (`fr.luba.poc`) never check by themselves. On the pilot, Gateway health also asks to update the gateway
+phone when it runs an older version than the latest release. See
+[new versions](docs/features/interface.md#new-versions).
+
+**Maintenance over Bluetooth and robot perception map**. Service → Robot → **Maintenance** shows the
+counters the robot sends over Bluetooth, now requested on every connection without a Mammotion account: distance,
+working time, battery cycles and blade hours. **Blades replaced** notes the change on the phone (nothing is sent to the robot,
+its counter is not reset); once the chosen interval (100 h of rotation by default, 20 to 300 h) is reached, the
+**Blades to replace** alert is raised. The local perception map the robot pushes by itself when it navigates on its
+own (seen at the start of the official return to base: a 61 × 31 WebP image, uniformly black) is decoded, shown in
+Service → Diagnostics → Sensors and perception and written to the log (`perception_map`). Logs of 2026-10-18 to
+2026-10-20 also show that the robot keeps publishing its reports at 1 Hz even when 200 ms is requested, and sends
+neither the fast tunnels, nor motion acknowledgements, nor ultrasonic states over Bluetooth: documented in
+[sensors probe](docs/SENSORS_PROBE.md#logs-of-2026-10-18-to-2026-10-20-fold-19648-frames-received) and
+[protocol](docs/MAMMOTION_PROTOCOL.md#synchronization-and-telemetry). See [maintenance](docs/features/maintenance.md).
+
+**Real coverage**. What a mowing actually mowed is measured from its track: the cutting width (40 cm) swept around the
+positions recorded with the blades running, on a 10 cm grid limited to the task zones minus the no-go zones (the
+planner's `RasterCoverage` grid), two positions being joined only within the same piece of track. A new **Real
+coverage** map layer (on by default, layer bar and Map sheet) draws it over the planned stripes during the mowing,
+refreshed every 2 s, then keeps the last mowing shown with its **gaps** in orange (unmowed portions of 0.25 m² or
+more, wider than about 30 cm), restored at launch. The mowing bar shows "Covered x %". The task detail gets a **Real
+coverage** section (share of each zone, area mowed twice, gaps) and a toggle on the replay map. The gaps are
+polygons that the planner takes as a target like a painted area (`CoverageMap.gapArea` → `PaintedZone.prepare`); the
+track context now records the task zones. See [real coverage](docs/features/mowing-history.md#real-coverage) and
+[REAL_COVERAGE.md](docs/REAL_COVERAGE.md).
+
+**Map screen well under the Dalvik register limit**. `MapScreen` was a single Compose method of about 1,400 lines whose
+states and blocks all counted in one method's registers: 222 registers measured on the Fold APK, with 224 as the
+refusal threshold of `checkFoldDexRegisters` (above 256, D8 miscompiled it and the map crashed on opening). Its states
+are now grouped in a few holders, its parameters are passed to the body as one object (`MapScreenArgs` →
+`MapScreenContent`), and the canvas, the header, the side bar, the panels, the sheets and the task pages are named
+composables reading those holders. `MapScreenContent` uses 136 registers. No change of behaviour or display: same
+states, same saved subset across a configuration change, same screenshots. See
+[map code structure](docs/features/map.md#code-structure-and-dalvik-register-limit).
+
+**Sync with the Mammotion app**. Map sheet → *Local corrections* → **Sync with the Mammotion app**: a dedicated page
+lists the differences between the corrected map and the Mammotion map stored in the robot (DumbyLuba zones, passages
+and no-go zones to create, corrected Mammotion zones and no-go zones to replace), each one with a tick to leave it
+out, its distance and duration, and why it cannot be driven when that is the case. It warns that the robot has to
+move: the robot only stores what it records while it drives, so for each chosen element it drives on its own, blades
+stopped, to the outline, then along it while it records it (APK `startDrawBorder` / `endDrawBorder`; centre half a
+chassis width plus 15 cm inside a zone, as far outside a no-go zone). The new element is recognised in the map read
+again, a replaced element is deleted only afterwards (elements the robot removes with it are recorded again), and the
+corrections the robot then holds leave the phone. Live state on the page: phase, share of the outline recorded,
+trail, element states, STOP (recording abandoned, nothing saved). The outline is driven in a new recording mode of the
+tracking: no manual mode (it would end the recording), no recovery or bypass (a detour would be drawn into the
+element). LUBA 2 only: the read-only barrier now refuses the map writing commands to the other models (it let every
+map data command through). Not yet tried on the robot. See [Sync with the Mammotion app](docs/features/map-sync.md).
+
+**Local mode (without Mammotion account)**. Me → **Local mode (without Mammotion account)**: the app sends no request
+to the Mammotion cloud (sign-in, robot list, account reading, camera token, native return through the account and
+firmware update are refused with "Local mode: Mammotion account not used (Me tab)") and the account entries disappear:
+profile card and account map in Me, "Read the map via the Mammotion account" on Home, **Account map** on the empty map
+and in the Map sheet, **Camera** in Service, the live camera button and view. The obstacle photo is treated as disabled
+(the robot no longer waits for it after the back-off; the encounter is notified "local mode, no photo"). Entering it
+deletes the session but keeps the saved credentials; it is refused while a native return or a firmware update is
+followed. Map, planning, mowing, return to base over Bluetooth, maintenance and alerts are unchanged. Fix, with or
+without the local mode: before the robot link, an empty account map (no account, map not read yet) no longer hides the
+cached Bluetooth map and the last known position; the account map is shown only once it has content. See
+[Mammotion account](docs/features/mammotion-account.md#local-mode-without-account).
+
+**Sync with the Mammotion app checked end to end**. The simulated robot of the test bench now serves its map over BLE,
+records its own positions between "start drawing" and "end drawing" (states 31/32/34), leaves the recording if it
+receives the manual mode, saves, cancels and deletes elements (with the no-go zones attached to a deleted zone): the
+real `RobotBle` drives it through whole syncs, including from the charging station. The bench found and the sync now
+fixes: moves started before the robot was READY again after the previous one (refused), and a wait for READY that would
+have refused to leave the charging station (state 15, now accepted as by a move to a point); arrival facing the boundary of a no-go zone (nose inside it: move
+refused) — the robot now stops 40 cm (then 25 cm) away and joins the outline in a straight line at a shallow angle,
+before recording; corners pivoted in place where the envelope leaves the safe surface — corners rounded to the pivot
+radius like the border laps, tight curves turned into chords the tracking pivots at; a margin of 8 cm too thin for the
+check after a pivot — 15 cm now; outlines allowed inside the station safety zone where the moves refuse to go. Also:
+recording speed capped at about 0.19 m/s, explicit save of the mapping (`todev_save_task`, APK `saveTask`) when the
+element is missing after the end of the recording, then one more reading.
+
+**Anonymized log exports**. Export all (ZIP), JSONL log and the ZIP exports of the test pages now remove
+personal data before writing, so that the file can be attached to a public ticket as is (GitHub issue #1): robot
+names (model prefix kept, stable pseudonym per export), RTK base number, latitude/longitude, Wi-Fi names and
+passwords, IP and MAC addresses, mobile network data (IMEI, IMSI, ICCID, APN), device keys and ids, e-mails, tokens,
+names of the other Bluetooth devices of the phone; received raw BLE frames and raw ZMQ messages are removed (their
+decoded form stays), obstacle photos are left out, `ANONYMIZED.json` lists the replacements. Map and positions stay in
+the robot's local frame. **Raw archive (not anonymized, with photos)** on the Logs page keeps the previous export. See
+[Anonymized export](docs/features/logs-and-data.md#anonymized-export).
+
+**Full journal of each mowing session**. Each task of the history now carries a list of **typed, timestamped events**
+(start, resume, return to base, recharge, obstacle, bumper contact, obstacle bypassed, blockage, lift, robot error,
+STOP, link lost / restored, end), with the robot position, the battery and a few raw values, shown in the new **Task
+journal** section of the task detail. Each recorded position also keeps the last speed command written by the phone,
+the speed measured between positions, the RTK status, the satellites and the link state (track format 2; format 1
+tracks stay readable). Size stays bounded: raw positions are compressed at the end of each run, 12 MB of positions and
+512 KB of events per task, 64 MB for all tasks (oldest first), 40 tasks. **Export all (ZIP)** and the raw archive now
+include a `tasks/` folder: every task record, and per task its context and events (JSON, anonymized like the reports)
+and its positions (CSV). See [Mowing history](docs/features/mowing-history.md) and
+[Logs and data](docs/features/logs-and-data.md).
+
+**Mowing Score**. The end-of-mowing report and the task detail now show a score out of 100 that explains itself:
+coverage (real coverage when measured, route progress otherwise), overlaps, pivots beyond those of the prepared
+route, reversing beyond what leaving the base needs, and incidents of the task journal, each with its measured value
+and the points it takes off. **Compare two mowings** on the Task history page shows two mowings side by side
+(settings, duration, recharges, battery, score factor by factor). See
+[Mowing Score](docs/features/mowing-history.md#mowing-score).
+
+**Incident Black Box**. While a task runs, the phone keeps a sliding memory of the last minute (robot state, every
+command written, app log events, link state); each incident of the task journal (obstacle, bumper contact, blockage,
+lift, robot error, STOP, link lost) freezes a black box with the 45 s before it and the 3 s after (incidents less than
+10 s apart share one box, 30 boxes per task). The task detail lists them in a **Black Box** section (state at the
+incident, robot every 2 s, last commands, log), they are exported with the logs, and the replay jumps from incident to
+incident (**Previous incident** / **Next incident**, or a tap on an incident of the journal or **Show in the replay**).
+See [Mowing history](docs/features/mowing-history.md#replay-of-the-actual-route).
+
+**Return reserve ("Never Die Outside")**. Far from the base, the robot no longer waits for the low threshold: it
+heads back as soon as its battery nears the estimated cost of the return (distance × detour of the real return path,
+docking and energy margin included) plus a **return reserve** set in the task settings (5 to 30 %, 10 % by default,
+never above the low threshold), then makes the same choice as at the low threshold (finish then go home, or
+recharge). The threshold in force is shown next to the battery and sent to the gateway with each tracking job; log
+`route_return_reserve`. The simulation applies the same rule: on the reference map, every zone with a short runtime
+ends at the base with at least the reserve on each arrival. See
+[Return reserve](docs/features/real-mowing.md#return-reserve-never-die-outside).
+
+**Leaving the base with the chassis overlapping the free surface**. When the robot sits on its station with part of
+its chassis beyond the free surface (learnt obstacle or no-go zone close behind the base, RTK offset of the charging
+position), every exit stopped at the first step with "Sortie de station hors enveloppe sûre". The exit, run by the
+gateway or by the phone, now applies the rule already used for a robot overlapping a border: it goes on while the
+remaining straight exit only moves the chassis away from what it already covers and ends inside the free surface (log
+`route_dock_exit_overlap`); forbidden ground ahead in the corridor still stops it. The refusal now gives its cause and
+the pose (position, distance from the base).
+
+**Obstacles that could not be deleted**. Deleting a saved obstacle now also dismisses the bumper contacts recorded at
+its place: before, the same contacts made it come back at once as a presumed obstacle, still avoided by routes (and
+by the base exit when it sat in front of the station) with no way to delete it. A presumed obstacle can be dismissed
+as a whole (**Dismiss** in Difficulties, **Dismiss this presumed obstacle** in its sheet on the map) instead of contact
+by contact, and the sheet of a contact covered by a saved obstacle opens that obstacle (**Open the saved obstacle**)
+so that it can be resized or deleted. The deletion dialogs say how many contacts will be dismissed.
+
+**Gateway health display**. The Service tab's robot card shows the gateway on the robot as measures instead of a text
+line: battery, Wi-Fi with signal bars and quality, rate and temperature side by side, and the first warning in an
+orange band. The Wi-Fi gateway page (pilot and gateway phone) shows four tiles (battery and Wi-Fi with a gauge,
+temperature, heating) and the phone states as coloured pills. See
+[Gateway health](docs/features/gateway.md#gateway-health).
+
+**Charging station: only the useful action**. The **Charging station** dialog follows the charging contact: robot on
+its base, only **Leave the station** is shown (with a note on the straight exit and a supervision box about the exit
+in front of the station); robot away from the base, only **Recharge**. Without a recent report (Bluetooth older than
+15 s, no link), both actions stay offered and the route still checks the contact. Through the Mammotion account, a
+robot already on its base no longer offers **Recharge (native Mammotion)**: "Robot on its base: no return needed." See
+[Charging station](docs/features/station-and-moves.md#charging-station-robot-connected).

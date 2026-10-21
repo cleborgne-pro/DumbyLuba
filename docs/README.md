@@ -25,6 +25,7 @@
 | [path-planning/PARAMETERS.md](path-planning/PARAMETERS.md) | engine parameters |
 | [path-planning/ENGINE.md](path-planning/ENGINE.md) | production engine: single engine, continuous mowing, nearest start, sweep bar |
 | [ROUTE_OPTIMIZATIONS.md](ROUTE_OPTIMIZATIONS.md) | route preparation and zone entry |
+| [REAL_COVERAGE.md](REAL_COVERAGE.md) | real coverage of a mowing from its track (CoverageMap), gaps as planner targets |
 
 ## Execution and safety
 

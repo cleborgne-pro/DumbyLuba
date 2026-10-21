@@ -20,7 +20,12 @@ the same route engine as mowing.
 The **Charging station** dialog recalls: "Recharge: DumbyLuba drives the robot in front of the base along the verified
 local route (50 cm from the edges, blades stopped), then the official Mammotion return handles the docking." and
 "Stay nearby, stop within reach." It needs a known base and an idle robot (no route, test, manual control or
-simulation). Tick **I am supervising the robot and the way to the station is clear**, then:
+simulation). Only the action that fits the charging contact of the latest Bluetooth report (at most 15 s old) is
+shown: robot on its base, **Leave the station** alone (note "Robot on its base. Leave the station: straight exit
+driving forward, slowly, blades stopped." and box **I am supervising the robot and the exit in front of the station
+is clear**); robot away from the base, **Recharge** alone. Without a recent report, both are shown and the route checks
+the contact itself. Tick the supervision box (away from the base: **I am supervising the robot and the way to the
+station is clear**), then:
 
 - **Leave the station**: charging contact required, exit driving forward, in a straight line and slowly (≈ 10 cm/s,
   no pivot on the base, heading within ±10°, ±10 cm corridor, at most 60 s). Release of the contact is confirmed within
@@ -43,6 +48,8 @@ With the [Mammotion account](mammotion-account.md) connected and no Bluetooth li
 
 - the dialog states "Native Mammotion return through the account": the Mammotion firmware computes the route and
   handles docking, as in the Mammotion app;
+- robot already on its base according to the latest account report (at most 3 min old): "Robot on its base: no return
+  needed." replaces the supervision box and the **Recharge (native Mammotion)** button;
 - **Recharge (native Mammotion)**, supervision box (**I am supervising the robot and the way to the station is
   clear**) mandatory and unticked after each request: wakes the robot if it is asleep, official return and docking
   monitoring with a progress bar and its state;

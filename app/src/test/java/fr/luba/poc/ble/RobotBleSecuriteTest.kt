@@ -174,7 +174,10 @@ class RobotBleSecuriteTest {
         val reconnected = bench.now
         bench.advance(20_000)
         assertFalse(bench.state.robotRoute.running)
-        assertTrue("No movement resumed after reconnection", bench.labelsSince(lostAt).none { it.startsWith("move") || it == "blades-on" })
+        // The simulated link refuses every write after drop(); virtual time stays frozen until the next advance, so a
+        // frame written just before the loss by a late background thread carries the loss instant: only later ones count.
+        val afterLoss = bench.labelsSince(lostAt + 1)
+        assertTrue("No movement resumed after reconnection: $afterLoss", afterLoss.none { it.startsWith("move") || it == "blades-on" })
         assertTrue(bench.labelsSince(reconnected).none { it == "manual" })
         bench.awaitReal(5000, "unexpected stop alert") { bench.alerted(AlertKind.UNEXPECTED_STOP) }
         assertEquals(1, bench.state.interruptions)

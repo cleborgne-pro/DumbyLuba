@@ -38,6 +38,8 @@ class CloudActionException(message:String):Exception(message)
  * tests: cloud simulated on a local port and fabricated MQTT events.
  */
 class CloudViewModel internal constructor(app:Application,private val api:MammotionCloud,private val accountStore:AccountStore,
+    /** Local mode ([AccountMode]): no request reaches the Mammotion cloud. */
+    private val localOnly:()->Boolean={ AccountMode.localOnly },
     private val mqttConnector:((CloudRobot,Boolean)->MqttLink)?=null):AndroidViewModel(app) {
     constructor(app:Application):this(app,MammotionCloud(SessionStore(app)),AccountStore(app))
     private val restoredAccount=accountStore.read()
@@ -45,13 +47,15 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
     private val positionStore=LastKnownPositionStore(app.filesDir)
     private val cache=MapCache(app)
     private val preferences=app.getSharedPreferences("mammotion_map_selection",android.content.Context.MODE_PRIVATE)
-    private val mutable=MutableStateFlow(CloudUi(accountSaved=restoredAccount!=null,accountEmail=restoredAccount?.email.orEmpty(),lastKnown=preferences.getString("robot",null)?.let(positionStore::read),connected=api.connected(),map=if(api.connected()) preferences.getString("robot",null)?.let{cache.read(it)} ?: RobotMap() else RobotMap(),status=if(api.connected()) tr("Secure session kept · refresh the robots", "Session sécurisée conservée · actualiser les robots") else tr("Account not connected", "Compte non connecté")))
+    private val restoredSession=!localOnly() && api.connected()
+    private val mutable=MutableStateFlow(CloudUi(accountSaved=restoredAccount!=null,accountEmail=restoredAccount?.email.orEmpty(),lastKnown=if(localOnly()) null else preferences.getString("robot",null)?.let(positionStore::read),connected=restoredSession,map=if(restoredSession) preferences.getString("robot",null)?.let{cache.read(it)} ?: RobotMap() else RobotMap(),status=when { localOnly() -> AccountMode.message; restoredSession -> tr("Secure session kept · refresh the robots", "Session sécurisée conservée · actualiser les robots"); else -> tr("Account not connected", "Compte non connecté") }))
     val state=mutable.asStateFlow()
     private val handler=Handler(Looper.getMainLooper())
     private val log=EventLog(app) { message -> handler.post { mutable.value=mutable.value.copy(status=message) } }
     private var job:Job?=null
     private fun status(s:String){handler.post { if(log.healthy) log.append("cloud_status",s) };mutable.value=mutable.value.copy(status=s,events=(mutable.value.events+s).takeLast(100))}
     private fun work(action:suspend ()->Unit) {
+        if(localOnly()) { status(AccountMode.message);return }
         if(mutable.value.busy)return
         // A tracking (return, update) already holds the account MQTT connection and relays the state.
         if(following())return
@@ -81,6 +85,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
      * time-limited: the request never stays stuck without a message.
      */
     fun requestCamera(bothFront:Boolean=false) {
+        if(localOnly()) { camera { it.copy(busy=false,credentials=null,status=tr("Video stream unavailable: ${AccountMode.message}", "Flux vidéo indisponible : ${AccountMode.message}")) };return }
         if(mutable.value.camera.busy) return
         val attempt=++cameraAttempt
         cameraJob=viewModelScope.launch {
@@ -115,6 +120,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
      * ready: the [CloudReadOnly] barrier only accepts these messages.
      */
     fun cloudCameraCommand(kind:CameraCommand) {
+        if(localOnly()) return
         val robot=mutable.value.camera.robot ?: mutable.value.selected ?: return
         viewModelScope.launch(Dispatchers.IO) {
             val result=runCatching {
@@ -140,6 +146,17 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         val selected=robots.firstOrNull { it.id == preferences.getString("robot",null) } ?: robots.firstOrNull()
         mutable.value=mutable.value.copy(robots=robots,selected=selected,telemetry=fr.luba.poc.protocol.Telemetry(),details=if(selected?.id==mutable.value.selected?.id) mutable.value.details else RobotDetails(),connected=true,map=selected?.let{cache.read(it.id)} ?: RobotMap(),lastKnown=selected?.let{positionStore.read(it.id)});status(tr("${robots.size} LUBA in the account", "${robots.size} LUBA dans le compte"))}
     fun logout(){job?.cancel();api.logout();preferences.edit().clear().apply();val saved=accountStore.read();mutable.value=CloudUi(accountSaved=saved!=null,accountEmail=saved?.email.orEmpty());status(tr("Session deleted", "Session supprimée"))}
+    /**
+     * Entering local mode: camera stopped and session deleted (the saved credentials are kept for a later return to
+     * the account). Refused while a native return or a firmware update is followed: false.
+     */
+    fun enterLocalMode():Boolean {
+        if(following()) return false
+        stopCamera();logout();status(AccountMode.message)
+        return true
+    }
+    /** Leaving local mode: the account can be signed in again (Me → Mammotion account). */
+    fun leaveLocalMode(){status(tr("Account not connected", "Compte non connecté"))}
     fun forgetAccount(){accountStore.clear();logout();status(tr("Saved account and session deleted", "Compte et session sauvegardés supprimés"))}
     fun refreshPosition()=work {
         if (mutable.value.robots.isEmpty()) load()
@@ -291,6 +308,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
      */
     fun nativeReturnToBase() {
         if(following()) return
+        if(localOnly()) { setReturn(CloudReturnUi(CloudReturnPhase.FAILED,AccountMode.message,now()));return }
         val robot=mutable.value.selected ?: run { setReturn(CloudReturnUi(CloudReturnPhase.FAILED,tr("No LUBA selected in the account", "Aucun LUBA sélectionné dans le compte"),now()));return }
         // Read-only mode: a model that is not validated never receives a motion order, native return included.
         fr.luba.poc.protocol.ModelSupport.refusal(robot.name)?.let { setReturn(CloudReturnUi(CloudReturnPhase.FAILED,it,now()));return }
@@ -392,6 +410,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
      */
     fun startFirmwareUpdate() {
         if(following()) return
+        if(localOnly()) { setFirmware(FirmwareUpdateUi(status=tr("Update not started: ${AccountMode.message}", "Mise à jour non lancée : ${AccountMode.message}")));return }
         val robot=mutable.value.selected ?: return
         val check=mutable.value.firmwareCheck
         // Read-only mode: the firmware of a model that is not validated is updated from the Mammotion app only.
@@ -418,6 +437,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
     }
     /** Follows an update already in progress (started from the Mammotion app or before an app restart). */
     fun followFirmwareUpdate() {
+        if(localOnly()) return
         val check=mutable.value.firmwareCheck
         if(following() || check?.upgrading!=true) return
         val robot=mutable.value.selected ?: return

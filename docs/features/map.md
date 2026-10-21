@@ -7,7 +7,7 @@ obstacles and signal surveys. Every mowing, every route and every survey starts 
 |---|---|
 | **Access** | Home → **MY MAP** tile, robot photo or **Start mowing** (**Follow mowing** while a task runs); Me → account map |
 | **Status** | Implemented: BLE and cloud reading, local cache, local corrections (0.60.0), DumbyLuba zones and passages recorded by driving (1.4.0) |
-| **Code** | `map/MapScreen.kt`, `MapSettingsSheet.kt`, `MapLayerBar.kt`, `MapDisplay.kt`, `MapFx.kt`, `MapFollow.kt`, `MapCompass.kt`, `MapOverlayLayout.kt`, `MapCorrections.kt`, `MapCorrectionEditor.kt`, `MapCorrectionTools.kt`, `MapCorrectionStore.kt`, `DrivenRecording.kt`, `MapTransfer.kt`, `MapCache.kt`, `StationReader.kt`, `LastKnownPosition.kt`, `MapObstacles.kt`, `MapLive.kt`, `MapRobot.kt`, `simulation/BaseStore.kt` |
+| **Code** | `map/MapScreen.kt` (with `MapScreenState.kt`, `MapRouteCanvas.kt`, `MapPanels.kt`, `MapSheetsHost.kt`, `MowingTaskPages.kt`, `MapSignals.kt`), `MapSettingsSheet.kt`, `MapLayerBar.kt`, `MapDisplay.kt`, `MapFx.kt`, `MapFollow.kt`, `MapCompass.kt`, `MapOverlayLayout.kt`, `MapCorrections.kt`, `MapCorrectionEditor.kt`, `MapCorrectionTools.kt`, `MapCorrectionStore.kt`, `DrivenRecording.kt`, `MapTransfer.kt`, `MapCache.kt`, `StationReader.kt`, `LastKnownPosition.kt`, `MapObstacles.kt`, `MapLive.kt`, `MapRobot.kt`, `simulation/BaseStore.kt` |
 | **Reference** | [Map reading and test procedure](../MAP_PREVIEW_TEST.md) |
 
 <p align="center">
@@ -85,7 +85,8 @@ control, test, simulation). The home screen offers the same reading under the **
   ([signal surveys](signal-surveys-and-terrain.md)). At the head of the bar, two toggles independent of the signal:
   **Obstacles** (bumper contacts with a photo, presumed obstacles; tapping a contact opens its card, where you pick
   the exclusion size before saving the obstacle; tapping a saved obstacle opens its exclusion size, which can be
-  edited, or deletes it) and **Difficulties** (heatmap of blockages, wheel slips, lifts…), kept between launches
+  edited, or deletes it), **Difficulties** (heatmap of blockages, wheel slips, lifts…) and **Real coverage** (area
+  actually mowed, [below](#real-coverage-layer)), kept between launches
   ([encountered obstacles and difficulties](obstacles.md#encountered-obstacles-and-difficulties)).
 - **Bottom bar** (compact): **Mow** (or **Follow** during a Mammotion task), **Manual** (Bluetooth only), **History**
   (latest completed tasks; a tap opens the details and the replay of the actual route, see
@@ -96,6 +97,16 @@ control, test, simulation). The home screen offers the same reading under the **
   bottom bar is replaced by the mowing bar during a route and by the simulation bar during a simulation.
 - **Gestures**: zoom, rotate and pan with two fingers (one finger pans); a tap selects a zone during the zone choice,
   otherwise opens an obstacle or contact card.
+
+### Real coverage layer
+
+The **Real coverage** layer (on by default; layer bar, Map sheet → *On the map*, or Service → Garden and history → Obstacles → *Map layers*)
+draws over the planned stripes the area actually mowed by the current mowing: the cutting width swept around the
+positions received with the blades running, refreshed every 2 s, darker green where the robot mowed twice. Once the
+mowing ends it stays shown, with the **gaps** left in orange (unmowed portions of 0.25 m² or more, wider than about
+30 cm); at launch, the last mowing with a recorded track is shown again until a new mowing starts. It is shown only on
+the map holding the zones of that mowing, never in the demo. Shares per zone and gaps:
+[task detail](mowing-history.md#real-coverage).
 
 ### Following the robot
 
@@ -125,9 +136,9 @@ the displayed source and the map contents ("7 zones · 26 no-go zones").
 | Group | Contents |
 |---|---|
 | *Map background* | three illustrated tiles: **Grid** (default, "Metric grid tied to the map: one line per meter, stronger every 5 m"), **Dots** ("Discreet pattern, fixed on screen"), **Plain** ("Neutral background, no grid") |
-| *On the map* | switches **Zone names** (on by default), **Scale** (on), **Planned route animation** (comet running along the route in mowing order, on), **Encountered obstacles**, **Difficulties** (same toggles as the layer bar) |
+| *On the map* | switches **Zone names** (on by default), **Scale** (on), **Planned route animation** (comet running along the route in mowing order, on), **Encountered obstacles**, **Difficulties**, **Real coverage** (same toggles as the layer bar) |
 | *Signal heatmap* | **Show the heatmap** (**Show the simulated heatmap** during a simulated survey) and chips for the measured layers (Wi-Fi, RTK, BLE…), or "No signal survey on this map: open the history to show one."; **Layer bar** (shown or collapsed, like the **Layers** button), **Heatmap history**, **Flat-ground reference** (tilt and orientation of the gateway phone, for the terrain) |
-| *Local corrections* | **Correct the map**: number of active corrections ("2 active"); opens the editor ([below](#correcting-the-map-local-corrections)). **Record by driving**: opens the dedicated page (map following the robot, camera, joysticks) to record a DumbyLuba zone, passage or no-go zone ([below](#mammotion-zones-and-dumbyluba-zones)) |
+| *Local corrections* | **Correct the map**: number of active corrections ("2 active"); opens the editor ([below](#correcting-the-map-local-corrections)). **Record by driving**: opens the dedicated page (map following the robot, camera, joysticks) to record a DumbyLuba zone, passage or no-go zone ([below](#mammotion-zones-and-dumbyluba-zones)). **Border types**: number of typed portions ("3 portions"); opens the border types editor ([below](#border-types)) |
 | *Map source* | **Read the robot map**, **Mammotion account map**, **Try the demo** ([above](#loading-a-map)) |
 | *Legend* | symbols drawn as on the map, by family: *Garden*, *Routes*, *Obstacles*, *Robot* |
 
@@ -210,6 +221,53 @@ simulation. Saving is refused during a local route ("Corrections: stop the curre
 File: `map-corrections.json` (app folder, versioned format, atomic write, at most 500 corrections; types `patch`,
 `offset`, `nogo`, and since 1.4.0 `zone` and `passage`, which an older version ignores).
 
+## Border types
+
+Each portion of a zone or no-go boundary can be marked with one of four types, the base of the future border, speed
+and precision strategies. **For now the types are only annotated, kept and drawn: they change nothing in the route
+computation nor in the robot's moves.**
+
+| Type | Colour | Meaning |
+|---|---|---|
+| **Open lawn** | light blue | the grass carries on beyond: a slight overrun is harmless |
+| **Curb** | amber | low edge the wheels can cross: curb, edging strip, path at ground level |
+| **Wall** | brown | vertical obstacle: wall, fence, hedge, house front |
+| **Danger** | red | sensitive portion: drop, pond, flower bed, road |
+
+**Editor.** Map sheet → *Local corrections* → **Border types** (same conditions as **Correct the map**: complete robot
+or account map, no simulation, no route or mowing in progress). Full-screen map, one finger moves it, two fingers zoom
+and rotate.
+
+1. Tap a boundary (zone or no-go zone) near the start of the portion: the point snaps to the boundary.
+2. Tap the other end on the same boundary: the shorter part between the two points is selected (dashed);
+   **Other side** takes the other part. **Whole boundary** selects the whole outline at once.
+3. Choose the type (chips with their colour and a one-line description), then **Validate**.
+
+A coloured portion tapped is selected: its chips change its type immediately, **Delete** removes it ("Undo" in the
+message restores it), **New portion here** starts a new portion at the tapped point. The list button shows every
+portion with its type, length, boundary and state; **Show** frames it. Where two portions overlap, the most recent one
+wins; an older portion entirely hidden by newer ones is dropped when saving.
+
+**On the map.** Typed portions are drawn over the outlines, in the colour of their type on a light halo, on the map
+screen (route preview included), the live mowing map, the correction editor and the record-by-driving page.
+
+**When the boundary changes.** A portion keeps its geometry along the boundary, not point indices. When the map is
+read again, the zone is recorded again (even under another identifier) or a local correction changes it, the portion
+is reprojected onto the new boundary if it still follows it within 30 cm ("Follows the redrawn boundary"); otherwise it
+stays in the list, not applied, as "To review: boundary changed too much". Types are laid over the effective map
+(Mammotion map + local corrections), and have no effect on a map where they find no matching boundary.
+
+File: `border-types.json` (app folder, versioned format, atomic write, at most 500 portions, coordinates to the
+millimetre). Code: `map/BorderTypes.kt` (model, reprojection, overlaps, storage), `map/BorderTypeEditor.kt` (editor
+and drawing). Tests: `BorderTypesTest`, `BorderTypeEditorTest`.
+
+## Sync with the Mammotion app
+
+Map sheet → *Local corrections* → **Sync with the Mammotion app** lists the differences between the corrected map and
+the Mammotion map stored in the robot, and writes the chosen ones into it: the robot drives each outline on its own,
+blades stopped, while it records it (DumbyLuba zones, passages and no-go zones created, corrected Mammotion zones and
+no-go zones replaced). The corrections the robot then holds leave the phone. See [Sync with the Mammotion app](map-sync.md).
+
 ## Mammotion zones and DumbyLuba zones
 
 The app works on **a single map**: the Mammotion map read from the robot, completed by the local corrections. Since
@@ -219,7 +277,7 @@ in the Mammotion app ([recording by driving](manual-control.md#recording-a-zone-
 | | Mammotion zone or passage | DumbyLuba zone or passage |
 |---|---|---|
 | Recorded by | the Mammotion app, in the robot | DumbyLuba, on this phone only (`map-corrections.json`) |
-| Seen by the robot and the Mammotion app | yes | **no** |
+| Seen by the robot and the Mammotion app | yes | **no**, until it is [synced](map-sync.md) |
 | Zone choice, route preview, simulation, local mowing, resume, borders, start point | yes | **yes, the same way** |
 | Moves (return to base, move to a point, links between zones, surveys) | yes, through the zones and passages | **yes, the same way**: a DumbyLuba passage connects zones like a Mammotion one |
 | On the map | solid outline, grey passage | **dashed** outline, "· DL" after the name, **green** passage |
@@ -283,3 +341,19 @@ is not cut automatically (disable or edit the DumbyLuba zone).
   followed live by the gateway uses the same center.
 - During a [simulation](simulation.md), the real robot stays visible next to the simulated silhouette, and the
   bottom bar shows the simulation progress.
+
+## Code structure and Dalvik register limit
+
+`MapScreen` is a thin entry point: it groups its parameters in `MapScreenArgs` and composes `MapScreenContent`, whose
+states live in a few holders (`MapScreenState.kt`: sheets and pages, task settings, route preparation, move to a point,
+layers, station and accesses, view and selection). The static drawing (`MapRouteCanvas`), the header, the side bar and
+the panels (`MapPanels.kt`), the sheets and dialogs (`MapSheetsHost.kt`) and the task pages (`MowingTaskPages.kt`)
+are named composables that read those holders.
+
+The method to watch is `MapScreenContent` (`MapScreenKt;MapScreenContent` in the output of
+`tools/check-dex-registers.py`): 136 Dalvik registers on 2026-10-21, against 222 for the former single `MapScreen`.
+Above 256 registers, D8 miscompiled the non-debuggable variant (VerifyError, crash when opening the map);
+`checkFoldDexRegisters` refuses the Fold APK when any app method exceeds **224**. A new state goes into the holder it
+belongs to, and a new panel or sheet into a named composable taking those holders, rather than a new local or a new
+`Isolated { }` block. Details: [map crash](../ROBOT_ROUTE_BLE.md#map-crash-real-cause-and-safeguards-oct-10).
+

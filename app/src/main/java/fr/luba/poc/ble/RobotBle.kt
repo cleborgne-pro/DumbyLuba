@@ -143,6 +143,8 @@ fun RobotUi.withMammotionMap(raw: RobotMap, corrections: List<MapCorrection> = m
     val borderFrontal: BorderFrontalUi = BorderFrontalUi(),
     val mowing: MowUi = MowUi(),
     val sensorProbe: SensorProbeSnapshot = SensorProbeSnapshot(),
+    /** Last local perception map pushed by the robot ([fr.luba.poc.diagnostics.PerceptionMapObserver]), outside any capture. */
+    val perceptionMap: fr.luba.poc.diagnostics.PerceptionMapFrame? = null,
     /** Video state read from telemetry (fpv_info, network used, vi_switch acknowledgement). */
     val camera: fr.luba.poc.camera.CameraRobotState = fr.luba.poc.camera.CameraRobotState(),
     /** Obstacle photo after a bumper contact (pending request, setting, saved photos). */
@@ -183,6 +185,8 @@ data class GatewayDrop(val x: Double, val y: Double, val at: Long, val probable:
 
 /** Recoveries by recomputing the path, per move to a point. */
 private const val MAX_NAV_RECOVERIES = 3
+/** Minimum battery to start a sync with the Mammotion map (several outlines may be driven in a row). */
+private const val SYNC_BATTERY_FLOOR = 40
 /** Back-off after a contact: raw speed (≈ 10 cm/s, like leaving the station) and maximum duration. */
 private const val BACK_OFF_LINEAR = 100
 /** Maximum number of slide map cells sent to the gateway (≈ 20 bytes each, 16 KB frame). */
@@ -310,6 +314,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         }
         val exit=fr.luba.poc.simulation.DockExit(base, approach)
         val motionProgress=MotionProgressGuard()
+        var overlapLogged=false
         while (true) {
             val t=live()
             val now=SystemClock.elapsedRealtime()
@@ -323,7 +328,18 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val rad=Math.toRadians(step.heading)
             val distance=minOf(0.10,position.distance(approach))
             val next=RobotPose(Point(position.x+distance*kotlin.math.cos(rad),position.y+distance*kotlin.math.sin(rad)),step.heading)
-            check(routes.motionCollision(RobotPose(position,step.heading),next)==null) { tr("Station exit outside the safe envelope", "Sortie de station hors enveloppe sûre") }
+            if (routes.motionCollision(RobotPose(position,step.heading),next)!=null) {
+                // Chassis already overlapping the free surface on its station: the remaining straight exit must only
+                // move it away and end inside the free surface (same rule as the gateway, [fr.luba.poc.autonomy.LegRunner]).
+                val overlapping=!routes.footprintSafe(RobotPose(position,step.heading))
+                check(overlapping && routes.leavesStraight(position,approach,step.heading)) { fr.luba.poc.simulation.DockExit.envelopeRefusal(position,base,overlapping) }
+                if (!overlapLogged) {
+                    overlapLogged=true
+                    event("route_dock_exit_overlap",tr("Chassis overlapping the free surface on the base: straight exit allowed while it only moves away",
+                        "Châssis débordant de la surface libre sur la base : sortie tout droit admise tant qu'elle ne fait que s'en éloigner"),
+                        mapOf("x" to position.x,"y" to position.y,"heading" to step.heading,"baseDistanceM" to position.distance(base)))
+                }
+            }
             check(obstacles().none { obstacle -> Geometry.distance(Point(obstacle.x,obstacle.y),position,next.position) < obstacle.exclusionRadiusM+RobotEnvelope.LUBA2.turnClearanceM }) { tr("Obstacle on the station exit", "Obstacle sur la sortie de station") }
             send(commands.movement(step.linear,0),stopLabel)
             delay(200)
@@ -655,6 +671,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         val rain = if (weather.monitoring && weather.location != null && (ui.mowing.running || ui.robotRoute.running))
             fr.luba.poc.weather.MowingRainCheck.check(weather.assessment, weather.forecast, System.currentTimeMillis(), 30).takeIf { it.warn } else null
         alertMonitor.condition(AlertKind.RAIN, rain?.let { Severity.WARNING }) { kind, severity -> alert(kind, severity, rain?.message ?: kind.title) }
+        // Blades to replace: counter received over Bluetooth, interval and last change noted on the phone (no robot command).
+        val blades = t.maintenance?.let { m -> ui.selected?.address?.let { id ->
+            fr.luba.poc.maintenance.BladeWear.status(m, fr.luba.poc.maintenance.BladeMaintenanceSettings.change(id), fr.luba.poc.maintenance.BladeMaintenanceSettings.intervalHours) } }
+        alertMonitor.condition(AlertKind.BLADE_WEAR, if (blades?.due == true) Severity.WARNING else null) { kind, severity -> alert(kind, severity, blades?.detail ?: kind.title) }
         observeGatewayBattery(ui)
     }
     /**
@@ -821,7 +841,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     // Task tracks: timestamped actual positions, map and prepared route, for replay from the history.
     // Declared before the init block: its write coroutine may start before the constructor finishes.
     private class TrackWrite(val id: String, val samples: List<fr.luba.poc.history.TrackSample> = emptyList(),
-                             val meta: fr.luba.poc.history.TrackMeta? = null, val keep: List<String>? = null)
+                             val meta: fr.luba.poc.history.TrackMeta? = null, val keep: List<String>? = null,
+                             val events: List<fr.luba.poc.history.TaskEvent> = emptyList(), val seal: Boolean = false,
+                             val boxes: List<fr.luba.poc.history.BlackBox> = emptyList())
     private val trackStore = fr.luba.poc.history.TaskTrackStore(app.filesDir)
     private val trackWrites = kotlinx.coroutines.channels.Channel<TrackWrite>(kotlinx.coroutines.channels.Channel.UNLIMITED)
     init {
@@ -831,17 +853,38 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             if (loaded != stored) runCatching { historyStore.save(loaded) }
             handler.post { update { ui -> ui.copy(mowingHistory = (ui.mowingHistory + loaded.filter { r -> ui.mowingHistory.none { it.id == r.id } })
                 .sortedByDescending { it.startedAt }) } }
+            coverageRestore(loaded)
             for (records in historyWrites) runCatching { historyStore.save(records) }
         }
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             for (write in trackWrites) runCatching {
                 write.meta?.let { meta -> if (!trackStore.hasMeta(write.id)) trackStore.writeMeta(write.id, meta) }
-                trackStore.append(write.id, write.samples)
+                if (!trackStore.append(write.id, write.samples) && !trackFull) {
+                    trackFull = true
+                    handler.post { event("task_track_full", tr("Track size limit reached: further positions of this task are not saved", "Taille maximale de la piste atteinte : les positions suivantes de cette tâche ne sont pas enregistrées")) }
+                }
+                trackStore.appendEvents(write.id, write.events)
+                write.boxes.forEach { trackStore.appendBox(write.id, it) }
+                // End of a run: raw positions compressed.
+                if (write.seal) trackStore.seal(write.id)
                 write.keep?.let(trackStore::prune)
             }.onFailure { error -> handler.post { event("task_track_save_failed", tr("Could not save the track: ${error.message}", "Sauvegarde de la piste impossible : ${error.message}")) } }
         }
     }
+    @Volatile private var trackFull = false
     private var trackSampler: fr.luba.poc.history.TrackSampler? = null
+    // Typed journal of the running task (recharges, obstacles, blockages, STOP, link losses…), written with its track.
+    private var taskEvents: fr.luba.poc.history.TaskEventRecorder? = null
+    // Last speed command written by this phone (raw units) and when (elapsed realtime), for the track samples.
+    private var lastSetpoint: MotionSetpoints.Setpoint? = null
+    private var lastSetpointAt = 0L
+    // Previous position received (elapsed realtime, rotation centre): measured speed of the track samples.
+    private var trackLastAt = 0L
+    private var trackLastPoint: Point? = null
+    private var trackLastSpeed = Double.NaN
+    // Black box: sliding memory of the running task (frames, commands, log events), frozen at each incident.
+    private val blackBox = fr.luba.poc.history.BlackBoxRecorder()
+    private val blackBoxTrigger = fr.luba.poc.history.BlackBoxTrigger()
     private val trackBuffer = ArrayList<fr.luba.poc.history.TrackSample>()
     private var trackJob: Job? = null
     private var trackPositionAt = 0L
@@ -873,6 +916,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     private var reducer = TelemetryReducer()
     private val sensorProbe = SensorProbe()
     private val cameraObserver = fr.luba.poc.camera.CameraRobotObserver()
+    private val perceptionMaps = fr.luba.poc.diagnostics.PerceptionMapObserver()
     // Automatic reconnection after an unexpected link loss: link only, commands are never resumed.
     private var unexpectedLoss = false
     private var wantLink = false
@@ -1253,9 +1297,12 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (photo.request != null && now - photo.request.contactAt < fr.luba.poc.camera.ObstaclePhotoUi.HOLD_MS * 2) return
         val t = state.value.telemetry
         val request = fr.luba.poc.camera.ObstaclePhotoRequest(id = now, contactAt = now, code = code, x = t.x, y = t.y, camera = photo.camera)
-        if (!photo.enabled) {
+        // Local mode: no camera (Mammotion cloud), handled like a disabled photo, the robot does not wait.
+        val localOnly = fr.luba.poc.auth.AccountMode.localOnly
+        if (!photo.enabled || localOnly) {
             // Photo disabled: the encounter is notified without an image (bounces of the same contact ignored).
-            if (now - lastObstacleAlertAt >= fr.luba.poc.camera.ObstaclePhotoUi.HOLD_MS * 2) { lastObstacleAlertAt = now; alertObstacle(request, tr("photo disabled", "photo désactivée")) }
+            if (now - lastObstacleAlertAt >= fr.luba.poc.camera.ObstaclePhotoUi.HOLD_MS * 2) { lastObstacleAlertAt = now
+                alertObstacle(request, if (localOnly) tr("local mode, no photo", "mode local, sans photo") else tr("photo disabled", "photo désactivée")) }
             return
         }
         update { it.copy(obstaclePhoto = it.obstaclePhoto.copy(request = request,
@@ -1271,7 +1318,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun holdForObstaclePhoto(prefix: String, heightMm: Int) {
         val request = state.value.obstaclePhoto.request ?: return
-        if (!state.value.obstaclePhoto.enabled) return
+        if (!state.value.obstaclePhoto.enabled || fr.luba.poc.auth.AccountMode.localOnly) return
         val done = kotlinx.coroutines.CompletableDeferred<Boolean>().also { photoDone = it }
         update { it.copy(obstaclePhoto = it.obstaclePhoto.copy(request = request.copy(readyAt = System.currentTimeMillis()), status = tr("Obstacle photo · robot still", "Photo de l'obstacle · robot immobile"))) }
         val began = SystemClock.elapsedRealtime()
@@ -1340,6 +1387,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         photoDone?.complete(false)
     }
     private fun event(kind: String, text: String, fields: Map<String, Any?> = emptyMap()) {
+        taskEvents?.let { recorder ->
+            if (kind !in fr.luba.poc.history.BlackBoxRecorder.NOISY) blackBox.note(fr.luba.poc.history.BlackBoxNote(System.currentTimeMillis(), kind, text.take(300)))
+            taskPose().let { (x, y, battery) -> taskEventWrite(recorder.fromLog(kind, text, fields, System.currentTimeMillis(), x, y, battery)) }
+        }
         log.append(kind, text, fields + mapOf("connectionId" to connectionId,
             "campaignId" to state.value.campaign.id, "caseId" to activeCase, "queueDepth" to queue.size,
             "bladeTestId" to bladeTestId, "heightTestId" to heightTestId))
@@ -1358,7 +1409,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     /** Current telemetry subscription: vision streams added while the sensor probe is running. */
     private fun reportsCommand(keep: Boolean, periodMs: Int = 1000) =
         commands.reports(keep, periodMs = periodMs, vision = sensorProbe.isRunning)
-    /** Report period: 200 ms during a tracked movement (route, learning, tests), 1 s otherwise. */
+    /**
+     * Report period: 200 ms during a tracked movement (route, learning, tests), 1 s otherwise. The LUBA 2 (firmware
+     * 1.30.31.19) stays at 1 Hz whatever the request (measured on 2026-10-20, see [Commands.reports]).
+     */
     private fun reportPeriodMs(): Int = if (state.value.robotRoute.running || state.value.teach.running || state.value.navTest.running ||
         state.value.silenceTest.running || state.value.driven?.paused == false) 200 else 1000
     /** Firmware debug switch during the capture (no movement); reset to 0 on stop. */
@@ -1526,9 +1580,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     fun setTimeout(seconds: Int) {
         if (gatt == null) update { it.copy(timeoutSeconds = seconds.coerceIn(5, 30)) }
     }
-    fun export(uri: Uri, archive: Boolean = false) {
+    fun export(uri: Uri, archive: Boolean = false, anonymize: Boolean = true) {
         if (state.value.campaign.running) return
-        log.export(uri, archive) { result -> handler.post { status(result) } }
+        log.export(uri, archive, anonymize) { result -> handler.post { status(result) } }
     }
     fun refreshHistory() { log.history { value -> handler.post { update { it.copy(history = value) } } } }
     fun runLocalChecks() {
@@ -1856,6 +1910,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     alertCommunicationExpected = alertMonitor.armed
                     // Loss of the gateway (Wi-Fi), not of the robot's Bluetooth: on 2026-10-14, "BLE lost" misled the analysis.
                     val lost = if (link is fr.luba.poc.gateway.GatewayLink && fr.luba.poc.gateway.GatewayLink.gatewayDisconnected(code)) tr("Gateway lost", "Perte passerelle") else tr("BLE lost", "Perte BLE")
+                    taskEvent(fr.luba.poc.history.TaskEventType.LINK_LOST, "$lost: $reason", mapOf("code" to code))
                     alertRouteFailure(tr("$lost: return / resume interrupted", "$lost : retour / reprise interrompu"))
                     if(state.value.robotRoute.running || state.value.navTest.running || state.value.manualActive) alert(AlertKind.UNEXPECTED_STOP, Severity.CRITICAL, tr("$lost: physical STOP not guaranteed", "$lost : STOP physique non garanti"))
                     campaignFailure = tr("$lost unexpectedly ($code)", "$lost inattendue ($code)")
@@ -1927,10 +1982,12 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             update { it.copy(commandsSent = it.commandsSent + 1) }
             if (queue.none { it is Operation.Write && it.batch == op.batch }) {
                 logicalCommandsCompleted++
+                if (taskEvents != null) blackBox.command(fr.luba.poc.history.BlackBoxCommand(System.currentTimeMillis(), op.label, op.setpoint?.linear, op.setpoint?.angular))
                 op.setpoint?.let {
                     val writtenAt = SystemClock.elapsedRealtime()
                     liftGuard.commanded(it.linear, writtenAt)
                     motionWrittenAt = if (it.zero) 0L else writtenAt
+                    lastSetpoint = it; lastSetpointAt = writtenAt
                 }
                 routeBladeGate?.written(op.label,SystemClock.elapsedRealtime())
                 if (op.label.startsWith("DIAGNOSTIC_ZERO")) zeroCommandsCompleted++
@@ -2024,7 +2081,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             if (state.value.navTest.running) {
                 if (BumperEvents.confirmsContact(error)) {
                     // Move to a point with blades OFF: back-off, then a new path around the recorded obstacle.
-                    val pose = if (navMapPlan?.physicalGuard == true && !navConfig.tonte && navCourse == null && navContact == null)
+                    val pose = if (navMapPlan?.physicalGuard == true && !navConfig.tonte && !navConfig.tracing && navCourse == null && navContact == null)
                         contactPose(error.code) else null
                     captureLocalIncident(error.code)
                     if (pose != null && localIncidentPending && state.value.navTest.running) navContact = pose
@@ -2036,6 +2093,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 requestStop(false, tr("Obstacle: native mission stopped, firmware route cannot be repaired locally", "Obstacle : mission native arrêtée, parcours firmware non réparable localement"))
             }
         }
+        if (message.hasNav()) mapSyncReply(message.nav)
         mapTransfer?.let { transfer ->
             try {
                 transfer.accept(message, commands).forEach { send(it, "MAP_REQUEST_ACK") }
@@ -2059,6 +2117,14 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val camera = cameraObserver.value
             if (message.hasMul() && message.mul.hasSetVideoAck()) event("camera", tr("Camera: vi_switch ${fr.luba.poc.camera.CameraRobotState.ackLabel(camera.lastAck)}", "Caméra : vi_switch ${fr.luba.poc.camera.CameraRobotState.ackLabel(camera.lastAck)}"), mapOf("code" to camera.lastAck))
             update { it.copy(camera = camera) }
+        }
+        perceptionMaps.accept(message, System.currentTimeMillis(), reducer.value.robotState)?.let { frame ->
+            update { it.copy(perceptionMap = frame) }
+            event("perception_map", tr("Robot perception map: ${frame.info.label}", "Carte de perception du robot : ${frame.info.label}"),
+                mapOf("format" to frame.info.format, "width" to frame.info.width, "height" to frame.info.height, "bytes" to frame.info.bytes,
+                    "robotState" to frame.robotState, "count" to frame.count,
+                    "imageBase64" to frame.image.takeIf { it.isNotEmpty() && it.size <= fr.luba.poc.diagnostics.PerceptionMapObserver.LOG_BYTES }
+                        ?.let { java.util.Base64.getEncoder().encodeToString(it) }))
         }
         if (sensorProbe.isRunning) {
             val changed = sensorProbe.accept(message, System.currentTimeMillis())
@@ -2487,7 +2553,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 doneMeters = checkpoint?.doneMeters ?: 0.0, forecast = forecast, batteryStart = battery, batteryEnd = battery, kind = kind,
                 links = setOf(trackingLink()))
         }
-        trackBegin(id, engine)
+        trackBegin(id, engine, kind == fr.luba.poc.history.TaskKind.MOW)
+        taskEvent(if (resumed) fr.luba.poc.history.TaskEventType.RESUME else fr.luba.poc.history.TaskEventType.START,
+            "${record.kind.label} · ${record.mode} · ${record.zoneNames.joinToString(", ")}",
+            mapOf("mode" to record.mode, "zones" to record.zoneNames.size, "link" to trackingLink().name, "progress" to record.progress))
         historyTracker = fr.luba.poc.history.MowingTracker(record.totals)
         historyRechargeBase = record.recharges
         historySavedAt = 0L
@@ -2501,12 +2570,65 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         historyJob = viewModelScope.launch { while (true) { historySample(); delay(2000) } }
     }
 
+    /** Robot position (rotation centre, as in the track) and battery for a task event. */
+    private fun taskPose(): Triple<Double?, Double?, Int?> {
+        val t = state.value.telemetry
+        val center = if (t.x != null && t.y != null) DeadReckoning.rotationCenter(Point(t.x, t.y), t.heading) else null
+        return Triple(center?.x, center?.y, t.battery)
+    }
+
+    private fun taskEventWrite(event: fr.luba.poc.history.TaskEvent?) {
+        val recorder = taskEvents ?: return
+        if (event == null) return
+        trackWrites.trySend(TrackWrite(recorder.taskId, events = listOf(event)))
+        // Incident: black box frozen a few seconds later, so that it shows what followed (stop, recovery).
+        if (event.type.incident && blackBoxTrigger.incident(recorder.taskId, event))
+            handler.postDelayed({ blackBoxFreeze() }, fr.luba.poc.history.BlackBoxRecorder.AFTER_MS)
+    }
+
+    private fun blackBoxFreeze() {
+        val pending = blackBoxTrigger.take() ?: return
+        val box = blackBox.freeze(pending.atMs, pending.types, pending.detail)
+        trackWrites.trySend(TrackWrite(pending.taskId, boxes = listOf(box)))
+        event("task_black_box", tr("Black box frozen: ${pending.types.joinToString(" + ") { it.label }}", "Black Box figée : ${pending.types.joinToString(" + ") { it.label }}"),
+            mapOf("frames" to box.frames.size, "commands" to box.commands.size, "notes" to box.notes.size))
+    }
+
+    /** Current state of the robot and of the link, for the black box. */
+    private fun blackBoxFrame(t: fr.luba.poc.protocol.Telemetry, command: MotionSetpoints.Setpoint?): fr.luba.poc.history.BlackBoxFrame {
+        val center = if (t.x != null && t.y != null) DeadReckoning.rotationCenter(Point(t.x, t.y), t.heading) else null
+        return fr.luba.poc.history.BlackBoxFrame(System.currentTimeMillis(), center?.x ?: Double.NaN, center?.y ?: Double.NaN, t.heading ?: Double.NaN,
+            command?.linear, command?.angular, trackLastSpeed, t.battery ?: -1, t.robotState ?: -1, t.sensorStatus ?: -1, t.rtkStatus ?: -1,
+            t.gpsStars ?: -1, trackLinkState(), state.value.robotRoute.phase.name, t.bleRssi, t.wifiRssi)
+    }
+
+    /** Event of the running task signalled directly (start, end, STOP, link lost, obstacle). */
+    private fun taskEvent(type: fr.luba.poc.history.TaskEventType, detail: String, data: Map<String, Any?> = emptyMap()) {
+        val recorder = taskEvents ?: return
+        val (x, y, battery) = taskPose()
+        taskEventWrite(recorder.record(fr.luba.poc.history.TaskEvent(System.currentTimeMillis(), type, detail, x ?: Double.NaN, y ?: Double.NaN,
+            battery ?: -1, data.mapNotNull { (k, v) -> v?.let { k to it.toString() } }.toMap())))
+    }
+
+    /** Link state for the track: autonomous tracking by the gateway (Wi-Fi cut or not), relay or direct Bluetooth. */
+    private fun trackLinkState(): fr.luba.poc.history.TrackLinkState = when {
+        gatt == null -> fr.luba.poc.history.TrackLinkState.UNKNOWN
+        remoteLegActive && gatewayOutageSince != 0L -> fr.luba.poc.history.TrackLinkState.GATEWAY_OUTAGE
+        remoteLegActive -> fr.luba.poc.history.TrackLinkState.GATEWAY
+        gatt is fr.luba.poc.gateway.GatewayLink -> fr.luba.poc.history.TrackLinkState.RELAY
+        else -> fr.luba.poc.history.TrackLinkState.BLUETOOTH
+    }
+
     /**
      * Start (or resume) of the track of task [id]: context (map, prepared route) recorded once, then
      * each new position received, filtered by [fr.luba.poc.history.TrackSampler] and written in batches.
      */
-    private fun trackBegin(id: String, engine: MowingSimulation) {
+    private fun trackBegin(id: String, engine: MowingSimulation, mowing: Boolean) {
         trackStop()
+        taskEvents = fr.luba.poc.history.TaskEventRecorder(id)
+        trackFull = false; trackLastAt = 0L; trackLastPoint = null; trackLastSpeed = Double.NaN
+        blackBox.clear()
+        coverageBegin(id, engine, mowing)
         val transit = mutableListOf<List<Point>>()
         var line = mutableListOf<Point>()
         engine.edges.forEach { e ->
@@ -2515,7 +2637,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             line += e.b
         }
         if (line.size >= 2) transit += line
-        trackWrites.trySend(TrackWrite(id, meta = fr.luba.poc.history.TrackMeta(engine.map, engine.preview.cuttingPaths, transit)))
+        trackWrites.trySend(TrackWrite(id, meta = fr.luba.poc.history.TrackMeta(engine.map, engine.preview.cuttingPaths, transit, engine.preview.zoneIds)))
         trackSampler = fr.luba.poc.history.TrackSampler()
         trackPositionAt = 0L; trackFlushedAt = SystemClock.elapsedRealtime()
         trackJob = viewModelScope.launch { while (true) { trackSample(id); delay(200) } }
@@ -2541,25 +2663,84 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             trackPositionAt = at
             // Same point as the map trail: the rotation centre, 8 cm ahead of the published point.
             val center = DeadReckoning.rotationCenter(Point(t.x, t.y), t.heading)
+            // Measured speed between two received positions (positions about 1 s apart).
+            val previous = trackLastPoint
+            val speed = if (previous != null && at - trackLastAt in 200..5_000) previous.distance(center) * 1000.0 / (at - trackLastAt) else Double.NaN
+            trackLastAt = at; trackLastPoint = center; trackLastSpeed = speed
+            // Command written by this phone in the last 3 s; none while the gateway tracks the route.
+            val command = lastSetpoint?.takeIf { !remoteLegActive && SystemClock.elapsedRealtime() - lastSetpointAt <= 3_000 }
             val sample = fr.luba.poc.history.TrackSample(System.currentTimeMillis(), center.x, center.y, t.heading ?: Double.NaN,
-                trackPhase(t), t.battery ?: -1)
-            if (sampler.accept(sample)) trackBuffer += sample
+                trackPhase(t), t.battery ?: -1, command?.linear, command?.angular, speed, t.rtkStatus ?: -1, t.gpsStars ?: -1, trackLinkState())
+            if (sampler.accept(sample)) { trackBuffer += sample; coverageAdd(id, sample) }
         }
+        blackBox.frame(blackBoxFrame(t, lastSetpoint?.takeIf { !remoteLegActive && SystemClock.elapsedRealtime() - lastSetpointAt <= 3_000 }))
         if (trackBuffer.size >= 300 || (trackBuffer.isNotEmpty() && SystemClock.elapsedRealtime() - trackFlushedAt >= 10_000)) trackFlush(id)
     }
 
     private fun trackFlush(id: String, keep: List<String>? = null) {
         trackFlushedAt = SystemClock.elapsedRealtime()
         if (trackBuffer.isEmpty() && keep == null) return
-        trackWrites.trySend(TrackWrite(id, trackBuffer.toList(), keep = keep))
+        trackWrites.trySend(TrackWrite(id, trackBuffer.toList(), keep = keep, seal = keep != null))
         trackBuffer.clear()
     }
 
     /** End of the current track: last points written; [keep] limits the kept tracks to recent tasks. */
     private fun trackStop(id: String? = null, keep: List<String>? = null) {
         val job = trackJob ?: return
-        job.cancel(); trackJob = null; trackSampler = null
+        job.cancel(); trackJob = null; trackSampler = null; taskEvents = null
         if (id != null) trackFlush(id, keep) else trackBuffer.clear()
+        coverageEnd()
+    }
+
+    // Real coverage of the current mowing ([fr.luba.poc.history.CoverageMap]), fed by the track positions and shown on
+    // the map ("Real coverage" layer); the last one stays displayed once the task ends.
+    private var coverageBuilder: fr.luba.poc.history.CoverageBuilder? = null
+    private var coverageTask: String? = null
+    private var coveragePublishedAt = 0L
+
+    private fun coverageBegin(id: String, engine: MowingSimulation, mowing: Boolean) {
+        coverageBuilder = null; coverageTask = null
+        if (!mowing) return
+        val builder = fr.luba.poc.history.CoverageBuilder(engine.map, engine.preview.zoneIds)
+        coverageBuilder = builder; coverageTask = id
+        coveragePublish(force = true)
+        // Resume: the positions saved before the interruption are swept too.
+        viewModelScope.launch {
+            val saved = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { trackStore.read(id)?.samples }.getOrNull() }
+            if (saved.isNullOrEmpty() || coverageBuilder !== builder) return@launch
+            builder.addRun(saved)
+            coveragePublish(force = true)
+        }
+    }
+
+    private fun coverageAdd(id: String, sample: fr.luba.poc.history.TrackSample) {
+        if (coverageTask != id) return
+        coverageBuilder?.add(sample) ?: return
+        coveragePublish()
+    }
+
+    /** Snapshot for the map, at most every 2 s while the task runs. */
+    private fun coveragePublish(force: Boolean = false, running: Boolean = true) {
+        val builder = coverageBuilder ?: return
+        val id = coverageTask ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - coveragePublishedAt < 2_000) return
+        coveragePublishedAt = now
+        fr.luba.poc.history.RealCoverage.publish(builder.snapshot()?.let { fr.luba.poc.history.CoverageView(id, it, running) })
+    }
+
+    private fun coverageEnd() {
+        coveragePublish(force = true, running = false)
+        coverageBuilder = null; coverageTask = null
+    }
+
+    /** At launch: coverage of the latest mowing with a recorded track, until a new mowing starts. */
+    private suspend fun coverageRestore(history: List<fr.luba.poc.history.MowingRecord>) {
+        val last = history.filter { it.kind == fr.luba.poc.history.TaskKind.MOW && it.finished }.maxByOrNull { it.startedAt } ?: return
+        val coverage = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { trackStore.read(last.id)?.takeIf { it.meta != null }?.let { fr.luba.poc.history.CoverageMap.of(it) } }.getOrNull()
+        } ?: return
+        handler.post { fr.luba.poc.history.RealCoverage.restore(fr.luba.poc.history.CoverageView(last.id, coverage, running = false)) }
     }
 
     /** Wet grass in the log (mowing start and report): data to recalibrate [fr.luba.poc.weather.GrassWetness.WET_SLIDE_GAIN]. */
@@ -2595,7 +2776,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         state.value.mowingRecord?.let { r -> update { it.copy(mowingRecord = r.copy(doneMeters = r.cuttingMeters)) } }
     }
 
-    private fun historyObstacle() {
+    private fun historyObstacle(reason: String) {
+        taskEvent(fr.luba.poc.history.TaskEventType.OBSTACLE, reason)
         state.value.mowingRecord?.let { r -> update { it.copy(mowingRecord = r.copy(obstacles = r.obstacles + 1)) } }
     }
 
@@ -2613,6 +2795,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         // Report opened at the end of a mowing only; surveys and routes remain available in the history.
         update { it.copy(mowingRecord = null, mowingReport = if (mowing) final else it.mowingReport) }
         historyPersist(final)
+        taskEvent(fr.luba.poc.history.TaskEventType.END, final.reason?.let { fr.luba.poc.history.reasonText(it) } ?: final.outcome.label,
+            mapOf("outcome" to final.outcome.name, "progress" to final.progress))
         trackStop(final.id, fr.luba.poc.history.TaskTrackStore.kept(state.value.mowingHistory))
         val comparison = fr.luba.poc.history.MowingComparison.of(final)
         event("mowing_report", tr("${final.kind.label} report: ${final.outcome.label} · ${comparison.durationVerdict} · ${comparison.rechargeVerdict}", "Rapport ${final.kind.label.lowercase()} : ${final.outcome.label} · ${comparison.durationVerdict} · ${comparison.rechargeVerdict}"),
@@ -2702,6 +2886,11 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val recharge = RouteRecharge(engine.config.returnPercent.toInt(), engine.config.resumePercent.toInt())
             // Watched return threshold: the low threshold, or the [FinishPolicy] floor while finishing a mowing below the low threshold.
             var lowWatch = recharge.low
+            // Never Die Outside ([ReturnReserve]): far from the base, the return cost plus the reserve raises the watched threshold.
+            val returnReserve = fr.luba.poc.simulation.ReturnReserve.sanitize(Math.round(engine.config.returnReservePercent).toInt(), recharge.low)
+            var returnDetour = fr.luba.poc.simulation.ReturnReserve.DEFAULT_DETOUR
+            var reserveWatch = recharge.low
+            var reserveWatchAt = 0L
             check(engine.config.baseEntryHeadingDegrees != null) { tr("Real base axis required for docking", "Axe réel de la base requis pour l'accostage") }
             val t = state.value.telemetry
             val initiallyDocked = t.chargeState in setOf(1,2)
@@ -2829,12 +3018,48 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     routeContact = null
                     /** Follows path[from until to) with a single blade state, without STOP at aligned vertices.
                      * Returns the index reached: `to` if the range is finished, otherwise the edge interrupted by the battery. */
+                    /** Battery points needed to return from the robot's position ([FinishPolicy]); null without a mowing measurement. */
+                    fun returnNeed(): Double? {
+                        if (intent!=RouteIntent.FOLLOW) return null
+                        val record=state.value.mowingRecord ?: return null
+                        val t=state.value.telemetry
+                        val here=Point(t.x ?: return null, t.y ?: return null)
+                        val meters=fr.luba.poc.simulation.ReturnReserve.returnMeters(here.distance(engine.baseApproach), returnDetour, engine.base.distance(engine.baseApproach))
+                        val (autonomy,factor)=fr.luba.poc.history.MowingCalibration.finishModel(record)
+                        return runCatching { FinishPolicy.neededPercent(FinishPolicy.restSeconds(meters,record.speedMps,factor),autonomy) }.getOrNull()
+                    }
+                    /** Threshold watched now: the low threshold raised by the return reserve (refreshed every 5 s), or the finish floor. */
+                    fun batteryWatch(): Int {
+                        if (lowWatch!=recharge.low) return lowWatch
+                        val now=SystemClock.elapsedRealtime()
+                        if (now-reserveWatchAt>=5_000) {
+                            reserveWatchAt=now
+                            val previous=reserveWatch
+                            reserveWatch=returnNeed()?.let { fr.luba.poc.simulation.ReturnReserve.threshold(recharge.low,recharge.high,it,returnReserve) } ?: recharge.low
+                            if (reserveWatch!=previous) update { it.copy(robotRoute=it.robotRoute.copy(lowWatch=reserveWatch.takeIf { w -> w>recharge.low })) }
+                        }
+                        return maxOf(lowWatch,reserveWatch)
+                    }
+                    /** Detour of the real return path from here (off the control loop, at the start of each range). */
+                    suspend fun calibrateReturn() {
+                        if (intent!=RouteIntent.FOLLOW || lowWatch!=recharge.low) return
+                        val t=state.value.telemetry
+                        val here=Point(t.x ?: return, t.y ?: return); val heading=t.heading ?: return
+                        val straight=here.distance(engine.baseApproach)
+                        if (straight<2.0) return
+                        val routes=missionRoutes
+                        val path=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            runCatching { routes.between(here,engine.baseApproach,heading,(engine.dockEntryHeading+180.0)%360.0) }.getOrNull() } ?: return
+                        returnDetour=fr.luba.poc.simulation.ReturnReserve.detour(path.zipWithNext().sumOf { (a,b) -> a.distance(b) },straight)
+                        reserveWatchAt=0L
+                    }
                     suspend fun followPath(path: List<SimEdge>, from: Int, to: Int, shown: Boolean, watchBattery: Boolean = false, departure: Boolean = false,
                                            finalArrivalM: Double = if (path[to-1].b==engine.baseApproach) 0.05 else RangeArrival.TARGET_M): Int {
                         if (watchBattery) {
+                            calibrateReturn()
                             val live=state.value.telemetry
                             NavSafety.tickFailure(SystemClock.elapsedRealtime()-devicePrevious,live.battery,live.sensorStatus,true,RouteRecharge.RESERVE_PERCENT)?.let { error(it) }
-                            if (requireNotNull(live.battery) <= lowWatch || workWindowEnding) return from
+                            if (requireNotNull(live.battery) <= batteryWatch() || workWindowEnding) return from
                         }
                         val blades = cutting && path[from].bladesOn
                         check((from until to).all { (cutting && path[it].bladesOn) == blades }) { tr("Inconsistent blade range", "Plage de lames incohérente") }
@@ -2931,7 +3156,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                                     delay(200); continue
                                 }
                             }
-                            if (watchBattery && requireNotNull(live.battery) <= lowWatch) {
+                            if (watchBattery && requireNotNull(live.battery) <= batteryWatch()) {
                                 purgeQueuedCommands(); send(commands.stop(), "ROUTE_LOW_BATTERY_STOP")
                                 return follower.index
                             }
@@ -3073,7 +3298,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                                 val guardId = legs.ensureGuard(missionRoutes.physicalSurface)
                                 val physicalId = (routePhysicalRoutes ?: missionRoutes).let { if (it === missionRoutes) guardId else legs.ensureGuard(it.physicalSurface) }
                                 val spec = fr.luba.poc.autonomy.LegSpec(legs.nextLegId(), routeId, from, cutting, shown, watchBattery, departure, lastArrivalM,
-                                    heightMm, state.value.trajectorySpeedPercent.coerceIn(10, 100), lowWatch, engine.baseApproach, guardId, physicalId,
+                                    heightMm, state.value.trajectorySpeedPercent.coerceIn(10, 100), if (watchBattery) { calibrateReturn(); batteryWatch() } else lowWatch, engine.baseApproach, guardId, physicalId,
                                     savedCalibration(), knownObstacles(), sampling = shown && surveyContours.isNotEmpty(), baseZone = routeBaseZone,
                                     slideField = slideFor(path)).let { full ->
                                     // Slip map too large: sent without it rather than tracked from here.
@@ -3392,7 +3617,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                         routeContact = null
                         check(bypassCount < ObstacleBypass.MAX_BYPASSES) { tr("${encounter.message}: ${ObstacleBypass.MAX_BYPASSES} bypasses already done, stop maintained", "${encounter.message} : ${ObstacleBypass.MAX_BYPASSES} contournements déjà effectués, arrêt maintenu") }
                         bypassCount++
-                        historyObstacle()
+                        historyObstacle(encounter.message ?: "")
                         routeStatus(RoutePhase.FOLLOWING,tr("${encounter.message} · stop, blades OFF", "${encounter.message} · arrêt, lames OFF"))
                         // Collision lock published with the contact (10-15): without this tolerance, the stop confirmation
                         // failed with "Protection robot active" before the back-off, which alone clears the lock.
@@ -3613,6 +3838,11 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             }
                             // Low threshold: finish without recharging if the remainder allows it ([FinishPolicy]); cutting resumes at once at the same point.
                             val battery=state.value.telemetry.battery
+                            // Return reserve: stopped above the low threshold because the return cost plus the reserve was reached.
+                            val reserveReturn=lowWatch==recharge.low && battery!=null && battery>recharge.low
+                            val trigger=if (reserveReturn) tr("Return reserve ($reserveWatch %)", "Réserve de retour ($reserveWatch %)") else tr("Low threshold ${recharge.low} %", "Seuil bas ${recharge.low} %")
+                            if (reserveReturn) event("route_return_reserve",tr("Battery near the return cost plus the reserve: return decision above the low threshold", "Batterie proche du coût du retour plus la réserve : décision de retour au-dessus du seuil bas"),
+                                mapOf("battery" to battery,"watchPercent" to reserveWatch,"reservePercent" to returnReserve,"lowPercent" to recharge.low,"detour" to returnDetour,"edge" to index))
                             val need=if (lowWatch==recharge.low) restNeed(index,0.0) else null
                             if (battery!=null && need!=null && FinishPolicy.finishWithoutRecharge(battery.toDouble(),need)) {
                                 lowWatch=FinishPolicy.ARRIVAL_FLOOR_PERCENT
@@ -3630,12 +3860,12 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             val live=freshState()
                             val saved=Point(requireNotNull(live.x),requireNotNull(live.y))
                             val savedHeading=requireNotNull(live.heading)
-                            routeStatus(RoutePhase.RETURNING,tr("Low threshold ${recharge.low} % · BLE return · blades OFF", "Seuil bas ${recharge.low} % · retour BLE · lames OFF"))
+                            routeStatus(RoutePhase.RETURNING,tr("$trigger · BLE return · blades OFF", "$trigger · retour BLE · lames OFF"))
                             rechargeCycle=true
                             update { it.copy(robotRoute=it.robotRoute.copy(rechargeCycles=it.robotRoute.rechargeCycles+1)) }
                             routeCheckpoint?.let { checkpoint -> routeCheckpoint = checkpoint.copy(rechargeCycles = checkpoint.rechargeCycles + 1).also { persistCheckpoint(it, force = true) } }
                             val paths=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { RobotRoute.rechargePaths(engine,saved,savedHeading,missionRoutes) }
-                            if (paths.returning.isNotEmpty()) followStation(paths.returning,RoutePhase.RETURNING,tr("Low threshold ${recharge.low} % · BLE return · blades OFF", "Seuil bas ${recharge.low} % · retour BLE · lames OFF"))
+                            if (paths.returning.isNotEmpty()) followStation(paths.returning,RoutePhase.RETURNING,tr("$trigger · BLE return · blades OFF", "$trigger · retour BLE · lames OFF"))
                             dock()
                             // Remainder from the base: exit, link to the interrupted point, remaining mowing and final return.
                             chargeAndDepart(restNeed=restNeed(index,paths.resuming.sumOf { it.meters }+engine.base.distance(engine.baseApproach)))
@@ -3718,6 +3948,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             }
             return
         }
+        taskEvent(fr.luba.poc.history.TaskEventType.STOP, reason, mapOf("intentional" to intentional))
         if (intentional) intentionalAlertStop()
         // Stop on a terrain difficulty (blockage, wheel slip, lift, deviation…): recorded on the map.
         if (!intentional) DifficultyClassifier.fromReason(reason)?.let { recordDifficulty(it, reason) }
@@ -5503,7 +5734,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val failure = NavSafety.startFailure(
                 state.value.selected?.name,
                 if (devicePrevious == 0L) null else SystemClock.elapsedRealtime() - devicePrevious,
-                t.battery, if (charging && t.robotState in setOf(11,15,39)) 11 else t.robotState, t.sensorStatus, t.selfCheck,
+                // Recorded outline (sync with the Mammotion app): the robot is in its recording state, not READY.
+                t.battery, if ((charging && t.robotState in setOf(11,15,39)) || (config.drawState != null && t.robotState == config.drawState)) 11 else t.robotState,
+                t.sensorStatus, t.selfCheck,
                 state.value.campaign.running, state.value.bladeTestActive, state.value.mapLoading,
                 config.heightMm, config.batteryFloor, ignoreOffMapLatch = config.pointDestination && !config.tonte && offMapLatchIgnored(t),
                 heights = state.value.cutHeights)
@@ -5644,12 +5877,15 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             // Robot on its base: slow straight exit to the link point before anything else (no pivot near the station).
             plan.departure?.let { exit -> navDockExit(config, exit); plan = plan.copy(departure = null); navMapPlan = plan }
             // Manual mode (state 20) carries the height: in the READY state the setpoint alone is ignored.
-            enterNavBumperMode(config)
+            // Recorded outline: the manual mode would end the recording; the recording state is checked instead.
+            if (config.tracing) confirmDrawState(config) else enterNavBumperMode(config)
             if (config.tonte) navSetHeight(config.heightMm)
             while (index < plan.points.size) {
                 // Blades running: no automatic bypass, the test stops and cuts the blades.
                 if (config.tonte && localIncidentPending) throw NavAbort(tr("Obstacle or contact during the cutting test: stopped, blades cut", "Obstacle ou contact pendant l'essai de coupe : arrêt, lames coupées"))
                 recovery?.let { reason ->
+                    // Recorded outline: a new path would be drawn into the element; stop instead.
+                    if (config.tracing) throw NavAbort(tr("$reason: outline left, recording abandoned", "$reason : contour quitté, enregistrement abandonné"))
                     // Recovery: STOP, fresh still position, new path from the actual position.
                     recovery = null
                     if (++recoveries > MAX_NAV_RECOVERIES) throw NavAbort(tr("$reason; $MAX_NAV_RECOVERIES recoveries already attempted", "$reason ; $MAX_NAV_RECOVERIES rattrapages déjà tentés"))
@@ -5681,6 +5917,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 }
                 if (localIncidentPending) {
                     localIncidentPending = false
+                    if (config.tracing) throw NavAbort(tr("Obstacle or contact on the outline: stopped, no bypass while recording", "Obstacle ou contact sur le contour : arrêt, pas de contournement pendant un enregistrement"))
                     if (++repairs > 3) throw NavAbort(tr("Three repairs: stop maintained, correct the map", "Trois réparations : arrêt maintenu, corriger la carte"))
                     // New telemetry required after STOP: two still positions published after it takes effect
                     // (1 Hz, delay ≈ 0.6 s); no resume on the old report.
@@ -5746,7 +5983,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 plan.departure?.let { exit -> navDockExit(config, exit); plan = plan.copy(departure = null); navMapPlan = plan; index = 1 }
                 // Gateway mounted on the robot: same tracking as mowing (LegRunner, over Bluetooth on the robot), without
                 // depending on Wi-Fi for each setpoint. Contact, added obstacle and deviation are still handled here as before.
-                if (!config.tonte && plan.physicalGuard && plan.routes != null && autonomousLegsAvailable()) {
+                // Recorded outline: tracked from here (the gateway tracking enters the manual mode).
+                if (!config.tonte && !config.tracing && plan.physicalGuard && plan.routes != null && autonomousLegsAvailable()) {
                     val outcome = try {
                         followNavRemote(plan, index) { target ->
                             // Points passed: result recorded as with tracking from here.
@@ -5851,8 +6089,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     val speedPercent = state.value.trajectorySpeedPercent
                     // Heading not confirmed by motion: slow advance until the first direction measurement.
                     // After a pivot: slow advance until the position that measures the heading reached.
-                    val linearLimit = if (!headingTrusted) minOf(PathFollower.linearFor(speedPercent), DeadReckoning.UNCONFIRMED_LINEAR)
-                        else reckoning.postPivotLinear(PathFollower.linearFor(speedPercent))
+                    // Recorded outline: speed capped by the drive (closer tracking, evenly spaced recorded points).
+                    val chosenLinear = PathFollower.linearFor(speedPercent).let { if (config.tracing) minOf(it, config.linearSpeed) else it }
+                    val linearLimit = if (!headingTrusted) minOf(chosenLinear, DeadReckoning.UNCONFIRMED_LINEAR)
+                        else reckoning.postPivotLinear(chosenLinear)
                     val command = follower.command(predicted.position,predicted.headingDegrees,linearLimit,
                         minOf(config.angularSpeed,Commands.MAX_ANGULAR_SPEED),reckoning.degreesPerUnit,reckoning.metersPerUnit,
                         RangeArrival.APPROACH_MIN_LINEAR,follower.deviation(position),reckoning.rotationCalibrated)
@@ -5996,6 +6236,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     /** Bumper contact: error history polled, manual mode (blades running or not) kept alive. */
     private fun navKeepAlive(blades: Boolean, config: NavConfig) {
         send(commands.errorQuery(), "NAV_ERROR_QUERY", periodic = true)
+        // Recorded outline: no manual mode keep-alive, it would end the recording.
+        if (config.tracing) return
         if (blades) send(commands.manualBlades(true,config.heightMm), "NAV_BLADES_KEEPALIVE", periodic = true)
         else send(commands.manualMow(1,0,config.heightMm), "NAV_BUMPER_KEEPALIVE_OFF", periodic = true)
     }
@@ -6046,6 +6288,23 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         event("nav_bumper_mode", tr("Manual mode with blades OFF confirmed: bumper contact monitored", "Mode manuel lames OFF confirmé : contact bumper surveillé"), mapOf("testId" to navTestId))
     }
 
+    /**
+     * Recorded outline: the robot must be in the recording state of [NavConfig.drawState] (it was put there by
+     * [MapSyncLink.startRecording]); bumper contacts stay reported through the error history.
+     */
+    private suspend fun confirmDrawState(config: NavConfig) {
+        purgeQueuedCommands(); send(commands.stop(), "NAV_TRACE_STOP")
+        val deadline = SystemClock.elapsedRealtime() + 3000
+        while (state.value.telemetry.robotState != config.drawState) {
+            if (!state.value.ready || closing || !log.healthy) throw NavAbort(tr("BLE / log unavailable", "BLE / journal indisponible"))
+            if (SystemClock.elapsedRealtime() >= deadline) throw NavAbort(tr("Robot no longer recording (state ${state.value.telemetry.robotState}, ${config.drawState} expected)",
+                "Robot plus en enregistrement (état ${state.value.telemetry.robotState}, ${config.drawState} attendu)"))
+            delay(200)
+        }
+        event("nav_trace_mode", tr("Recording state confirmed: outline driven without manual mode", "État d'enregistrement confirmé : contour parcouru sans mode manuel"),
+            mapOf("testId" to navTestId, "robotState" to config.drawState))
+    }
+
     /** Continuous check of the drive; any anomaly throws NavAbort and stops all movement. */
     private fun navTick(config: NavConfig, zone: List<Point>?) {
         if (!log.healthy || !state.value.ready || closing) throw NavAbort(tr("BLE / log unavailable", "BLE / journal indisponible"))
@@ -6053,7 +6312,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         NavSafety.automaticPositionFailure(if (positionPrevious == 0L) null else SystemClock.elapsedRealtime() - positionPrevious, t.x, t.y)?.let { throw NavAbort(it) }
         if (t.x != null && t.y != null && state.value.robotMap.shapes.any { it.kind == ShapeKind.NO_GO && Geometry.inside(Point(t.x, t.y), it.points) }) throw NavAbort(tr("Entered a no-go zone", "Entrée dans une zone interdite"))
         // Move to a point beyond the mapped zones: 25 published there is not a contact ([offMapLatchIgnored]).
-        if (t.robotState !in listOf(11, 20) || !(fr.luba.poc.protocol.SelfCheck.nominal(t.selfCheck) ||
+        if (t.robotState !in (config.drawState?.let { listOf(it) } ?: listOf(11, 20)) || !(fr.luba.poc.protocol.SelfCheck.nominal(t.selfCheck) ||
                 (config.pointDestination && !config.tonte && offMapLatchIgnored(t)))) throw NavAbort(tr("Robot state / protection changed", "État / protection robot changé"))
         val failure = NavSafety.tickFailure(
             if (devicePrevious == 0L) null else SystemClock.elapsedRealtime() - devicePrevious,
@@ -6328,6 +6587,237 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (state.value.ready && !closing) send(reportsCommand(false, periodMs = reportPeriodMs()), "DRIVEN_REPORTS")
     }
 
+    // ---------------------------------------------------------------- sync with the Mammotion map
+
+    /**
+     * Sync of the local corrections into the Mammotion map held by the robot ([fr.luba.poc.mapsync]): the robot drives
+     * each outline on its own, blades stopped, while it records it. Page: Map sheet → Sync with the Mammotion app.
+     */
+    val mapSync: fr.luba.poc.mapsync.MapSyncRunner by lazy { fr.luba.poc.mapsync.MapSyncRunner(MapSyncLink(), viewModelScope) }
+
+    /** Current differences between the robot map and the corrected map, traces checked (computed off the main thread). */
+    suspend fun mapSyncDifferences(): List<fr.luba.poc.mapsync.SyncItem> = MapSyncLink().differences()
+
+    /** Reason why the sync cannot start now, null if it can. */
+    fun mapSyncRefusal(): String? = MapSyncLink().refusal()
+
+    /** Last reply of the robot to a map writing command (logged, shown by the sync page). */
+    private fun mapSyncReply(nav: fr.luba.poc.proto.MctrlNavProto.MctlNav) {
+        if (!mapSync.state.value.running) return
+        if (nav.hasToappGetCommondataAck() && mapTransfer == null) {
+            val ack = nav.toappGetCommondataAck
+            if (ack.action in setOf(0, 1, 6, 7)) event("map_sync_reply", tr("Robot reply to a map command", "Réponse du robot à une commande de carte"),
+                mapOf("action" to ack.action, "type" to ack.type, "result" to ack.result, "hash" to ack.hash, "robotState" to state.value.telemetry.robotState))
+        }
+        if (nav.hasToappBstate()) event("map_sync_border_state", tr("Recording state reported by the robot", "État d'enregistrement signalé par le robot"),
+            mapOf("bdstate" to nav.toappBstate.bdstate, "robotState" to state.value.telemetry.robotState))
+    }
+
+    private inner class MapSyncLink : fr.luba.poc.mapsync.MapSyncPort {
+        override fun refusal(): String? {
+            val ui = state.value
+            return when {
+                !fr.luba.poc.protocol.ModelSupport.motionValidated(ui.selected?.name) -> tr("Writing to the robot map is reserved for a validated LUBA 2 (Luba-VS)",
+                    "L'écriture dans la carte du robot est réservée à un LUBA 2 validé (Luba-VS)")
+                gatt == null || !ui.ready || closing -> tr("Connect the robot (Bluetooth or gateway) first", "Connectez d'abord le robot (Bluetooth ou passerelle)")
+                !ui.mammotionMap.complete || ui.mammotionMap.source.contains("DÉMONSTRATION", true) -> tr("Read the robot map first", "Lisez d'abord la carte du robot")
+                ui.mapLoading -> tr("Wait for the end of the map reading", "Attendez la fin de la lecture de la carte")
+                ui.robotRoute.running || ui.mowing.active || ui.navTest.running || navJob != null || ui.manualActive || ui.driven != null ||
+                    ui.borderFrontal.running || ui.teach.running || ui.campaign.running || ui.bladeTestActive -> tr("Stop the current activity of the robot first", "Arrêtez d'abord l'activité en cours du robot")
+                (ui.telemetry.battery ?: 0) <= SYNC_BATTERY_FLOOR -> tr("Battery unknown or ≤ $SYNC_BATTERY_FLOOR %: charge the robot first", "Batterie inconnue ou ≤ $SYNC_BATTERY_FLOOR % : rechargez d'abord le robot")
+                else -> null
+            }
+        }
+
+        override fun robotPosition(): Point? = state.value.telemetry.let { t ->
+            val x = t.x; val y = t.y
+            if (x != null && y != null && x.isFinite() && y.isFinite()) Point(x, y) else null
+        }
+
+        private fun base(map: RobotMap): fr.luba.poc.simulation.MapBase? = runCatching { BaseStore(getApplication(), map).resolve(map) }.getOrNull()
+
+        private fun station(map: RobotMap): Point? = base(map)?.point ?: map.station?.point
+
+        /** Station kept out of the outlines: its safety zone (the moves neither enter nor start there) plus a margin. */
+        private fun stationClearance(map: RobotMap): Double = base(map)?.takeIf { it.entryHeadingDegrees != null }?.let {
+            maxOf(fr.luba.poc.mapsync.MapSyncPlanner.STATION_CLEARANCE_M, TrajectoryPlanner.baseSafetyRadius(it.approachDistanceM) + fr.luba.poc.mapsync.MapSyncPlanner.STATION_MARGIN_M)
+        } ?: fr.luba.poc.mapsync.MapSyncPlanner.STATION_CLEARANCE_M
+
+        private fun accesses(map: RobotMap): List<List<Point>> = runCatching { BaseStore(getApplication(), map).accesses() }.getOrDefault(emptyList())
+
+        private fun check(map: RobotMap, obstacles: List<fr.luba.poc.obstacles.LocalObstacle>, accesses: List<List<Point>>): (List<Point>) -> String? = { trace ->
+            try { PointPlanner.tracePlan(map, trace, obstacles, accesses); null }
+            catch (e: IllegalArgumentException) { e.message ?: e.javaClass.simpleName }
+            catch (e: IllegalStateException) { e.message ?: e.javaClass.simpleName }
+        }
+
+        override suspend fun differences(): List<fr.luba.poc.mapsync.SyncItem> {
+            val ui = state.value
+            val station = station(ui.robotMap)
+            val clearance = stationClearance(ui.robotMap)
+            val accesses = accesses(ui.robotMap)
+            return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                fr.luba.poc.mapsync.MapSyncPlanner.differences(ui.mammotionMap, ui.correctedMap, ui.mapCorrections, station = station,
+                    check = check(ui.robotMap, ui.obstacles, accesses), stationClearanceM = clearance)
+            }
+        }
+
+        override fun recreate(shape: MapShape): fr.luba.poc.mapsync.SyncItem? {
+            val ui = state.value
+            return fr.luba.poc.mapsync.MapSyncPlanner.recreate(shape, station = station(ui.robotMap), check = check(ui.robotMap, ui.obstacles, accesses(ui.robotMap)),
+                stationClearanceM = stationClearance(ui.robotMap))
+        }
+
+        private fun config(drawState: Int?) = NavConfig(pointDestination = true, linearSpeed = PathFollower.linearFor(state.value.trajectorySpeedPercent)
+            .let { if (drawState != null) minOf(it, fr.luba.poc.mapsync.MapSyncPlanner.TRACE_LINEAR) else it },
+            angularSpeed = PathFollower.angularLimit(state.value.trajectorySpeedPercent), automatic = true, maxDurationMs = 600_000, maxRadiusM = 200.0,
+            batteryFloor = SYNC_BATTERY_FLOOR - 5, drawState = drawState)
+
+        /**
+         * Starts a drive with [start] and waits for its end: null if it reached its end, otherwise its refusal or stop
+         * reason (a refusal without its own drive status is read from the general status line).
+         */
+        /** The last [drive] really started (false: refused before any movement). */
+        private var started = false
+
+        private suspend fun drive(progress: ((Double) -> Unit)?, start: () -> Unit): String? {
+            // A move only starts from READY (or the recording state for a recorded outline): after the previous drive the
+            // robot leaves its manual mode within about a second.
+            // Robot on its base: charging states accepted like a move to a point (it leaves the station in a straight line).
+            val stateOk: (Int?) -> Boolean = { it == 11 || it in NavConfig.DRAW_STATES ||
+                (state.value.telemetry.chargeState in setOf(1, 2) && it in setOf(15, 39)) }
+            if (!waitState(6000, stateOk)) return tr("robot not ready (state ${state.value.telemetry.robotState})", "robot non prêt (état ${state.value.telemetry.robotState})")
+            val navBefore = state.value.navTest.status
+            val statusBefore = state.value.status
+            start()
+            started = state.value.navTest.running
+            if (!started) return when {
+                state.value.navTest.status != navBefore -> state.value.navTest.status
+                state.value.status != statusBefore -> state.value.status
+                else -> tr("drive refused", "déplacement refusé")
+            }
+            while (state.value.navTest.running || navJob != null) {
+                val nav = state.value.navTest
+                if (progress != null && nav.segmentCount > 0) progress(nav.segmentIndex.toDouble() / nav.segmentCount)
+                delay(250)
+            }
+            val nav = state.value.navTest
+            return if (nav.outcome == "PASS") null else nav.status
+        }
+
+        /** Waits until [ok] accepts the robot state; false after [timeoutMs] or if the link drops. */
+        private suspend fun waitState(timeoutMs: Long, ok: (Int?) -> Boolean): Boolean {
+            val deadline = SystemClock.elapsedRealtime() + timeoutMs
+            while (!ok(state.value.telemetry.robotState)) {
+                if (!state.value.ready || closing || SystemClock.elapsedRealtime() >= deadline) return false
+                delay(200)
+            }
+            return true
+        }
+
+        override suspend fun driveTo(targets: List<Point>): String? {
+            var refusal: String? = null
+            for (target in targets) {
+                val reason = drive(null) { startMapNavigation(config(null), target) } ?: return null
+                // Interrupted after it started: no other attempt. Refused before moving: next point.
+                if (started) return reason
+                event("map_sync_approach_refused", reason, mapOf("x" to target.x, "y" to target.y))
+                refusal = reason
+            }
+            return refusal ?: tr("no point to drive to", "aucun point à rejoindre")
+        }
+
+        override suspend fun startRecording(kind: fr.luba.poc.mapsync.SyncKind): String? {
+            // After a move the manual mode is left (blades OFF): wait for READY, insist once if it lingers.
+            if (!waitState(3000) { it == 11 } && state.value.telemetry.robotState == 20 && state.value.ready && !closing)
+                send(commands.manualBlades(false, navConfig.heightMm), "MAP_SYNC_EXIT_MANUAL")
+            if (!waitState(4000) { it == 11 }) return tr("robot not ready (state ${state.value.telemetry.robotState}, 11 expected)",
+                "robot non prêt (état ${state.value.telemetry.robotState}, 11 attendu)")
+            send(commands.startMapRecording(kind.type), "MAP_SYNC_RECORD_START type=${kind.type}")
+            event("map_sync_record_start", tr("Recording requested from the robot", "Enregistrement demandé au robot"), mapOf("type" to kind.type, "expectedState" to kind.drawState))
+            if (!waitState(10_000) { it == kind.drawState }) return tr("robot state ${state.value.telemetry.robotState} after 10 s, ${kind.drawState} expected",
+                "état du robot ${state.value.telemetry.robotState} après 10 s, ${kind.drawState} attendu")
+            return null
+        }
+
+        override fun firstDrivable(paths: List<List<Point>>): Int? {
+            val ui = state.value
+            val routes = try { PointPlanner.traceRoutes(ui.robotMap, ui.obstacles, accesses(ui.robotMap)) }
+                catch (e: IllegalArgumentException) { event("map_sync_join_refused", e.message ?: "routes"); return null }
+            return paths.indexOfFirst { path -> runCatching { routes.requirePath(path) }.isSuccess }.takeIf { it >= 0 }
+        }
+
+        override suspend fun driveExact(path: List<Point>): String? {
+            val ui = state.value
+            val plan = try { PointPlanner.tracePlan(ui.robotMap, path, ui.obstacles, accesses(ui.robotMap)) }
+                catch (e: IllegalArgumentException) { return e.message ?: e.javaClass.simpleName }
+                catch (e: IllegalStateException) { return e.message ?: e.javaClass.simpleName }
+            return drive(null) { startMapNavigation(config(null), preset = plan) }
+        }
+
+        override suspend fun driveTrace(trace: List<Point>, kind: fr.luba.poc.mapsync.SyncKind, progress: (Double) -> Unit): String? {
+            val here = robotPosition() ?: return tr("robot position unknown", "position du robot inconnue")
+            val ui = state.value
+            // Joined beforehand: the robot stands on the start (arrival tolerance); a short link is only added beyond it.
+            val path = if (here.distance(trace.first()) > 0.3) listOf(here) + trace else trace
+            val plan = try { PointPlanner.tracePlan(ui.robotMap, path, ui.obstacles, accesses(ui.robotMap)) }
+                catch (e: IllegalArgumentException) { return e.message ?: e.javaClass.simpleName }
+                catch (e: IllegalStateException) { return e.message ?: e.javaClass.simpleName }
+            return drive(progress) { startMapNavigation(config(kind.drawState), preset = plan) }
+        }
+
+        override suspend fun endRecording(kind: fr.luba.poc.mapsync.SyncKind): String? {
+            send(commands.endMapRecording(kind.type), "MAP_SYNC_RECORD_END type=${kind.type}")
+            event("map_sync_record_end", tr("End of recording requested from the robot", "Fin d'enregistrement demandée au robot"), mapOf("type" to kind.type))
+            return if (waitState(20_000) { it != kind.drawState }) null
+                else tr("robot still recording after 20 s (state ${state.value.telemetry.robotState})", "robot toujours en enregistrement après 20 s (état ${state.value.telemetry.robotState})")
+        }
+
+        override suspend fun saveRecording(): String? {
+            if (!state.value.ready || closing) return tr("robot disconnected", "robot déconnecté")
+            send(commands.saveMapTask(), "MAP_SYNC_SAVE")
+            event("map_sync_save_sent", tr("Explicit save of the mapping requested", "Sauvegarde explicite de la cartographie demandée"))
+            delay(2000)
+            return null
+        }
+
+        override fun cancelRecording() {
+            if (!state.value.ready || closing) return
+            runCatching { send(commands.cancelMapRecording(), "MAP_SYNC_RECORD_CANCEL") }
+            event("map_sync_record_cancel", tr("Recording abandoned in the robot", "Enregistrement abandonné dans le robot"))
+        }
+
+        override suspend fun deleteElement(kind: fr.luba.poc.mapsync.SyncKind, hash: Long): String? {
+            if (!state.value.ready || closing) return tr("robot disconnected", "robot déconnecté")
+            send(commands.deleteMapElement(kind.type, hash), "MAP_SYNC_DELETE type=${kind.type}")
+            event("map_sync_delete", tr("Deletion of a map element requested", "Suppression d'un élément de carte demandée"), mapOf("type" to kind.type, "hash" to hash))
+            delay(2000)
+            return null
+        }
+
+        override suspend fun readMap(): RobotMap? {
+            delay(1500)
+            mapReadRefusal()?.let { event("map_sync_read_refused", it); return null }
+            fetchMap()
+            val deadline = SystemClock.elapsedRealtime() + 75_000
+            delay(300)
+            while (state.value.mapLoading && SystemClock.elapsedRealtime() < deadline) delay(300)
+            val map = state.value.mammotionMap
+            return map.takeIf { !state.value.mapLoading && it.complete && !it.source.contains("DÉMONSTRATION", true) }
+        }
+
+        override fun corrections(): List<MapCorrection> = state.value.mapCorrections
+
+        override fun saveCorrections(corrections: List<MapCorrection>): Boolean = saveMapCorrections(corrections)
+
+        override fun stopMotion(reason: String) {
+            if (state.value.navTest.running || navJob != null) stopNavTest(reason, userInitiated = true)
+            else if (state.value.ready && !closing) { purgeQueuedCommands(); send(commands.stop(), "MAP_SYNC_STOP") }
+        }
+
+        override fun log(kind: String, text: String, fields: Map<String, Any?>) = event(kind, text, fields)
+    }
+
     /** Saves the recorded shape as a local correction and ends the recording. */
     fun saveDrivenRecording(correction: MapCorrection): Boolean {
         val trace = state.value.driven ?: return false
@@ -6351,12 +6841,30 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             "radiusM" to obstacle.radiusM, "marginM" to obstacle.marginM, "incidents" to obstacle.incidents.size))
     }
 
+    /**
+     * Deletes a saved obstacle and dismisses the bumper contacts it hid ([fr.luba.poc.difficulty.PresumedObstacles.hiddenContacts]):
+     * otherwise the same obstacle came back at once as a presumed obstacle, still avoided and impossible to delete.
+     */
     fun deleteObstacle(id: String) {
+        val removed = state.value.obstacles.firstOrNull { it.id == id }
         val kept = state.value.obstacles.filter { it.id != id }
+        val events = state.value.difficulties.events
+        val hidden = removed?.let { fr.luba.poc.difficulty.PresumedObstacles.hiddenContacts(events, it, kept, System.currentTimeMillis()) }.orEmpty()
+            .map { it.id }.toSet()
         obstacleStore.save(kept)
         update { it.copy(obstacles = kept) }
-        publishDifficulties(state.value.difficulties.events, persist = false)
-        event("obstacle_deleted", tr("Local obstacle deleted", "Obstacle local supprimé"), mapOf("id" to id))
+        if (hidden.isEmpty()) publishDifficulties(events, persist = false)
+        else publishDifficulties(events.map { if (it.id in hidden) it.copy(dismissed = true) else it }, persist = true)
+        event("obstacle_deleted", tr("Local obstacle deleted", "Obstacle local supprimé"), mapOf("id" to id, "contactsDismissed" to hidden.size))
+    }
+
+    /** Presumed obstacle dismissed (object removed, false contacts): all its contacts are dismissed at once. */
+    fun dismissPresumedObstacle(id: String) {
+        val events = state.value.difficulties.events
+        val contacts = fr.luba.poc.difficulty.PresumedObstacles.contactsOf(events, id, System.currentTimeMillis()).map { it.id }.toSet()
+        if (contacts.isEmpty()) return
+        publishDifficulties(events.map { if (it.id in contacts) it.copy(dismissed = true) else it }, persist = true)
+        event("presumed_obstacle_dismissed", tr("Presumed obstacle dismissed", "Obstacle présumé écarté"), mapOf("id" to id, "contacts" to contacts.size))
     }
 
     fun addObstacleIncident(id: String, incident: ObstacleIncident) {

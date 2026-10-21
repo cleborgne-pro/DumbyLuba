@@ -33,6 +33,8 @@ import fr.luba.poc.proto.LubaMsgProto.LubaMsg
     /** Latitude/longitude published by the robot (RTK station or position), for the garden weather. */
     val geoLat: Double? = null, val geoLon: Double? = null, val geoSource: String? = null,
     val firmware: String? = null,
+    /** Maintenance counters (`rpt_maintain`, RIT_MAINTAIN): mileage, working time, battery cycles, blade use. */
+    val maintenance: fr.luba.poc.auth.Maintenance? = null, val lastMaintenanceAt: Long? = null,
     /** Internal model code (`device_product_type_info.sub_product_type`, e.g. HM060100LBVAWD50OMNIH or "62"): gives the
      * cutting heights ([CutHeightRange.forProductType]); [productName] is the trade name (`main_product_type`). */
     val productType: String? = null, val productName: String? = null,
@@ -47,7 +49,11 @@ import fr.luba.poc.proto.LubaMsgProto.LubaMsg
      * definition of FIX; `pos_level` is not one (it was 1 with status 4 in every record of 2026-10-15).
      */
     val rtkFix: Boolean get() = rtkStatus == RTK_FIX
-    companion object { const val RTK_FIX = 4 }
+    companion object {
+        const val RTK_FIX = 4
+        /** Empty telemetry shared by the screens (immutable): a constructor call passes every field and costs Dalvik registers (MapScreen). */
+        val EMPTY = Telemetry()
+    }
 }
 
 class TelemetryReducer {
@@ -108,6 +114,11 @@ class TelemetryReducer {
             value = value.copy(bladeHeightMm = report.work.knifeHeight, lastBladeHeightAt = wallTime, workHeightMm = report.work.knifeHeight, lastWorkHeightAt = wallTime)
             // The firmware does not always send the end of movement: reaching the target ends it.
             if (value.heightMoving == true && value.heightTargetMm == report.work.knifeHeight) value = value.copy(heightMoving = false)
+        }
+        if (report.hasMaintain()) report.maintain.let { m ->
+            val blade = if (m.hasBladeUsedTime()) m.bladeUsedTime else null
+            value = value.copy(maintenance = fr.luba.poc.auth.Maintenance(m.mileage, m.workTime, m.batCycles,
+                blade?.bladeUsedTime ?: 0, blade?.bladeUsedWarnTime ?: 0), lastMaintenanceAt = wallTime)
         }
         if (report.hasCutterWorkModeInfo()) {
             value = value.copy(cutterRpm = report.cutterWorkModeInfo.currentCutterRpm, lastCutterRpmAt = wallTime)

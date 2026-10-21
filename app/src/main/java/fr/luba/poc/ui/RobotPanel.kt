@@ -59,6 +59,7 @@ enum class ServicePage(val key: String, private val titleEn: String, private val
     DRIVEN_RECORD("EnregistrementPilote", "Record by driving", "Enregistrer en pilotant", parent = "Pilotage"),
     HEIGHT("Hauteur", "Cutting height", "Hauteur de coupe"),
     CAMERA("Camera", "Camera", "Caméra"),
+    MAINTENANCE("Entretien", "Maintenance", "Entretien"),
     // Garden and history
     HISTORY("Historique", "Task history", "Historique des tâches"),
     OBSTACLES("Obstacles", "Obstacles", "Obstacles"),
@@ -139,6 +140,9 @@ fun RobotPanel(
         if (uri != null) robot.export(uri, archive = true)
     }
     val exportArchive = { archive.launch("luba-diagnostics-${System.currentTimeMillis()}.zip") }
+    val rawArchive = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) robot.export(uri, archive = true, anonymize = false)
+    }
 
     if (page == ServicePage.HUB) { ServiceHub(state, modifier, onTabChange); return }
 
@@ -162,10 +166,12 @@ fun RobotPanel(
         ServicePage.MANUAL -> ManualPage(robot, state, back, modifier) { onTabChange(ServicePage.DRIVEN_RECORD.key) }
         ServicePage.DRIVEN_RECORD -> fr.luba.poc.manual.DrivenRecordPage(robot, state, back, modifier)
         ServicePage.HEIGHT -> BladesPage(robot, state, back, exportArchive, listOf(BladeBench.HEIGHT), page.title) { requirements() }
-        ServicePage.CAMERA -> if (cloud != null) fr.luba.poc.camera.CameraPage(robot, state, cloud, cloudState, back)
+        ServicePage.CAMERA -> if (fr.luba.poc.auth.AccountMode.observe()) PushedPage(page.title, back, modifier) { InfoNote(fr.luba.poc.auth.AccountMode.message) }
+            else if (cloud != null) fr.luba.poc.camera.CameraPage(robot, state, cloud, cloudState, back)
             else PushedPage(page.title, back, modifier) { InfoNote(tr("Mammotion account unavailable on this screen.", "Compte Mammotion indisponible sur cet écran.")) }
+        ServicePage.MAINTENANCE -> MaintenancePage(state, back, modifier)
         ServicePage.HISTORY -> fr.luba.poc.history.MowingHistoryPage(state.mowingHistory, state.mowingRecord, state.selected?.address,
-            back, onOpen = { robot.showTaskDetail(it) }, modifier = modifier)
+            back, onOpen = { robot.showTaskDetail(it) }, modifier = modifier, loadTrack = robot::loadTaskTrack)
         ServicePage.OBSTACLES -> ObstacleListPage(robot, state, back) { onTabChange(ServicePage.OBSTACLE_SIM.key) }
         ServicePage.OBSTACLE_SIM -> ObstacleSimPage(state, back)
         ServicePage.SIGNALS -> fr.luba.poc.map.SignalSurveyPage(state, back, onShowSignalsOnMap, onSignalSurveyRoute)
@@ -190,9 +196,17 @@ fun RobotPanel(
                 LogLines(state.events.asReversed())
             }
             InfoNote(tr("Full log kept on the phone (frames, decoded messages, delays, tests); the latest 150 events are shown here. " +
-                "The ZIP archive adds the test reports and the obstacle photos.",
+                "The ZIP archive adds the test reports.",
                 "Journal complet conservé sur le téléphone (trames, messages décodés, délais, essais) ; les 150 derniers événements s'affichent ici. " +
-                "L'archive ZIP ajoute les rapports d'essais et les photos d'obstacles."))
+                "L'archive ZIP ajoute les rapports d'essais."))
+            InfoNote(tr("Exports are anonymized and can be attached to a public ticket as is: robot name and serial number, " +
+                "GPS position, Wi-Fi, IP and MAC addresses, account data and raw frames are removed, obstacle photos are left out. " +
+                "The map stays in the robot's local frame.",
+                "Les exports sont anonymisés et peuvent être joints tels quels à un ticket public : nom et numéro de série du robot, " +
+                "position GPS, Wi-Fi, adresses IP et MAC, données du compte et trames brutes sont retirés, les photos d'obstacles sont écartées. " +
+                "La carte reste dans le repère local du robot."))
+            TextAction(tr("Raw archive (not anonymized, with photos)", "Archive brute (non anonymisée, avec photos)"),
+                { rawArchive.launch("luba-diagnostics-raw-${System.currentTimeMillis()}.zip") }, enabled = !state.campaign.running)
         }
         ServicePage.ADVANCED -> AdvancedPage(robot, state, back, modifier)
         ServicePage.HUB -> Unit
@@ -322,6 +336,7 @@ private fun ServiceHub(state: RobotUi, modifier: Modifier, open: (String) -> Uni
         // Robot card: a tap opens the Bluetooth connection.
         Surface(onClick = { open(ServicePage.CONNECTION.key) }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
             color = colors.Surface, border = androidx.compose.foundation.BorderStroke(1.dp, colors.Hairline)) {
+            Column {
             Row(Modifier.padding(horizontal = Dimens.Lg, vertical = Dimens.Md), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Dimens.Md)) {
                 Box(Modifier.size(width = 84.dp, height = 56.dp).background(colors.SurfaceMuted, MaterialTheme.shapes.medium), contentAlignment = Alignment.Center) {
@@ -335,10 +350,15 @@ private fun ServiceHub(state: RobotUi, modifier: Modifier, open: (String) -> Uni
                         Box(Modifier.size(7.dp).background(if (link.connected) colors.Green else if (connected || link.connecting) colors.Warning else colors.TextTertiary, CircleShape))
                         Text(link.summary, style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
                     }
-                    fr.luba.poc.gateway.GatewayHealthLine(fr.luba.poc.gateway.rememberPilotGatewayHealth(pilot))
                 }
                 state.telemetry.battery?.let { Text("$it %", style = fr.luba.poc.ui.theme.NumericStyle.copy(fontSize = 18.sp)) }
                 Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = colors.TextTertiary)
+            }
+            // Gateway on the robot (pilot role): its health under the robot, separated by a hairline.
+            fr.luba.poc.gateway.rememberPilotGatewayHealth(pilot)?.let { health ->
+                androidx.compose.material3.HorizontalDivider(color = colors.Hairline)
+                fr.luba.poc.gateway.GatewayHealthStrip(health, Modifier.padding(horizontal = Dimens.Lg, vertical = Dimens.Md))
+            }
             }
         }
         // Read-only mode of a model that is not validated (docs/features/supported-models.md).
@@ -360,7 +380,9 @@ private fun ServiceHub(state: RobotUi, modifier: Modifier, open: (String) -> Uni
             Entry(ServicePage.MANUAL, Icons.Rounded.Gamepad, tr("Joysticks, blades stopped", "Joysticks, lames arrêtées"), enabled = ready)
             Entry(ServicePage.HEIGHT, Icons.Rounded.Height, tr("Setpoint and deck sequences", "Consigne et séquences du plateau"), enabled = ready,
                 value = state.telemetry.bladeHeightMm?.let { "$it mm" })
-            Entry(ServicePage.CAMERA, Icons.Rounded.Videocam, tr("Live video through the Mammotion account", "Vidéo en direct par le compte Mammotion"))
+            // Video only goes through the Mammotion cloud: no entry in local mode.
+            if (!fr.luba.poc.auth.AccountMode.observe()) Entry(ServicePage.CAMERA, Icons.Rounded.Videocam, tr("Live video through the Mammotion account", "Vidéo en direct par le compte Mammotion"))
+            Entry(ServicePage.MAINTENANCE, Icons.Rounded.Build, tr("Blade wear, mileage, battery cycles", "Usure des lames, kilométrage, cycles batterie"))
         }
         SettingsGroup(tr("Garden and history", "Jardin et historique")) {
             fr.luba.poc.history.MowingHistoryRow(state.mowingHistory) { open(ServicePage.HISTORY.key) }
@@ -750,11 +772,12 @@ private fun SensorsPage(robot: RobotBle, state: RobotUi, back: () -> Unit, expor
             KeyValueRow(tr("Messages received", "Messages reçus"), if (z.messages == 0L) "0" else tr("${z.messages} · ${z.bytes} B · ${z.minSize}..${z.maxSize} B", "${z.messages} · ${z.bytes} o · ${z.minSize}..${z.maxSize} o"))
             z.samples.forEach { DataEntry("Message", it, maxLines = 3) }
         }
+        PerceptionMapGroup(state.perceptionMap)
         SensorSlotsGroup(state.telemetry.sensorStatus, probe)
         SensorVisionGroup(probe.vision)
         SettingsGroup(tr("Vision, SLAM and camera", "Vision, SLAM et caméra")) {
             val e = probe.extras
-            KeyValueRow(tr("Vision state (slow tunnel, index 16)", "État vision (tunnel lent, index 16)"), e.visionState?.toString() ?: "—")
+            KeyValueRow(tr("Vision state (tunnel 26, index 16)", "État vision (tunnel 26, index 16)"), e.visionState?.toString() ?: "—")
             KeyValueRow(tr("Localisation fusion", "Fusion de localisation"), e.fuseStatus?.toString() ?: "—")
             KeyValueRow(tr("Visual SLAM (vslam_status)", "SLAM visuel (vslam_status)"), e.vslamStatus?.toString() ?: "—")
             KeyValueRow(tr("VIO survival", "Survie VIO"), e.vioSurvivalM?.let { "%.2f m".format(it) } ?: "—")
