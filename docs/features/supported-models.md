@@ -104,6 +104,14 @@ only** (`ModelTrial`, `protocol/ModelSupport.kt`):
 | 2. Joystick at low speed | Service → Manual control | joystick bounded to 300 linear units (≈ 0.3 m/s) and 150 angular units (≈ 15 °/s), blades stopped |
 | 3. Blade test | Service → Blade test | discs while stationary, 10 s at most, OFF checked before and after |
 
+**Bumper "alert" at rest.** The three tests refuse to start, and stop, when the bumper slot of `sensor_status`
+(bits 0–2) is not 0. A LUBA 3 AWD reports 1 ("alert") there permanently with a free bumper
+([DumbyLuba#2](https://github.com/cleborgne-pro/DumbyLuba/issues/2)), so none of its tests could start. When the trial
+is armed while this slot reads 1, that value becomes the robot's resting value for the trial (`Armed.bumperRest`,
+`ModelTrial.sensors`, logged in `model_trial_armed`): the guards of the three tests ignore it, but an error/obstacle
+value (2–7, never accepted) and the collision protection (self-check 25, code 1014) still refuse or stop them. The arming dialog says so and asks to check that the bumper moves freely. The LUBA 2 is not concerned
+(validated model, no trial). The raw value stays shown as is in Service → Sensors.
+
 Everything else stays refused, at the entry points and by `RobotBle.send`: routes and mowing, move to a point, return
 to base, base exit, gateway tracking, cutting height, obstacle and border tests, map writing. During the trial the
 barrier lets through, on top of the read and stop commands, only motion within the trial ceilings, the manual

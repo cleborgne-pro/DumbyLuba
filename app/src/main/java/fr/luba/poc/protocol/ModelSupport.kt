@@ -65,10 +65,21 @@ object ModelTrial {
     const val MAX_LINEAR = 300
     const val MAX_ANGULAR = 150
 
-    /** Armed trial: exact Bluetooth name of the robot and validity (elapsed realtime, ms). */
-    data class Armed(val robotName: String, val sinceMs: Long, val untilMs: Long) {
+    /**
+     * Armed trial: exact Bluetooth name of the robot and validity (elapsed realtime, ms). [bumperRest]: bumper slot of
+     * `sensor_status` (bits 0–2) read at rest when arming, 0 or [BUMPER_REST_ALERT] (see [sensors]).
+     */
+    data class Armed(val robotName: String, val sinceMs: Long, val untilMs: Long, val bumperRest: Int = 0) {
         fun remainingMs(now: Long) = (untilMs - now).coerceAtLeast(0)
     }
+
+    /**
+     * Bumper slot value accepted as the resting value of a trial model: "alert" (1). A LUBA 3 AWD reports it
+     * permanently with a free bumper (DumbyLuba#2), which refused the three tests; on the LUBA 2 these bits only mean
+     * an alert, never a contact (read through code 1014 and self-check 25, still enforced). The error/obstacle values
+     * (2–7) are never accepted.
+     */
+    const val BUMPER_REST_ALERT = 1
 
     private val armed = MutableStateFlow<Armed?>(null)
     val state: StateFlow<Armed?> = armed.asStateFlow()
@@ -77,9 +88,21 @@ object ModelTrial {
     fun eligible(name: String?): Boolean =
         !name.isNullOrBlank() && ModelSupport.isMower(name) && !ModelSupport.motionValidated(name)
 
-    fun arm(name: String?, now: Long): Armed {
+    /** Arms the trial for [name]; [sensors]: `sensor_status` at rest, whose bumper slot gives [Armed.bumperRest]. */
+    fun arm(name: String?, now: Long, sensors: Int? = null): Armed {
         require(eligible(name)) { tr("Trial reserved for a connected mower in read-only mode", "Essai réservé à une tondeuse connectée en lecture seule") }
-        return Armed(name!!.trim(), now, now + DURATION_MS).also { armed.value = it }
+        val rest = sensors?.let { it and 7 }?.takeIf { it == BUMPER_REST_ALERT } ?: 0
+        return Armed(name!!.trim(), now, now + DURATION_MS, rest).also { armed.value = it }
+    }
+
+    /**
+     * `sensor_status` seen by the guards of the three tests on [name]: unchanged on a validated model or without an
+     * active trial; during a trial armed with a bumper at rest in alert ([Armed.bumperRest]), that same value is
+     * cleared, so that only an error/obstacle value (2–7) of the bumper slot stops or refuses the tests.
+     */
+    fun sensors(name: String?, sensors: Int?, now: Long): Int? {
+        val rest = armed.value?.takeIf { active(name, now) && !ModelSupport.motionValidated(name) }?.bumperRest ?: 0
+        return if (sensors != null && rest != 0 && sensors and 7 == rest) sensors and 7.inv() else sensors
     }
 
     /** Ends the trial; returns the trial that was armed, if any. */

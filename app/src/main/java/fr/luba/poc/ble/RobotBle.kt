@@ -2266,7 +2266,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 if (state.value.bladeTestActive) {
                     if (bladeBits == 1) bladeOnObserved = true
                     if (bladeBits > 1) stopBladeTest(tr("Raw blade state not recognized", "État lames brut non reconnu"))
-                    if (reducer.value.robotState !in listOf(11, 20) || !fr.luba.poc.protocol.SelfCheck.nominal(reducer.value.selfCheck) || (reducer.value.sensorStatus ?: 7) and 7 != 0) stopBladeTest(tr("Mammotion state/protection changed", "État/protection Mammotion changé"))
+                    if (reducer.value.robotState !in listOf(11, 20) || !fr.luba.poc.protocol.SelfCheck.nominal(reducer.value.selfCheck) || (trialSensors(reducer.value.sensorStatus) ?: 7) and 7 != 0) stopBladeTest(tr("Mammotion state/protection changed", "État/protection Mammotion changé"))
                 }
             }
             reportCount++
@@ -2457,14 +2457,20 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         val name = state.value.selected?.name
         if (!state.value.ready) return tr("Connect the robot first", "Connecter d'abord le robot")
         return try {
-            val armed = fr.luba.poc.protocol.ModelTrial.arm(name, SystemClock.elapsedRealtime())
+            val sensors = state.value.telemetry.sensorStatus
+            val armed = fr.luba.poc.protocol.ModelTrial.arm(name, SystemClock.elapsedRealtime(), sensors)
             event("model_trial_armed", tr("Model trial armed: command cutoff, low-speed joystick and blade test only", "Essai du modèle armé : coupure des commandes, joystick lent et essai des lames seulement"),
                 mapOf("robotName" to name, "model" to fr.luba.poc.ui.RobotModel.detect(name).name, "firmware" to state.value.telemetry.firmware,
                     "durationMs" to fr.luba.poc.protocol.ModelTrial.DURATION_MS, "maxLinear" to fr.luba.poc.protocol.ModelTrial.MAX_LINEAR,
-                    "maxAngular" to fr.luba.poc.protocol.ModelTrial.MAX_ANGULAR, "untilMs" to armed.untilMs))
+                    "maxAngular" to fr.luba.poc.protocol.ModelTrial.MAX_ANGULAR, "untilMs" to armed.untilMs,
+                    "sensorStatus" to sensors, "bumperRest" to armed.bumperRest))
             null
         } catch (error: IllegalArgumentException) { error.message }
     }
+
+    /** `sensor_status` for the guards of the three unlocking tests: bumper alert at rest of a trial model cleared ([fr.luba.poc.protocol.ModelTrial.sensors]). */
+    private fun trialSensors(sensors: Int?): Int? =
+        fr.luba.poc.protocol.ModelTrial.sensors(state.value.selected?.name, sensors, SystemClock.elapsedRealtime())
 
     /** Ends the model trial (button, disconnection); a running test stops through its own guards. */
     fun endModelTrial(reason: String) {
@@ -4508,7 +4514,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         val t = state.value.telemetry
         BladeSafety.requireReady(state.value.selected?.name,
             if (bladeDeviceAt == 0L) null else SystemClock.elapsedRealtime() - bladeDeviceAt,
-            t.battery, t.robotState, t.sensorStatus, t.selfCheck, state.value.campaign.running, heightMm, state.value.cutHeights, modelAllowed)
+            t.battery, t.robotState, trialSensors(t.sensorStatus), t.selfCheck, state.value.campaign.running, heightMm, state.value.cutHeights, modelAllowed)
     }
     /**
      * Height adjustment outside a mission. Firmware 1.30.29.26 (logs of 10-10): `todev_knife_height_set` alone
@@ -4835,7 +4841,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             // Beyond the mapped zones, 25 does not prevent driving freely ([offMapLatchIgnored]); nor does a positioning
             // condition (41 weak satellite signal, 2026-10-22): the joystick does not need RTK and brings the robot under open sky.
             check(fr.luba.poc.protocol.SelfCheck.joystickAllowed(t.selfCheck) || offMapLatchIgnored(t)) { fr.luba.poc.protocol.SelfCheck.refusal(t.selfCheck) }
-            check(!TeachSafety.bumperHealthAlert(t.sensorStatus)) { tr("Bumper / lift sensor alert", "Alerte capteur pare-chocs / soulèvement") }
+            check(!TeachSafety.bumperHealthAlert(trialSensors(t.sensorStatus))) { tr("Bumper / lift sensor alert", "Alerte capteur pare-chocs / soulèvement") }
             // Model trial: joystick bounded to the trial ceilings (low speed).
             manualCommand = fr.luba.poc.protocol.ModelTrial.joystick(robotName, linear, angular); manualInputAt = SystemClock.elapsedRealtime()
             if (manualCommand.first != 0) manualLastLinear = manualCommand.first
@@ -4867,7 +4873,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             check(guard == null) { guard ?: "" }
                             check(fr.luba.poc.protocol.SelfCheck.joystickAllowed(currentTelemetry.selfCheck) || offMapLatchIgnored(currentTelemetry)) {
                                 fr.luba.poc.protocol.SelfCheck.refusal(currentTelemetry.selfCheck) }
-                            check(!TeachSafety.bumperHealthAlert(currentTelemetry.sensorStatus)) {
+                            check(!TeachSafety.bumperHealthAlert(trialSensors(currentTelemetry.sensorStatus))) {
                                 tr("Bumper / lift sensor alert (sensors ${currentTelemetry.sensorStatus})", "Alerte capteur pare-chocs / soulèvement (capteurs ${currentTelemetry.sensorStatus})") }
                             check(currentTelemetry.robotState in listOf(11,20)) { tr("Incompatible robot state (${currentTelemetry.robotState})", "État robot incompatible (${currentTelemetry.robotState})") }
                             check(state.value.ready && !closing && log.healthy) { tr("Link unavailable", "Liaison indisponible") }
@@ -4885,7 +4891,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             return true
         } catch (error: Exception) {
             // Refused while driving (finger still on the joystick): a collision protection is handled like in the loop.
-            if (state.value.manualActive && ManualContact.suspected(state.value.telemetry.selfCheck, state.value.telemetry.sensorStatus)) {
+            if (state.value.manualActive && ManualContact.suspected(state.value.telemetry.selfCheck, trialSensors(state.value.telemetry.sensorStatus))) {
                 manualInterrupted(error.message ?: tr("Control interrupted", "Pilotage interrompu"))
                 return false
             }
@@ -4901,8 +4907,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
      */
     private fun manualInterrupted(reason: String) {
         val live = state.value.telemetry
-        val contact = ManualContact.suspected(live.selfCheck, live.sensorStatus)
-        if (!contact || TeachSafety.bumperHealthAlert(live.sensorStatus)) alert(AlertKind.UNEXPECTED_STOP, Severity.CRITICAL, reason)
+        val sensors = trialSensors(live.sensorStatus)
+        val contact = ManualContact.suspected(live.selfCheck, sensors)
+        if (!contact || TeachSafety.bumperHealthAlert(sensors)) alert(AlertKind.UNEXPECTED_STOP, Severity.CRITICAL, reason)
         stopManual(reason)
         if (!contact) return
         manualContactUntil = SystemClock.elapsedRealtime() + ManualContact.GRACE_MS
@@ -4947,7 +4954,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             check(!ui.taskStopPending && ui.ready && !closing && log.healthy && !ui.robotRoute.running && !ui.mowing.active && !ui.manualActive &&
                 !ui.navTest.running && !ui.teach.running && heightTarget == null && !bladeMayBeOn && !bladeOffPending) { tr("Finish the mission or test in progress", "Terminer la mission ou l'essai en cours") }
             TeachSafety.startFailure(ui.selected?.name, if (devicePrevious == 0L) null else now - devicePrevious, t.battery, t.robotState,
-                t.sensorStatus, t.selfCheck, ui.campaign.running, ui.bladeTestActive, ui.navTest.running, ui.mapLoading,
+                trialSensors(t.sensorStatus), t.selfCheck, ui.campaign.running, ui.bladeTestActive, ui.navTest.running, ui.mapLoading,
                 modelAllowed = fr.luba.poc.protocol.ModelTrial.testAllowed(ui.selected?.name, now))?.let { error(it) }
             NavSafety.automaticPositionFailure(now - positionPrevious, t.x, t.y)?.let { error(it) }
             check(t.rtkFix) { tr("RTK FIX position required", "Position RTK FIX requise") }
@@ -4975,7 +4982,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     check(state.value.ready && !closing && log.healthy) { tr("BLE link interrupted", "Liaison BLE interrompue") }
                     check(fr.luba.poc.protocol.ModelTrial.testAllowed(state.value.selected?.name, now)) { tr("Model trial ended", "Essai du modèle terminé") }
                     TeachSafety.tickFailure(now - devicePrevious, live.battery, live.sensorStatus, 30)?.let { error(it) }
-                    check(fr.luba.poc.protocol.SelfCheck.nominal(live.selfCheck) && !TeachSafety.bumperHealthAlert(live.sensorStatus)) { tr("Protection or sensor alert", "Protection ou alerte capteur") }
+                    check(fr.luba.poc.protocol.SelfCheck.nominal(live.selfCheck) && !TeachSafety.bumperHealthAlert(trialSensors(live.sensorStatus))) { tr("Protection or sensor alert", "Protection ou alerte capteur") }
                     check(live.robotState in listOf(11, 20)) { tr("Robot state changed (${live.robotState})", "État robot changé (${live.robotState})") }
                     NavSafety.automaticPositionFailure(now - positionPrevious, live.x, live.y)?.let { error(it) }
                 }

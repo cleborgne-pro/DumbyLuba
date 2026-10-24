@@ -854,3 +854,11 @@ outline); the refusal names each element and its type. A frame the reading does 
 (`map_frame_error`), a refused element-list frame is asked again; only the size limits end the reading. See
 [map element types](docs/features/supported-models.md#map-element-types). Types 21 to 23 are interpreted from
 PyMammotion, not from a map read by DumbyLuba.
+
+Version 1.15.2 (185): **model trial on a LUBA 3 AWD whose bumper reads "alert" at rest**. A LUBA 3 owner could start none of
+the three tests: the bumper slot of `sensor_status` read 1 ("alert") all the time, bumper free
+([DumbyLuba#2](https://github.com/cleborgne-pro/DumbyLuba/issues/2), no log). Arming the trial while it reads 1 now
+keeps this value as the robot's resting value: the command cutoff test, the low-speed joystick and the blade test
+ignore it, and an error/obstacle bumper value (2–7) or the collision protection still refuses or stops them.
+The arming dialog and the armed trial say so; the LUBA 2 is unchanged. Not tried on a LUBA 3 yet. See
+[Model trial](docs/features/supported-models.md#model-trial).

@@ -91,4 +91,42 @@ class RobotBleModelTrialTest {
         assertNotNull(bench.state.motorWatchdog)
         assertEquals(0.0, bench.sim.speed, 0.005)
     }
+
+    /** DumbyLuba#2: bumper slot at 1 ("alert") all the time on a LUBA 3, bumper free; an error/obstacle value still stops. */
+    @Test fun `bumper alert at rest of a LUBA 3 no longer blocks the three tests`() {
+        bench.installMap(); bench.sim.sensorLow = 1; bench.connect()
+        bench.advance(1000)
+        assertNull(bench.ble.armModelTrial())
+        assertEquals(ModelTrial.BUMPER_REST_ALERT, ModelTrial.state.value?.bumperRest)
+        bench.ble.beginManualGesture()
+        assertTrue(bench.state.manualStatus, hold(200, 0, 1000))
+        bench.sim.sensorLow = 2
+        bench.advance(1000)
+        assertFalse("error/obstacle value stops the joystick", bench.state.manualActive)
+        bench.ble.stopManual()
+        bench.sim.sensorLow = 1
+        bench.advance(1000)
+        bench.ble.startSilenceTest(100)
+        assertTrue(bench.state.silenceTest.status, bench.state.silenceTest.running)
+        bench.until(60_000, "verdict") { !bench.state.silenceTest.running }
+        assertNotNull(bench.state.motorWatchdog)
+        bench.ble.prepareBladeStop(50)
+        bench.until(5000, "blade stop verified") { bench.state.bladeStatus.contains("État lames OFF reçu") }
+        bench.ble.startBladeTest(50)
+        assertTrue(bench.state.bladeStatus, bench.state.bladeTestActive)
+        bench.until(5000, "blades running") { bench.sim.bladesOn }
+        bench.until(15_000, "end of test") { !bench.state.bladeTestActive && !bench.sim.bladesOn }
+    }
+
+    @Test fun `bumper alert appearing after arming with a clear bumper still refuses`() {
+        bench.installMap(); bench.connect()
+        bench.advance(1000)
+        assertNull(bench.ble.armModelTrial())
+        bench.sim.sensorLow = 1
+        bench.advance(1000)
+        bench.ble.beginManualGesture()
+        assertFalse(bench.ble.manualInput(200, 0))
+        bench.ble.startSilenceTest(100)
+        assertFalse(bench.state.silenceTest.running)
+    }
 }

@@ -50,6 +50,8 @@ fun ModelTrialGroup(robot: RobotBle, state: RobotUi, modelLabel: String, open: (
         } else {
             StatusNote(tr("Trial armed · ${(active.remainingMs(now) / 60_000) + 1} min left · these three tests only, joystick limited to low speed",
                 "Essai armé · encore ${(active.remainingMs(now) / 60_000) + 1} min · ces trois essais seulement, joystick limité à basse vitesse"), NoteTone.WARNING)
+            if (active.bumperRest != 0) InfoNote(tr("The bumper read \"alert\" at rest when arming: kept as this robot's resting value for the trial. A bumper error/obstacle value, or a collision protection, still stops the tests.",
+                "Le pare-chocs indiquait « alerte » au repos à l'armement : valeur retenue comme repos de ce robot pour l'essai. Une valeur erreur/obstacle du pare-chocs, ou une protection collision, arrête toujours les essais."))
             NavRow(tr("1. Command cutoff", "1. Coupure des commandes"), icon = Icons.Rounded.TimerOff,
                 subtitle = tr("Does the robot stop on its own when the app goes silent?", "Le robot s'arrête-t-il seul quand l'application se tait ?")) { open(ServicePage.WATCHDOG.key) }
             NavRow(tr("2. Joystick at low speed", "2. Joystick à basse vitesse"), icon = Icons.Rounded.Gamepad,
@@ -61,14 +63,14 @@ fun ModelTrialGroup(robot: RobotBle, state: RobotUi, modelLabel: String, open: (
             SecondaryPillButton(tr("End the trial", "Terminer l'essai"), { robot.endModelTrial(tr("Ended by the user", "Terminé par l'utilisateur")) }, Modifier.fillMaxWidth())
         }
     }
-    if (asking) ModelTrialDialog(modelLabel, onDismiss = { asking = false }) {
+    if (asking) ModelTrialDialog(modelLabel, state.telemetry.sensorStatus?.let { it and 7 } == ModelTrial.BUMPER_REST_ALERT, onDismiss = { asking = false }) {
         asking = false
         refusal = robot.armModelTrial()
     }
 }
 
 @Composable
-private fun ModelTrialDialog(modelLabel: String, onDismiss: () -> Unit, onArm: () -> Unit) {
+private fun ModelTrialDialog(modelLabel: String, bumperAlertAtRest: Boolean, onDismiss: () -> Unit, onArm: () -> Unit) {
     var sight by remember { mutableStateOf(false) }
     var clear by remember { mutableStateOf(false) }
     var stop by remember { mutableStateOf(false) }
@@ -79,6 +81,8 @@ private fun ModelTrialDialog(modelLabel: String, onDismiss: () -> Unit, onArm: (
             Text(tr("For 30 minutes, this robot only accepts the command cutoff test, the joystick at low speed (≈ 0.3 m/s) and the blade test while stationary. Mowing, routes, return to base and map writing stay disabled. The trial ends at disconnection.",
                 "Pendant 30 minutes, ce robot n'accepte que l'essai de coupure des commandes, le joystick à basse vitesse (≈ 0,3 m/s) et l'essai des lames à l'arrêt. Tonte, trajets, retour à la base et écriture de carte restent désactivés. L'essai s'arrête à la déconnexion."),
                 style = MaterialTheme.typography.bodyMedium)
+            if (bumperAlertAtRest) StatusNote(tr("The bumper reads \"alert\" right now. Some models report it at rest (LUBA 3 AWD): check that the bumper is free and moves normally. This value will be kept as the resting value of the trial; an error/obstacle value still stops the tests.",
+                "Le pare-chocs indique « alerte » en ce moment. Certains modèles l'indiquent au repos (LUBA 3 AWD) : vérifiez que le pare-chocs est libre et bouge normalement. Cette valeur sera retenue comme repos de l'essai ; une valeur erreur/obstacle arrête toujours les essais."), NoteTone.WARNING)
             LubaCheckRow(tr("I am the owner, next to the robot, which I can see", "Je suis le propriétaire, à côté du robot, que je vois"), sight, { sight = it })
             LubaCheckRow(tr("Flat open ground, 3 m clear around it, no people or animals", "Terrain plat et dégagé, 3 m libres autour, ni personne ni animal"), clear, { clear = it })
             LubaCheckRow(tr("I can reach the robot's physical STOP button", "Je peux atteindre le bouton STOP physique du robot"), stop, { stop = it })
