@@ -16,7 +16,8 @@ class SelfCheckTest {
 
     @Test fun `explicit refusal reason`() {
         assertTrue(SelfCheck.refusal(11).startsWith("Robot verrouillé après STOP (self-check 11)"))
-        assertEquals("Protection / self-check actif (34)", SelfCheck.refusal(34))
+        assertEquals("Protection / self-check actif : protection pluie (34)", SelfCheck.refusal(34))
+        assertEquals("Protection / self-check actif (77)", SelfCheck.refusal(77))
         assertEquals("Protection / self-check inconnu (télémétrie absente)", SelfCheck.refusal(null))
     }
 
@@ -35,5 +36,19 @@ class SelfCheckTest {
         assertEquals(SelfCheck.refusal(11), NavSafety.startFailure("Luba-VSDEMO01", 100, 87, 11, 0, 11, false, false, false, 60))
         assertEquals(SelfCheck.refusal(11), TeachSafety.startFailure("Luba-VSDEMO01", 100, 87, 11, 0, 11, false, false, false, false))
         assertNull(NavSafety.startFailure("Luba-VSDEMO01", 100, 87, 11, 0, 10, false, false, false, 60))
+    }
+
+    /** Mammotion app table: 41 = weak satellite signal; consistent with 11, 23 and 25 observed on the robot. */
+    @Test fun `self-check 41, weak satellite signal, joystick allowed, nothing to unlock`() {
+        assertEquals("signal satellite faible", SelfCheck.name(41))
+        assertEquals("hors de la zone de travail", SelfCheck.name(25))
+        assertEquals("arrêt d'urgence", SelfCheck.name(11))
+        assertNull(SelfCheck.name(77))
+        listOf(40L, 41L, 42L, 99L).forEach { assertTrue("$it", SelfCheck.positioning(it)); assertTrue("$it", SelfCheck.joystickAllowed(it)) }
+        listOf(null, 11L, 23L, 25L, 34L).forEach { assertFalse("$it", SelfCheck.positioning(it)); assertFalse("$it", SelfCheck.joystickAllowed(it)) }
+        assertFalse(SelfCheck.nominal(41))
+        assertTrue(SelfCheck.refusal(41).startsWith("Positionnement indisponible : signal satellite faible (self-check 41). Rien à déverrouiller"))
+        // Missions still refused: the robot has no usable position.
+        assertEquals(SelfCheck.refusal(41), NavSafety.startFailure("Luba-VSDEMO01", 100, 87, 11, 0, 41, false, false, false, 60))
     }
 }

@@ -18,6 +18,7 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_random.h>
+#include <esp_heap_caps.h>
 #include <esp_wifi.h>
 
 #include "gw_ota.h"
@@ -25,7 +26,7 @@
 #include "robot.h"
 #include "session.h"
 
-static const char *FW_VERSION = "gateway-0.2.0";
+static const char *FW_VERSION = "gateway-0.3.0";
 static const char *HOSTNAME = "dumbyluba-esp32";
 // mDNS instance name shown by the app, same naming as the phone gateway service (kept unchanged).
 static const char *INSTANCE = "DumbyLuba passerelle ESP32";
@@ -237,6 +238,12 @@ static String statusJson() {
        ",\"last_stop\":\"" + jsonEscape(r.lastStop.c_str()) + "\"},";
   j += "\"pilot\":{\"connected\":" + String(p.active ? "true" : "false") + ",\"peer\":\"" + p.peer + "\",\"frames_in\":" +
        String(p.framesIn) + ",\"frames_out\":" + String(p.framesOut) + ",\"last\":\"" + jsonEscape(p.last) + "\"},";
+  const robot::AutonomyState a = robot::autonomyState();
+  j += "\"autonomy\":{\"running\":" + String(a.running ? "true" : "false") + ",\"leg\":" + String(a.legId) +
+       ",\"edge\":" + String(a.index) + ",\"edges\":" + String(a.total) + ",\"without_pilot\":" + String(a.orphan ? "true" : "false") +
+       ",\"status\":\"" + jsonEscape(a.status.c_str()) + "\",\"last\":\"" + jsonEscape(a.last.c_str()) + "\"},";
+  j += "\"psram\":{\"size\":" + String(ESP.getPsramSize()) + ",\"free\":" + String(ESP.getFreePsram()) +
+       ",\"largest_block\":" + String((uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)) + "},";
   j += "\"ota\":" + ota::statusJson();
   j += "}";
   return j;
@@ -266,6 +273,14 @@ static void handleRoot() {
   h += "<p><b>Robot</b>: " + htmlEscape(robotLabel(r)) + "</p>";
   h += "<p><b>Pilot</b>: " + (p.active ? htmlEscape(p.peer) : String("none")) + "</p>";
   if (!r.lastStop.empty()) h += "<p><b>Last safety stop</b>: " + htmlEscape(r.lastStop.c_str()) + "</p>";
+  const robot::AutonomyState a = robot::autonomyState();
+  if (a.running) {
+    h += "<p><b>Autonomous tracking</b>: route " + String(a.legId) + ", edge " + String(a.index) + "/" + String(a.total) +
+         (a.orphan ? " · pilot absent, the robot carries on alone" : "") + "<br>" + htmlEscape(a.status.c_str()) + "</p>";
+    h += F("<form method=post action=/autonomy/stop><button>Stop the autonomous tracking</button> (robot stopped, blades OFF)</form>");
+  } else if (!a.last.empty()) {
+    h += "<p><b>Last autonomous tracking</b>: " + htmlEscape(a.last.c_str()) + "</p>";
+  }
   if (!r.address.empty())
     h += F("<form method=post action=/robot/release><button>Release the robot</button> "
            "(Mammotion app, direct Bluetooth; no more automatic reconnection)</form>");
@@ -273,6 +288,12 @@ static void handleRoot() {
   h += htmlEscape(statusJson());
   h += F("</pre></body></html>");
   web.send(200, "text/html; charset=utf-8", h);
+}
+
+static void handleAutonomyStop() {
+  robot::stopAutonomy("Arrêt demandé sur la page de la passerelle");
+  web.sendHeader("Location", "/");
+  web.send(303, "text/plain", "");
 }
 
 static void handleRelease() {
@@ -348,6 +369,13 @@ static void handleCommand(String cmd) {
     Serial.printf("[gateway] code: %s\n", c.c_str());
   } else if (cmd == "code") {
     Serial.printf("[gateway] code: %s\n", gatewayCode.c_str());
+  } else if (cmd == "pair") {
+    // Same link as the Android gateway's pairing QR code (Pilot: Service → Wi-Fi gateway → scan or open the link).
+    // Carries the code: only shown on the serial console, never on the web pages.
+    if (WiFi.status() != WL_CONNECTED) Serial.println("[gateway] pairing link: no Wi-Fi address yet");
+    else Serial.printf("[gateway] pairing link: %s\n",
+                       gw::proto::pairingUri(WiFi.localIP().toString().c_str(), gw::proto::PORT, gatewayCode.c_str(),
+                                             "ESP32").c_str());
   } else if (cmd == "status") {
     printStatus();
   } else if (cmd == "release") {
@@ -368,7 +396,7 @@ static void handleCommand(String cmd) {
   } else if (cmd == "ota-mowing on" || cmd == "ota-mowing off") {
     ota::setAllowWhilePiloted(cmd.endsWith("on"));
   } else if (!cmd.isEmpty()) {
-    Serial.println("commands: status | code [NNNNNN] | release | wifi NAME|PASSWORD | forget-wifi | ap-pass | reboot | "
+    Serial.println("commands: status | code [NNNNNN] | pair | release | wifi NAME|PASSWORD | forget-wifi | ap-pass | reboot | "
                    "ota | ota-mowing on|off");
   }
 }
@@ -458,10 +486,12 @@ void setup() {
   web.on("/wifi", HTTP_GET, handleWifiForm);
   web.on("/wifi", HTTP_POST, handleWifiSave);
   web.on("/robot/release", HTTP_POST, handleRelease);
+  web.on("/autonomy/stop", HTTP_POST, handleAutonomyStop);
   ota::Hooks otaHooks;
   otaHooks.code = [] { return gatewayCode; };
   otaHooks.pilotConnected = [] { return session::info().active; };
   otaHooks.robotPiloted = [] { return robot::state().pilot >= 0; };
+  otaHooks.autonomyRunning = [] { return robot::autonomyState().running; };
   otaHooks.announce = [](const String &t) { session::announce(gw::ota::BEGIN_EVENT, t); };
   otaHooks.closePilot = [](uint32_t timeoutMs) { return session::closeActive("gateway update", timeoutMs); };
   otaHooks.block = [](const String &reason) { session::setBlocked(reason); };
@@ -477,8 +507,8 @@ void setup() {
   web.begin();
 
   session::begin(gatewayCode, currentHealth);
-  robot::begin(session::deliver);
-  Serial.println("Commands: status | code [NNNNNN] | release | wifi NAME|PASSWORD | forget-wifi | ap-pass | reboot | "
+  robot::begin(session::deliver, session::deliverLeg, currentHealth);
+  Serial.println("Commands: status | code [NNNNNN] | pair | release | wifi NAME|PASSWORD | forget-wifi | ap-pass | reboot | "
                  "ota | ota-mowing on|off");
 }
 

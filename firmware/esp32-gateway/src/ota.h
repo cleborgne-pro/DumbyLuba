@@ -19,6 +19,7 @@ struct Hooks {
   std::function<String()> code;                // six-digit code (key of the proof)
   std::function<bool()> pilotConnected;        // pilot session open
   std::function<bool()> robotPiloted;          // the pilot holds the robot link
+  std::function<bool()> autonomyRunning;       // autonomous route tracking in progress (pilot present or not)
   std::function<void(const String &)> announce;  // event to the pilot
   std::function<bool(uint32_t)> closePilot;    // closes the session (safety stop); true if closed in time
   std::function<void(const String &)> block;   // refuses new sessions with this reason (empty: accepts them)

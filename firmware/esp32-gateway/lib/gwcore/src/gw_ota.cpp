@@ -7,6 +7,11 @@ namespace ota {
 
 std::string refusal(const Situation &s) {
   if (s.updateRunning) return "Update already in progress";
+  // A restart would drop the robot link in the middle of a route followed without the pilot: refused whatever the
+  // "Updates during mowing" setting.
+  if (s.autonomyRunning)
+    return "Autonomous route tracking in progress: update refused until the robot has finished its route "
+           "(or stop it from the app).";
   if (s.robotPiloted && !s.allowWhilePiloted)
     return "Robot being piloted: update refused (app setting \"Updates during mowing\" "
            "is off). Try again with the robot stopped, or turn the setting on.";

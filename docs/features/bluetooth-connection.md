@@ -108,7 +108,7 @@ Group **Test limits**: **Minimum battery** 30 % (fixed). Once the adb permission
 ## Limitations
 
 - The protocol comes from reverse engineering (PyMammotion) and may change with a firmware update.
-- Only `Luba-VS…` names (LUBA 2) are accepted for movement and blade commands; every other model is in
+- Only `Luba-VS…` and `Luba-VP…` names (LUBA 2 and its X series) are accepted for movement and blade commands; every other model is in
   [read-only mode](supported-models.md). A name proves neither the exact model nor the owner.
 - The robot's Bluetooth range is a few meters: direct Bluetooth from the phone is only usable nearby (tests,
   configuration). To control the robot across the whole garden, **a device placed on the LUBA is required**: the

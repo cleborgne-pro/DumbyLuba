@@ -7,6 +7,7 @@
 #include <deque>
 #include <string>
 
+#include "gw_leg_frames.h"
 #include "gw_ota.h"
 #include "ota.h"
 #include "robot.h"
@@ -22,6 +23,9 @@ struct Session {
   WiFiClient client;
   IPAddress peer;
   bool waiting = false;  // same phone coming back: waits for its previous session to end
+  // The pilot announced the autonomous tracking frames (LEG_HELLO): an older pilot receives none (it would take them
+  // for a fault).
+  bool legPilot = false;
   std::deque<Bytes> outbox;
 };
 
@@ -172,22 +176,24 @@ void run(void *arg) {
   if (!readFrame(s, parser, frame, lastRx)) finish(s);
   const uint32_t now = millis();
   if (limiter.blocked(now)) {
-    refuse(s, "Too many attempts: wait a minute");
+    refuse(s, P::wire::TOO_MANY_ATTEMPTS);
     finish(s);
   }
   if (frame.type != P::HELLO || frame.payload.empty() || frame.payload[0] != P::VERSION) {
-    refuse(s, "Different gateway version: update both phones");
+    refuse(s, P::wire::VERSION_MISMATCH);
     finish(s);
   }
   uint8_t expected[32];
   proof(nonce, sizeof(nonce), expected);
   if (frame.payload.size() != 33 || !sameProof(expected, frame.payload.data() + 1, 32)) {
     limiter.failed(now);
-    refuse(s, "Wrong gateway code");
+    refuse(s, P::wire::WRONG_CODE);
     finish(s);
   }
-  // "ota" capability: the pilot sends its setting (CONFIG) and knows an announced restart is not a failure.
-  send(s, P::WELCOME, P::welcome(gw::ota::CAPABILITY));
+  // "autonomy": the pilot hands the routes over (frames 0x80..0x97) and the robot carries on through a Wi-Fi outage;
+  // "dock-exit": the gateway runs the station exit itself; "ota": the pilot sends its setting (CONFIG) and knows an
+  // announced restart is not a failure.
+  send(s, P::WELCOME, P::welcome(std::string(P::CAP_AUTONOMY) + "," + P::CAP_DOCK_EXIT + "," + gw::ota::CAPABILITY));
   note("pilot connected: " + s->peer.toString());
 
   bool intentional = false;
@@ -225,7 +231,7 @@ void run(void *arg) {
         case P::OPEN: {
           std::string address, name;
           P::parseOpen(frame.payload, address, name);
-          const std::string refused = attached ? "Robot link already open" : robot::attach(s->id, address, name);
+          const std::string refused = attached ? P::wire::LINK_ALREADY_OPEN : robot::attach(s->id, address, name);
           if (!refused.empty()) send(s, P::FAILURE, text(refused));
           else attached = true;
           break;
@@ -240,15 +246,28 @@ void run(void *arg) {
           intentional = true;
           stop = true;
           break;
+        case gw::leg::frames::LEG_HELLO: {
+          Lock l;
+          s->legPilot = true;
+          break;
+        }
         case P::CONFIG: {
           std::string value;
           if (P::configValue(frame.payload, "ota_during_mowing", value)) ota::setAllowWhilePiloted(value == "1");
           break;
         }
-        default:
-          send(s, P::FAILURE, text("Unknown frame " + std::to_string(frame.type)));
+        default: {
+          bool legPilot;
+          {
+            Lock l;
+            legPilot = s->legPilot;
+          }
+          // Autonomous tracking: only once the robot link was opened by this pilot, which announced it.
+          if (attached && legPilot && robot::autonomyFrame(frame.type, frame.payload)) break;
+          send(s, P::FAILURE, text(P::wire::unknownFrame(frame.type)));
           reason = "unknown frame";
           stop = true;
+        }
       }
     }
     if (stop) break;
@@ -299,8 +318,11 @@ void run(void *arg) {
 
   if (!intentional) note("pilot lost (" + s->peer.toString() + "): " + reason);
   if (attached) {
-    const std::string outcome = robot::detach(s->id, !intentional);
+    bool continued = false;
+    const std::string outcome = robot::detach(s->id, !intentional, &continued);
     if (intentional) note("pilot left (intentional close); Bluetooth link kept");
+    // Autonomous tracking in progress and Wi-Fi lost: the robot carries on alone, no safety stop was written.
+    else if (continued) note("pilot lost during autonomous tracking: the robot carries on alone");
     else note(String("safety stop: ") + outcome.c_str());
   }
   finish(s);
@@ -375,6 +397,11 @@ void poll() {
 void deliver(int id, uint8_t type, const Bytes &payload) {
   Lock l;
   if (active && active->id == id) active->outbox.push_back(P::encode(type, payload));
+}
+
+void deliverLeg(int id, uint8_t type, const Bytes &payload) {
+  Lock l;
+  if (active && active->id == id && active->legPilot) active->outbox.push_back(P::encode(type, payload));
 }
 
 Info info() {

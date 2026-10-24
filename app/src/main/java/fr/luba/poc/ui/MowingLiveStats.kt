@@ -73,5 +73,21 @@ object MowingLiveStats {
         return "Recharge ${done.coerceAtLeast(0)}/$total"
     }
 
+    /**
+     * Live end of the mowing ([fr.luba.poc.history.LiveEta]): "End ≈ 16:40 · 1 h 05 left · 1 recharge left";
+     * "(forecast)" while the speed is not measured on this mowing yet.
+     */
+    fun etaText(eta: fr.luba.poc.history.LiveEta.Eta, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+        val end = java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(zone).format(java.time.Instant.ofEpochMilli(eta.endAtMs))
+        val left = fr.luba.poc.history.MowingText.duration(eta.remainingSeconds)
+        val recharges = when (eta.rechargesLeft) {
+            0 -> null
+            1 -> tr("1 recharge left", "1 recharge restante")
+            else -> tr("${eta.rechargesLeft} recharges left", "${eta.rechargesLeft} recharges restantes")
+        }
+        return listOfNotNull(tr("End ≈ $end", "Fin ≈ $end"), tr("$left left", "reste $left"), recharges).joinToString(" · ") +
+            if (eta.measuredSpeed) "" else tr(" (forecast)", " (prévision)")
+    }
+
     private fun thousands(value: Int): String = String.format(fr.luba.poc.i18n.I18n.locale, "%,d", value).replace(' ', ' ').replace(' ', ' ')
 }

@@ -151,7 +151,8 @@ the displayed source and the map contents ("7 zones · 26 no-go zones").
 | Beyond the Mammotion boundaries | **orange hatching** with a thin orange outline: mowing surface added on the phone (DumbyLuba zones, enlargements) |
 | No-go zone | ochre fill, thin darker outline |
 | Map obstacle | grey, outlined |
-| Vision zone (LUBA 2 AWD X) | drawn like a map obstacle: rectangle of type 25/26 recorded by the robot's vision, avoided by moves; mowing computation refused on such a map ([details](supported-models.md#map-of-a-luba-2-awd-x-vision-zones-version-1121)) |
+| No-Stop zone (LUBA 2 AWD X) | light blue tint, **dashed** blue outline: type 25, the robot does not stop there for what its vision sees; ordinary ground, mowed and crossed ([details](supported-models.md#map-of-a-luba-2-awd-x-vision-module-zones)) |
+| Vision obstacle zone (LUBA 2 AWD X) | drawn like a map obstacle: type 26, never observed, avoided by moves; mowing computation refused on such a map |
 | Passage | grey stripe dotted with white (path never mowed); **green** stripe for a DumbyLuba passage |
 | Passes to mow | white lines, translucent white band at the cutting width |
 | Borders to mow | white lines on a lighter band at the cutting width: the margin kept along the boundaries and around no-go zones reads as a light edging |
@@ -223,9 +224,9 @@ File: `map-corrections.json` (app folder, versioned format, atomic write, at mos
 
 ## Border types
 
-Each portion of a zone or no-go boundary can be marked with one of four types, the base of the future border, speed
-and precision strategies. **For now the types are only annotated, kept and drawn: they change nothing in the route
-computation nor in the robot's moves.**
+Each portion of a zone or no-go boundary can be marked with one of four types. The border lap and the pass ends
+follow a strategy per type, and **Danger** portions also keep the transits away (see below). Speed and precision
+strategies per type are not there yet.
 
 | Type | Colour | Meaning |
 |---|---|---|
@@ -256,6 +257,33 @@ read again, the zone is recorded again (even under another identifier) or a loca
 is reprojected onto the new boundary if it still follows it within 30 cm ("Follows the redrawn boundary"); otherwise it
 stays in the list, not applied, as "To review: boundary changed too much". Types are laid over the effective map
 (Mammotion map + local corrections), and have no effect on a map where they find no matching boundary.
+
+**Border lap per type.** For a recorded boundary, the margin between the side of the chassis and the outline, along
+each typed portion, is (`map/BorderStrategy.kt`):
+
+| Type | Lap margin | Why |
+|---|---|---|
+| **Open lawn** | 2 cm (never more than the set margin) | a slight overrun is harmless: the lap cuts as close as possible |
+| **Curb** and untyped portions | the set outer-loop margin | unchanged |
+| **Wall** | at least 12 cm | the chassis does not rub the wall, fence or hedge |
+| **Danger** | at least 55 cm | no footprint of any pass, pivots included, comes closer than 40 cm |
+
+The planner receives the outlines moved by the difference with the set margin along each portion (zone outline pulled
+in, or pushed out for an open lawn; no-go outline pushed out, or pulled in), so the border lap, the pass ends and the
+coverage target follow it, and the chassis envelope check of every pass is made on those outlines: along a Danger
+portion, the chassis footprint stays at least 40 cm away even during a pivot, which leaves an unmowed strip there on
+purpose. The transits keep the recorded outlines. The robot map and the safety checks of the preparation and of the
+tracking are unchanged. The route preview lists the strategy of each type present on the selected zones ("Borders by
+type": type, length, lap margin). Tests: `BorderStrategyTest`.
+
+**Transits away from Danger portions.** Links between passes and zones, the access to the first pass, returns to the
+base, recharge trips and resumes keep the chassis side at least **0.8 m** from every Danger portion
+(`TrajectoryPlanner.DANGER_TRANSIT_MARGIN_M`, robot centre at half a width + 0.8 m), whatever the detour: the transit
+goes round by the other side of a bed or of a no-go zone instead of running along the Danger edge. A transit that
+starts or ends on a pass running inside that band (border lap along the Danger portion) only crosses it to leave or
+reach the pass, straight away. When no transit outside the band connects the two ends (narrow corridor between Danger
+portions), the usual safe transit is kept: the band is a preference, never an exclusion, and no check is removed. The
+cutting passes themselves are unchanged. Tests: `DangerTransitTest`.
 
 File: `border-types.json` (app folder, versioned format, atomic write, at most 500 portions, coordinates to the
 millimetre). Code: `map/BorderTypes.kt` (model, reprojection, overlaps, storage), `map/BorderTypeEditor.kt` (editor

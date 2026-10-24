@@ -14,6 +14,7 @@
 #include <string>
 
 #include "gw_blufi.h"
+#include "gw_protocol.h"
 
 namespace robot {
 
@@ -35,13 +36,30 @@ struct State {
   std::string lastStop;  // last safety stop (text)
 };
 
-void begin(PilotSink sink);
+// [leg]: autonomous tracking frames (only to a pilot that announced them); [health]: board health (battery).
+void begin(PilotSink sink, PilotSink leg, std::function<gw::proto::Health()> health);
 State state();
 
 // Pilot [session]: null (empty string) if accepted, otherwise the reason for refusal.
 std::string attach(int session, const std::string &address, const std::string &name);
-// Detaches; [emergency]: stop written by the gateway. Returns the report (empty if no stop).
-std::string detach(int session, bool emergency);
+// Detaches; [emergency]: stop written by the gateway. Returns the report (empty if no stop). [continued]: an
+// autonomous tracking carries on without the pilot (Wi-Fi lost): no stop was written.
+std::string detach(int session, bool emergency, bool *continued = nullptr);
+// Autonomous tracking frame from the pilot (0x80..0x97); false if it is not one.
+bool autonomyFrame(uint8_t type, const gw::Bytes &payload);
+
+struct AutonomyState {
+  bool running = false;
+  int legId = 0;
+  int index = 0;
+  int total = 0;
+  bool orphan = false;  // pilot absent: the robot carries on alone
+  std::string status;
+  std::string last;  // last finished tracking
+};
+AutonomyState autonomyState();
+// Interrupts the autonomous tracking (robot stopped, blades OFF), e.g. from the web page.
+void stopAutonomy(const std::string &reason);
 void write(int session, const gw::Bytes &frame);
 void readRssi(int session);
 void scan(int session);

@@ -675,3 +675,158 @@ in front of the station); robot away from the base, only **Recharge**. Without a
 15 s, no link), both actions stay offered and the route still checks the contact. Through the Mammotion account, a
 robot already on its base no longer offers **Recharge (native Mammotion)**: "Robot on its base: no return needed." See
 [Charging station](docs/features/station-and-moves.md#charging-station-robot-connected).
+
+Version 1.15.0 (183): **No-Stop zones of the Luba 2 AWD X and model trial**. Type 25 map elements of a Luba 2 AWD X
+are the **No-Stop zones** of the Mammotion app: the robot keeps going there even when its vision module detects an
+obstacle (the bumper still stops it). They are now ordinary ground: neither avoided by moves nor refused by the
+mowing computation, drawn with a light blue tint and a dashed blue outline. Type 26 (vision obstacle zone, never
+observed) is still avoided and still refuses the computation. A map holding these types is now read back from the
+local cache (it was written but refused on reading, so read again at every connection). See
+[vision module zones](docs/features/supported-models.md#map-of-a-luba-2-awd-x-vision-module-zones).
+
+**Model trial**. The owner of a model in read-only mode can arm, from Service, a 30-minute trial for the connected
+robot only, after three confirmations (next to the robot, flat open ground, physical STOP within reach). It opens the
+three tests needed to validate a model, and nothing else: the command cutoff test, the joystick bounded to low speed
+(≈ 0.3 m/s, ≈ 15 °/s) and the blade test while stationary. Routes, mowing, moves, return to base, gateway tracking,
+cutting height and map writing stay refused, at the entry points and by the Bluetooth barrier, which only adds the
+bounded motion, manual mowing and knife commands during the trial. The trial ends with its button, at disconnection,
+after 30 minutes or for another robot, and is never saved. See [model trial](docs/features/supported-models.md#model-trial).
+
+**LUBA 2 AWD X series unlocked**. `Luba-VP…` robots leave read-only mode and get every control of the LUBA 2 AWD
+(motion, blades, routes, mowing, gateway tracking, map writing): same platform and firmware as the validated LUBA 2,
+connection, map, camera and STOP checked on a 3000X (DumbyLuba#1). Not driven by DumbyLuba yet: run the command cutoff
+test before mowing; vision obstacle zones (type 26) stay avoided. See
+[X series](docs/features/supported-models.md#luba-2-awd-x-series-unlocked).
+
+**Obstacles identified without the Contact test, and from the joystick**. The Learn tab of Service → Obstacle tests
+no longer waits for a stationary contact on the connection: the slow approach is available at once (it still stops
+after 1 m, 30 s or 3 s without moving, and a contact during it validates detection). **Obstacle in front of the
+robot** places an obstacle against the bumper from the robot's pose, without any command, with an adjustable distance,
+type, radius and margin. While driving with the joystick, a bumper contact (1014, or the collision lock 25 announcing
+it) stops the robot and opens the **Obstacle touched while driving** sheet over any screen: keep it with its size, or
+dismiss it; the contact otherwise stays on the map (origin "manual control"). See
+[obstacles](docs/features/obstacles.md).
+
+**No more app crash while a route is being drawn**. The live map could kill the app in the middle of a route: on a
+redraw, the clipping area (zones minus no-go zones) went through a boolean path operation that Skia sometimes refuses,
+and Compose turned the refusal into a fatal exception (border loop on the Fold, 2026-10-22, stopped at edge 180/354). The
+operation that fails now leaves its shape out of the clip instead, non-finite points (position, trace, vertex) are kept out
+of the framing and of the drawn paths, and a view not measured yet keeps a positive scale.
+
+**Robot stuck in self-check 41: weak satellite signal, not a lock**. Self-check values are now named after the table
+of the Mammotion app: 41 is "weak satellite signal" (40, 42 and 99 are the other positioning conditions; 11, 23 and
+25 match what was already observed). The robot stuck in 41 was shown as locked, with an **Unlock** that could not work
+and the advice to press STOP then Start, while the joystick was refused. A note now explains that the positioning is
+lost and that there is nothing to unlock; the **joystick stays allowed** (blades OFF, bumper and lift still stop it)
+to drive the robot under open sky; mowing and moves stay refused until the signal is back. During mowing, the pause
+waits up to 5 minutes instead of 30 s before giving up, then resumes as usual. The condition name shows in the Robot
+tab and in the log. See [positioning lost](docs/features/safety.md#positioning-lost-self-check-41).
+
+**Slow approach, gentle driving and contacts while driving**. The obstacle slow approach drove at 20 units, where the
+LUBA 2 does not move: it always ended as "Presumed blockage". It now drives at 80 units (≈ 7.6 cm/s), and a halt of
+the robot against the object (collision lock 25, or 3 s without moving) is no longer an interruption: the error history
+is read for 3 s, a 1014 or the lock give **Contact detected**, a halt after at least 5 cm without any code gives
+**Stopped in front of an object** with the obstacle proposed (bumper not validated). Gentle joystick driving no longer
+stops with "Wheels commanded without progress": the expected distance only counts the command above the low-speed dead
+band (100 units), a lift at a normal speed is still caught. A contact while driving is now detected: the joystick reads
+the robot's error history every 500 ms (the LUBA 2 only gives the 1014 there, and nothing read it while driving), and a
+stop on wheels without progress keeps the 3 s window for a late 1014. See [obstacles](docs/features/obstacles.md).
+
+**Bumper contact while driving and during the slow approach, for real**. The LUBA 2 only records a bumper contact
+(1014) in manual mowing mode (state 20). The joystick and the obstacle slow approach drove it in ready mode (11), so a
+pressed bumper produced nothing at all (Fold log of 2026-10-22: error history unchanged, state 11 throughout). Both
+now drive in manual mode with blades OFF, renewed every 500 ms like routes do (the approach waits up to 5 s for it to
+be confirmed); releasing the joystick leaves that mode. See [obstacles](docs/features/obstacles.md).
+
+**Finishing of the gaps after a mowing**. When a finished mowing leaves at least 1 m² unmowed according to its real
+coverage (and no more than 30 % of its zones, where mowing again is the right answer), the end-of-mowing report and
+the task sheet offer a **Finishing**: "Left unmowed: 3.2 m² in 4 gaps", **Prepare the finishing**. The button opens
+Service → Trial mowing targeting those gaps (outlined in orange) instead of a painted zone. Each gap is widened over
+the mowed grass by the lap inset plus 20 cm, so that the lap of each piece runs on its ragged edge and the passes
+cover it, even for a gap about 1 m wide where a painted zone of the same gap only left its centre line; along a zone
+boundary, the lap is the usual border lap. Every cutting pass is checked against the LUBA 2 footprint on the robot
+map (`TrajectoryEnvelope`), and the route is refused above half the cutting length of a new mowing of the zones; the
+page shows its length, its share of a new mowing and the envelope result. Same planner, route checks, protections and
+resume as any mowing. Measured on the reference map: a 1 m band left across Aire de jeux is closed entirely, a 3 m
+band to 2 %, with a route about a quarter of a new mowing. See [real coverage](docs/features/mowing-history.md#finishing-of-the-gaps).
+
+**Transits away from Danger portions and start direction**. Boundary portions typed **Danger** now count: links
+between passes and zones, the access to the first pass, returns to the base, recharges and resumes keep the chassis
+at least 0.8 m from them, whatever the detour (round the other side of a bed rather than along a drop or a road). A
+pass running along the Danger portion is only left and reached straight away, and where no transit outside that band
+exists, the usual safe transit is kept: a preference, never an exclusion. The **Start** marker of the map and of the
+route preview now carries an arrow showing the direction the robot sets off in. Measured on the reference map: robot
+at a far corner of each zone, the chosen start costs 0.7 m of initial transit over the seven zones against 134 m to
+the fixed anchor of the plan. See [border types](docs/features/map.md#border-types) and
+[nearest start](docs/path-planning/ENGINE.md#nearest-start).
+
+**Border lap adapted to the border types**. The border lap and the pass ends now follow the type of each boundary
+portion: **Open lawn** at 2 cm from the outline (cut as close as possible), **Curb** and untyped at the set margin,
+**Wall** at least 12 cm (no rubbing), **Danger** at least 55 cm, so that no pass footprint, pivots included, comes
+closer than 40 cm (checked with the chassis envelope; an unmowed strip is left there on purpose). The route preview
+lists the strategy of each type present ("Borders by type"). The transits, the robot map and the safety checks are
+unchanged. See [border types](docs/features/map.md#border-types).
+
+**Mission control in the mowing bar**. During a mowing, the bar shows the robot's deviation from the edge being driven
+("Deviation 4 cm left") and the waypoint aimed at with its distance ("waypoint 12/240 in 3.2 m"), directly or through
+the gateway, and a live end: "End ≈ 16:40 · 1 h 05 left · 1 recharge left", recomputed from the cutting speed, battery
+use and charge rate measured on this mowing (incidents and bypasses included), the launch forecast filling in for the
+first minutes ("(forecast)"). See [mowing bar](docs/features/real-mowing.md#mowing-bar).
+
+**Smart resume after a recharge or a blockage**. After a recharge, the robot no longer goes back to the interrupted
+point first when that costs transit: the remainder may start with the block (whole cell, or a segment set aside)
+that minimises the total transit from the base back to the base, the interrupted cell being finished later from its
+interrupted point (2 m saved at least; not with height passes). Applied to the recharge cycle of a mowing and to the
+resume of a mowing whose robot charges on the base. Measured on the reference map (four zones): 17 to 35 m of transit
+saved depending on the interruption point, every remaining stripe kept. A robot whose wheels turn without moving
+(soft ground, root) no longer stops the mowing: the place is recorded as a blockage and bypassed like a bumper
+contact. When a bypass is impossible (object too large, no detour, repeated exits at the same place), the segment is
+deferred to the end of the mowing with its position and tried again there, given up if the robot is blocked again
+(counted as skipped). The save keeps the reordered remainder; "Resume further on" is not offered on it. See
+[resume](docs/features/mowing-resume.md#smart-resume-after-a-recharge-or-a-blockage).
+
+**ESP32 gateway brought up to the app**. The ESP32 gateway firmware catches up with the Android gateway on every
+point that does not need autonomous tracking: its refusals, link losses and safety stop reports use the same French
+protocol texts again (translated into the pilot's language by the app, "STOP écrit…" recognised as a confirmed stop);
+the Bluetooth search lists every Mammotion mower (Luba, Yuka, Ezy-, Kumar, Maston) and reports a refused scan to the
+pilot instead of an empty list; the blades OFF of its safety stop keeps the cutting height of every model (20 to
+100 mm, H versions included, instead of 25 to 70 mm); the serial console command `pair` prints the pairing link of
+the Android gateway's QR code. A search requested while the gateway tries to reach its retained robot now cancels
+that attempt instead of answering after the app has given up. Fixed: a pilot request arriving while the gateway
+connected to the robot or waited for a write confirmation could end that wait early as a success (gateway stuck
+"busy", no more reconnection or search, possible restart, write reported confirmed too early). Autonomous tracking
+came next (below). See
+[ESP32 gateway](firmware/esp32-gateway/README.md).
+
+**Autonomous tracking on the ESP32 gateway** (firmware 0.3.0). The ESP32 gateway now follows the routes prepared by
+the pilot on its own, like the Redmi: it announces `autonomy` and `dock-exit` in WELCOME, receives the route and the
+free physical surface once, then follows them with the same loop, guards and thresholds as the Android gateway
+(C++ port of `LegRunner` and its building blocks: path follower, dead reckoning with the 0.6 s command delay, blade
+gates, height, 30 cm deviation and 1 m drift on the return, chassis envelope on the WKB surface, obstacles, collision
+lock, station exit, robot telemetry decoded on board, bumper contact and lift, gateway fallen off the robot). A
+Wi-Fi outage no longer stops the robot: the tracking carries on, progress and survey samples are handed back when the
+pilot returns, the robot stops after 20 min without a pilot, and the gateway asks for the official Mammotion docking
+when a return ends with no pilot. A pilot write, a deliberate departure or the new **Stop the autonomous tracking**
+button of the gateway page stops it (blades OFF, zero speed). No update over Wi-Fi and no release of the robot while
+a tracking runs. ESP32 limits: routes and surfaces of 1.5 MB at most (refused with the reason beyond), no phone tilt
+(no Slope/Terrain layer), no overheating stop (no sensor). 43 tests on a simulated robot, not tried on the robot. See
+[autonomous gateway](docs/AUTONOMOUS_GATEWAY.md#esp32-gateway-2026-10-23).
+
+**Sync with the Mammotion app: join onto the outline faced in place first**. The straight join from the approach
+point to the outline ends half a chassis + 15 cm from the element. Under 25° of misalignment the tracking turns while
+moving: that arc took the chassis towards the element and the envelope check refused the join three times
+("Join onto the outline interrupted"), on 8 draws of the position noise out of 40 on the simulated robot (also the
+occasional failure of the map sync bench test). The robot now faces the join point in place before driving it, after
+a recovery too: no join refused in 80 draws. The outline is now also started facing its first edge in place (the join
+left the robot up to 25° off, and the arc that corrected it took the chassis towards the element): over 300 draws,
+outlines abandoned fall from 17.7 % to 11.7 %, none at the join any more. The remaining ones are safe aborts of the
+footprint and corridor checks (nothing recorded, corrections kept: start the sync again), whose margins are kept until
+the first real tries. See [map sync](docs/features/map-sync.md#what-is-verified-what-is-not).
+
+**What was tried on the robot**. Most of this version was checked on the simulated robot and the reference map, not
+on a LUBA: smart resume, finishing of the gaps, transits away from Danger portions and border lap by type, mission
+control, sync with the Mammotion app, and autonomous tracking on the ESP32 gateway (board tried, never on the robot).
+The bumper contact in manual mode, the slow approach at 80 units and self-check 41 come from what the robot did
+(2026-10-22), but their fixes have not been tried on it yet. The Luba 2 AWD X series has its connection, map, camera
+and STOP checked, and was never driven by DumbyLuba: run the command cutoff test before mowing. Keep STOP within reach
+for the first mowing with this version.

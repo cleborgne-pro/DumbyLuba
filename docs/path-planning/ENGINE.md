@@ -66,6 +66,23 @@ chassis pivot reserve. With several zones, the order chosen by the user is kept 
 entered as close as possible to the start, and each next zone starts from the exit of the previous one. The whole mission is then evaluated and checked, without removing any
 envelope, obstacle or tracking check.
 
+Measured on the reference map (`StartTransitTest`): robot at a far corner of each zone, initial transit to the
+chosen start 0.0 to 0.2 m against 11 to 28 m to the fixed anchor of the plan (its first vertex), 0.7 m against
+134 m over the seven zones. The **Start** marker of the map and of the preview carries an arrow along the first edge
+of the first pass (`routeStartAhead`): the direction the robot sets off in.
+
+Transits keep away from the boundary portions typed **Danger** ([border types](../features/map.md#border-types)):
+`TrajectoryPlanner` first looks for the transit in the comfort and crossing surfaces minus a band of half a width +
+0.8 m around those portions, with no detour limit, then falls back to the usual surfaces. Same planner for the
+computation (`PlanningRequest.dangerLines`, filled in by `RoutePlanning.coverage` from the annotations) and for the
+mission (`RoutePlanning.mission`).
+
+Border strategy per type (`RoutePlanning.withBorderStrategy`, `map/BorderStrategy.kt`): for a recorded boundary, the
+planner works on the outlines moved along each typed portion by its lap margin minus the set margin (open lawn 2 cm,
+wall ≥ 12 cm, danger ≥ 55 cm), `PlanningRequest.navigationMap` keeping the recorded outlines for the transits. The
+envelope of the passes is that of the moved outlines: along a Danger portion the chassis footprint stays ≥ 40 cm away,
+pivots included (`BorderStrategyTest`).
+
 ## Sweep bar and checkerboard by direction — 0.46.0
 
 Observation: on a checkerboard zone, passes of both directions were mixed and the robot crossed from one side of

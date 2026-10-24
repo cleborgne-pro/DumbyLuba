@@ -227,6 +227,9 @@ private fun RobotScreen(
             .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
             .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, fr.luba.poc.alerts.LocalNotifications.channelId(level)))
     }, onClear = robot::clearNotificationHistory)
+    // Contact while driving with the joystick: the obstacle sheet opens over any screen (keep with its size, or dismiss).
+    fr.luba.poc.map.ManualContactSheet(state.manualContactId, state.difficulties, state.obstaclePhoto.photos, state.obstacles,
+        actions = { action -> fr.luba.poc.map.MapExtraLayers.actions?.invoke(action) }, onClose = robot::closeManualContact)
     var useCloudMap by remember { mutableStateOf(true) }
     // Account map: only before the first robot link (or on request). Once the robot is linked, a gateway
     // dropout or reconnection keeps the Bluetooth map, its heatmap and its framing.
@@ -248,6 +251,14 @@ private fun RobotScreen(
     fun openDevice(target: DevicePage) { tab = Tab.Appareil; page = target }
     LaunchedEffect(mapOpenToken) { if (mapOpenToken > 0) openDevice(DevicePage.MAP) }
     fun openService(sub: String) { robotTab = sub; tab = Tab.Service }
+    // Finishing of a mowing's gaps: only for the connected robot of that mowing with its complete map; opens the
+    // trial mowing page targeting the gaps after closing the report ([close]).
+    fun finishingFor(robotId: String?, close: () -> Unit): ((fr.luba.poc.planning.FinishingOffer) -> Unit)? =
+        if (state.robotMap.complete && robotId != null && state.selected?.address == robotId) { offer ->
+            fr.luba.poc.ui.FinishingDraft.set(state.robotMap, offer)
+            close()
+            openService(fr.luba.poc.ui.ServicePage.MOW_DEBUG.key)
+        } else null
     val role = fr.luba.poc.gateway.rememberGatewayRole()
     var demoMap by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(startAt) {
@@ -526,14 +537,16 @@ private fun RobotScreen(
                     fr.luba.poc.history.TaskDetailPage(record, state.mowingHistory,
                         fallbackMap = state.robotMap.takeIf { it.complete && state.selected?.address == record.robotId },
                         loadTrack = robot::loadTaskTrack, onExcluded = { robot.setMowingExcluded(record.id, it) },
-                        onBack = { robot.showTaskDetail(null) })
+                        onBack = { robot.showTaskDetail(null) },
+                        onFinishing = finishingFor(record.robotId) { robot.showTaskDetail(null) })
                 }
             }
             state.mowingReport?.let { report ->
                 fr.luba.poc.history.MowingReportDialog(report, state.mowingHistory,
                     onExcluded = { robot.setMowingExcluded(report.id, it) }, onDismiss = { robot.showMowingReport(null) },
                     loadTrack = robot::loadTaskTrack,
-                    fallbackMap = state.robotMap.takeIf { it.complete && state.selected?.address == report.robotId })
+                    fallbackMap = state.robotMap.takeIf { it.complete && state.selected?.address == report.robotId },
+                    onFinishing = finishingFor(report.robotId) { robot.showMowingReport(null) })
             }
         }
     }

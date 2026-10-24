@@ -91,7 +91,7 @@ object NavSafety {
         /** Cutting heights of the connected model. */
         heights: fr.luba.poc.protocol.CutHeightRange = fr.luba.poc.protocol.CutHeightRange.forRobot(name),
     ): String? {
-        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Walk reserved for a LUBA 2 identified as Luba-VS", "Marche réservée au LUBA 2 identifié Luba-VS")
+        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Walk reserved for a LUBA 2 identified as Luba-VS or Luba-VP", "Marche réservée au LUBA 2 identifié Luba-VS ou Luba-VP")
         if (campaignRunning) return tr("Stop the BLE campaign before the walk", "Arrêter la campagne BLE avant la marche")
         if (bladeTestRunning) return tr("Finish the cutting test before the walk", "Terminer l'essai de coupe avant la marche")
         if (mapLoading) return tr("Wait for the map to be read", "Attendre la lecture de carte")

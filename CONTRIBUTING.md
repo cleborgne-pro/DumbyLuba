@@ -21,7 +21,7 @@ Report security vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 
 ## Testing another robot model
 
-Only the LUBA 2 AWD (`Luba-VS…`) is validated; LUBA 1, LUBA 2 X, LUBA 3, LUBA mini, Yuka and the other Mammotion
+Only the LUBA 2 AWD (`Luba-VS…`, X series `Luba-VP…`) is validated; LUBA 1, LUBA 3, LUBA mini, Yuka and the other Mammotion
 mowers connect in read-only mode. Owners of these models help the most by following
 [supported models](docs/features/supported-models.md#testing-your-model) and opening a **Model compatibility report**
 issue. A model is unlocked by following [Unlocking a model](docs/features/supported-models.md#unlocking-a-model),

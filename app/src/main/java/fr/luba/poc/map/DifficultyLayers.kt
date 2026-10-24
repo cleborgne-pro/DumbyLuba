@@ -139,6 +139,7 @@ fun difficultySourceLabel(source: String): String = when (source) {
     "trajet" -> tr("route", "trajet")
     "navigation" -> "navigation"
     "tonte native" -> tr("native mowing", "tonte native")
+    "pilotage" -> tr("manual control", "pilotage manuel")
     else -> source
 }
 
@@ -193,14 +194,36 @@ fun EncounterSheet(ui: DifficultyUi, photos: List<ObstaclePhoto>, obstacles: Lis
     ObstacleEditSheet(obstacles)
     val opened by MapExtraLayers.openedEncounter.collectAsState()
     val event = opened ?: return
+    EncounterDialog(event, ui, photos, obstacles, onClose = { MapExtraLayers.close() })
+}
+
+/**
+ * Sheet of a contact met while driving with the joystick ([fr.luba.poc.ble.RobotUi.manualContactId]), shown over any
+ * screen: same choices as a contact on the map (keep it as an obstacle with its size, or dismiss it). Closed without a
+ * choice, the contact stays in the log and on the map.
+ */
+@Composable
+fun ManualContactSheet(contactId: String?, ui: DifficultyUi, photos: List<ObstaclePhoto>, obstacles: List<LocalObstacle>,
+                       actions: (DifficultyAction) -> Unit, onClose: () -> Unit) {
+    val event = ui.events.firstOrNull { it.id == contactId } ?: return
+    EncounterDialog(event, ui, photos, obstacles, onClose = onClose, actions = actions, openSaved = null,
+        title = tr("Obstacle touched while driving", "Obstacle touché en pilotage"))
+}
+
+/** Contact sheet: photo, details, saved obstacle around it, dismiss or save with the chosen exclusion size. */
+@Composable
+private fun EncounterDialog(event: DifficultyEvent, ui: DifficultyUi, photos: List<ObstaclePhoto>, obstacles: List<LocalObstacle>,
+                            onClose: () -> Unit, actions: (DifficultyAction) -> Unit = { MapExtraLayers.actions?.invoke(it) },
+                            openSaved: ((String) -> Unit)? = { MapExtraLayers.openObstacle(it) },
+                            title: String = tr("Obstacle encountered", "Obstacle rencontré")) {
     var kind by remember(event.id) { mutableStateOf(ObstacleKind.OTHER) }
     var radius by remember(event.id) { mutableFloatStateOf(ObstacleSelection.defaultRadius(event, ui.presumed).toFloat()) }
     var margin by remember(event.id) { mutableFloatStateOf(fr.luba.poc.simulation.ObstacleBypass.CONTACT_MARGIN_M.toFloat()) }
     val photo = MapExtraLayers.photoFor(event, photos)
     val date = java.text.SimpleDateFormat(tr("yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm"), fr.luba.poc.i18n.I18n.locale).format(java.util.Date(event.atMs))
-    LubaDialog(onDismissRequest = { MapExtraLayers.close() }, title = tr("Obstacle encountered", "Obstacle rencontré"), content = {
+    LubaDialog(onDismissRequest = onClose, title = title, content = {
         if (photo != null) fr.luba.poc.ui.PhotoImage(photo, Modifier.fillMaxWidth().aspectRatio(4f / 3f), 1280)
-        else Text(tr("No photo for this contact (option off, account not signed in or stream unavailable).", "Pas de photo pour ce contact (option désactivée, compte non connecté ou flux indisponible)."),
+        else if (event.source != "pilotage") Text(tr("No photo for this contact (option off, account not signed in or stream unavailable).", "Pas de photo pour ce contact (option désactivée, compte non connecté ou flux indisponible)."),
             style = MaterialTheme.typography.bodyMedium, color = MammotionColors.TextSecondary)
         KeyValueRow("Contact", date)
         KeyValueRow(tr("Origin", "Origine"), difficultySourceLabel(event.source))
@@ -217,13 +240,13 @@ fun EncounterSheet(ui: DifficultyUi, photos: List<ObstaclePhoto>, obstacles: Lis
             Text(tr("This contact is covered by the saved obstacle “${saved.label.ifBlank { saved.kind.label }}”.",
                 "Ce contact est couvert par l'obstacle enregistré « ${saved.label.ifBlank { saved.kind.label }} »."),
                 style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
-            SecondaryPillButton(tr("Open the saved obstacle", "Ouvrir l'obstacle enregistré"), { MapExtraLayers.openObstacle(saved.id) }, Modifier.fillMaxWidth())
+            if (openSaved != null) SecondaryPillButton(tr("Open the saved obstacle", "Ouvrir l'obstacle enregistré"), { openSaved(saved.id) }, Modifier.fillMaxWidth())
         }
         // Presumed obstacle (several contacts): dismissed as a whole, otherwise it stays as long as two contacts remain.
         ObstacleSelection.presumedFor(event, ui.presumed)?.let { presumed ->
             val count = PresumedObstacles.contactsOf(ui.events, presumed.id, System.currentTimeMillis()).size
             if (count > 1) SecondaryPillButton(tr("Dismiss this presumed obstacle ($count contacts)", "Écarter cet obstacle présumé ($count contacts)"), {
-                MapExtraLayers.actions?.invoke(DifficultyAction.DismissPresumed(presumed.id)); MapExtraLayers.close()
+                actions(DifficultyAction.DismissPresumed(presumed.id)); onClose()
             }, Modifier.fillMaxWidth())
         }
         Text(tr("Save the obstacle: size of the zone that routes will avoid around it (pole hit: choose Pole and a wider margin).", "Enregistrer l'obstacle : taille de la zone que les trajets éviteront autour de lui (poteau touché : choisir Poteau et une marge plus large)."),
@@ -232,13 +255,13 @@ fun EncounterSheet(ui: DifficultyUi, photos: List<ObstaclePhoto>, obstacles: Lis
     }, footer = {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SecondaryPillButton(tr("Dismiss", "Écarter"), {
-                MapExtraLayers.actions?.invoke(DifficultyAction.Dismiss(event.id)); MapExtraLayers.close()
+                actions(DifficultyAction.Dismiss(event.id)); onClose()
             }, Modifier.weight(1f))
             PrimaryPillButton(tr("Save the obstacle", "Enregistrer l'obstacle"), {
                 val now = System.currentTimeMillis()
-                MapExtraLayers.actions?.invoke(DifficultyAction.Register(ObstacleSelection.fromEncounter(event, ui.presumed, kind,
+                actions(DifficultyAction.Register(ObstacleSelection.fromEncounter(event, ui.presumed, kind,
                     radius.toDouble(), margin.toDouble(), java.util.UUID.randomUUID().toString(), now, date)))
-                MapExtraLayers.close()
+                onClose()
             }, Modifier.weight(1f))
         }
     })

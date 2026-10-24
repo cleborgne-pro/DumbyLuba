@@ -236,13 +236,47 @@ void test_safety_blades_off_height_sources() {
     writeAll(s, pilot, luba(12, luba(2, height)));
     TEST_ASSERT_EQUAL(65, s.commandedHeightMm());
     Bytes wrong;
-    gw::pb::int32Field(wrong, 1, 90);  // outside 25..70: ignored
+    gw::pb::int32Field(wrong, 1, 110);  // outside 20..100: ignored
     writeAll(s, pilot, luba(12, luba(2, wrong)));
     TEST_ASSERT_EQUAL(65, s.commandedHeightMm());
     TEST_ASSERT_TRUE(s.emergencyPayloads(1000, payloads));
     gw::Commands c2;
     assertBytes(c2.bladesOff(65, 1000), payloads[0]);
   }
+}
+
+// H versions cut at 55-100 mm and the mini down to 20 mm (CutHeightRange.ANY): the injected blades OFF keeps their height.
+void test_safety_height_range_all_models() {
+  Bytes bits;
+  gw::pb::int32Field(bits, 4, 1 << 9);
+  gw::Safety s;
+  gw::Blufi robot, pilot;
+  Bytes work;
+  gw::pb::int32Field(work, 20, 95);  // rpt_work.knife_height of an H version
+  Bytes report = luba(5, work);
+  gw::pb::messageField(report, 2, bits);
+  notifyAll(s, robot, luba(10, luba(39, report)));
+  TEST_ASSERT_EQUAL(95, s.telemetryHeightMm());
+  Bytes hand;
+  gw::pb::int32Field(hand, 2, 1);    // cut_knife_ctrl ON
+  gw::pb::int32Field(hand, 3, 100);  // cut_knife_height
+  writeAll(s, pilot, luba(12, luba(6, hand)));
+  TEST_ASSERT_EQUAL(100, s.commandedHeightMm());
+  std::vector<Bytes> payloads;
+  TEST_ASSERT_TRUE(s.emergencyPayloads(1000, payloads));
+  gw::Commands c;
+  assertBytes(c.bladesOff(100, 1000), payloads[0]);
+  Bytes mini;
+  gw::pb::int32Field(mini, 1, 20);
+  writeAll(s, pilot, luba(12, luba(2, mini)));
+  TEST_ASSERT_EQUAL(20, s.commandedHeightMm());
+  Bytes low;
+  gw::pb::int32Field(low, 1, 19);
+  writeAll(s, pilot, luba(12, luba(2, low)));
+  TEST_ASSERT_EQUAL(20, s.commandedHeightMm());
+  TEST_ASSERT_TRUE(gw::validCutHeight(20));
+  TEST_ASSERT_TRUE(gw::validCutHeight(100));
+  TEST_ASSERT_FALSE(gw::validCutHeight(101));
 }
 
 // Height read from the cutting motor reports (driver 4 and 11), like TelemetryReducer.
@@ -311,6 +345,58 @@ void test_protocol_open_and_scan() {
   assertBytes(expected, r);
 }
 
+// Texts on the wire: byte for byte those of the Android gateway (GatewaySession / GatewayRobot), known to
+// GatewayWireText, which translates them on an English phone.
+void test_wire_texts_match_android_gateway() {
+  namespace W = gw::proto::wire;
+  TEST_ASSERT_EQUAL_STRING("Trop d'essais : attendre une minute", W::TOO_MANY_ATTEMPTS);
+  TEST_ASSERT_EQUAL_STRING("Version de passerelle différente : mettre à jour les deux téléphones", W::VERSION_MISMATCH);
+  TEST_ASSERT_EQUAL_STRING("Code de passerelle incorrect", W::WRONG_CODE);
+  TEST_ASSERT_EQUAL_STRING("Passerelle occupée par un autre pilote", gw::proto::BUSY);
+  TEST_ASSERT_EQUAL_STRING("Liaison robot déjà ouverte", W::LINK_ALREADY_OPEN);
+  TEST_ASSERT_EQUAL_STRING("Scanner Bluetooth indisponible", W::SCANNER_UNAVAILABLE);
+  TEST_ASSERT_EQUAL_STRING("connexion sans réponse", W::CONNECTION_NOT_ANSWERED);
+  TEST_ASSERT_EQUAL_STRING("opération GATT sans réponse", W::GATT_NOT_ANSWERED);
+  TEST_ASSERT_EQUAL_STRING("robot non connecté : aucun arrêt à écrire", W::NO_ROBOT_NO_STOP);
+  TEST_ASSERT_EQUAL_STRING("liaison robot perdue : arrêt non transmis", W::LINK_LOST_NO_STOP);
+  TEST_ASSERT_EQUAL_STRING("écriture GATT bloquée : liaison fermée, arrêt non garanti", W::WRITE_STUCK);
+  TEST_ASSERT_EQUAL_STRING("message fragmenté en cours : arrêt non injectable, liaison fermée (arrêt non garanti)",
+                           W::MID_MESSAGE);
+  TEST_ASSERT_EQUAL_STRING("Trame inconnue 153", W::unknownFrame(153).c_str());
+  TEST_ASSERT_EQUAL_STRING("La passerelle tient déjà un autre robot (Luba-VS1)", W::holdsAnotherRobot("Luba-VS1").c_str());
+  // The pilot reads the report as confirmed when it starts with "STOP écrit" (GatewayStopReport.confirmed).
+  TEST_ASSERT_EQUAL_STRING("STOP écrit par la passerelle (2 trame(s)), liaison Bluetooth conservée",
+                           W::stopWritten(2).c_str());
+  TEST_ASSERT_EQUAL_STRING("STOP non confirmé (délai dépassé)", W::stopNotConfirmed(-1).c_str());
+  TEST_ASSERT_EQUAL_STRING("STOP non confirmé (133)", W::stopNotConfirmed(133).c_str());
+}
+
+// Scan filter: every Mammotion mower, like ModelSupport.isMower (the pilot then decides read-only or not).
+void test_is_mower() {
+  TEST_ASSERT_TRUE(gw::proto::isMower("Luba-VS123456"));
+  TEST_ASSERT_TRUE(gw::proto::isMower("Luba-VP0001"));
+  TEST_ASSERT_TRUE(gw::proto::isMower("LUBA-MD1"));
+  TEST_ASSERT_TRUE(gw::proto::isMower("  Yuka-ABC"));
+  TEST_ASSERT_TRUE(gw::proto::isMower("Ezy-12"));
+  TEST_ASSERT_TRUE(gw::proto::isMower("Kumar-1"));
+  TEST_ASSERT_TRUE(gw::proto::isMower("Maston-1"));
+  TEST_ASSERT_FALSE(gw::proto::isMower("Spino-1"));
+  TEST_ASSERT_FALSE(gw::proto::isMower("RTK-123"));
+  TEST_ASSERT_FALSE(gw::proto::isMower("Lub"));
+  TEST_ASSERT_FALSE(gw::proto::isMower("   "));
+  TEST_ASSERT_FALSE(gw::proto::isMower("Ezy12"));
+}
+
+// Pairing link read by GatewayPairing.parse (same as the Android gateway's QR code).
+void test_pairing_uri() {
+  TEST_ASSERT_EQUAL_STRING("dumbyluba://pair?v=2&host=192.168.0.187&port=8766&code=123456&name=ESP32",
+                           gw::proto::pairingUri("192.168.0.187", 8766, "123456", "ESP32").c_str());
+  TEST_ASSERT_EQUAL_STRING("dumbyluba://pair?v=2&host=10.0.0.2&port=8766&code=000001&name=Redmi%20A1",
+                           gw::proto::pairingUri("10.0.0.2", 8766, "000001", "Redmi A1").c_str());
+  TEST_ASSERT_EQUAL_STRING("dumbyluba://pair?v=2&host=h&port=1&code=123456",
+                           gw::proto::pairingUri("h", 1, "123456", "").c_str());
+}
+
 void test_limiter() {
   gw::proto::AttemptLimiter l(5, 60000);
   for (int i = 0; i < 5; i++) l.failed(1000);
@@ -330,6 +416,11 @@ void test_ota_policy() {
   TEST_ASSERT_TRUE(gw::ota::refusal(s).empty());
   s.updateRunning = true;
   TEST_ASSERT_FALSE(gw::ota::refusal(s).empty());
+  // Autonomous tracking (pilot present or gone): refused even with the setting on.
+  gw::ota::Situation alone;
+  alone.autonomyRunning = true;
+  alone.allowWhilePiloted = true;
+  TEST_ASSERT_EQUAL(0, gw::ota::refusal(alone).rfind("Autonomous route tracking", 0));
 }
 
 void test_ota_nonce_single_use_and_expiry() {
@@ -384,10 +475,14 @@ int main(int, char **) {
   RUN_TEST(test_safety_corrupted_refuses_injection);
   RUN_TEST(test_safety_sys_knife_ctrl);
   RUN_TEST(test_safety_blades_off_height_sources);
+  RUN_TEST(test_safety_height_range_all_models);
   RUN_TEST(test_safety_driver_height_reports);
   RUN_TEST(test_safety_blade_bits_luba2_only);
   RUN_TEST(test_protocol_frames);
   RUN_TEST(test_protocol_open_and_scan);
+  RUN_TEST(test_wire_texts_match_android_gateway);
+  RUN_TEST(test_is_mower);
+  RUN_TEST(test_pairing_uri);
   RUN_TEST(test_limiter);
   RUN_TEST(test_ota_policy);
   RUN_TEST(test_ota_nonce_single_use_and_expiry);

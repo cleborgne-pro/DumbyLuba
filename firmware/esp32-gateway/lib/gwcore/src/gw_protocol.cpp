@@ -1,5 +1,8 @@
 #include "gw_protocol.h"
 
+#include <cctype>
+#include <cstring>
+
 namespace gw {
 namespace proto {
 
@@ -50,6 +53,53 @@ void parseOpen(const Bytes &payload, std::string &address, std::string &name) {
   name = nl == std::string::npos ? std::string() : text.substr(nl + 1);
   const bool blank = name.find_first_not_of(" \t\r\n") == std::string::npos;
   if (blank) name.clear();
+}
+
+namespace wire {
+std::string unknownFrame(int type) { return "Trame inconnue " + std::to_string(type); }
+std::string holdsAnotherRobot(const std::string &robot) { return "La passerelle tient déjà un autre robot (" + robot + ")"; }
+std::string stopWritten(size_t frames) {
+  return std::string(STOP_WRITTEN) + " (" + std::to_string(frames) + " trame(s)), liaison Bluetooth conservée";
+}
+std::string stopNotConfirmed(int code) {
+  return "STOP non confirmé (" + (code < 0 ? std::string("délai dépassé") : std::to_string(code)) + ")";
+}
+}  // namespace wire
+
+bool isMower(const std::string &raw) {
+  static const char *const PREFIXES[] = {"Luba", "Yuka", "Ezy-", "Kumar", "Maston"};
+  const size_t first = raw.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) return false;
+  const std::string name = raw.substr(first);
+  for (const char *prefix : PREFIXES) {
+    const size_t n = std::strlen(prefix);
+    if (name.size() < n) continue;
+    bool same = true;
+    for (size_t i = 0; i < n && same; i++) same = std::tolower((unsigned char)name[i]) == std::tolower((unsigned char)prefix[i]);
+    if (same) return true;
+  }
+  return false;
+}
+
+static std::string percentEncode(const std::string &value) {
+  static const char HEX[] = "0123456789ABCDEF";
+  std::string out;
+  for (unsigned char c : value) {
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '*') out += (char)c;
+    else {
+      out += '%';
+      out += HEX[c >> 4];
+      out += HEX[c & 15];
+    }
+  }
+  return out;
+}
+
+std::string pairingUri(const std::string &host, uint16_t port, const std::string &code, const std::string &name) {
+  std::string uri = "dumbyluba://pair?v=" + std::to_string(VERSION) + "&host=" + percentEncode(host) +
+                    "&port=" + std::to_string(port) + "&code=" + code;
+  if (!name.empty()) uri += "&name=" + percentEncode(name);
+  return uri;
 }
 
 Bytes Health::encode() const {

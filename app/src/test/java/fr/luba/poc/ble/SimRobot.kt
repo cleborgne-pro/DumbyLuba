@@ -94,8 +94,14 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
     // ───── Physical obstacle, errors ─────
     /** Real obstacle (center, radius): forward motion is blocked on bumper contact, code 1014 published. */
     var obstacle: Pair<Point, Double>? = null
+    /** Soft ground (center, radius): the wheels spin without moving forward once the robot centre is inside; reversing and pivoting still work, no contact. */
+    var mud: Pair<Point, Double>? = null
     /** Collision lock (self-check 25) published on contact, cleared after a 10 cm back-off. */
     var latchOnContact = false
+    /** The contact produces code 1014 (false: soft object, bumper not triggered, the robot only stops moving). */
+    var bumperReports = true
+    /** Like the LUBA 2: the contact (1014) is only published in manual mowing mode (state 20), not when driven in state 11. */
+    var contactOnlyInManual = true
     var contacts = 0; private set
     private var contactAt: Point? = null
     private var latchFrom: Point? = null
@@ -105,6 +111,9 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
     var latchReleaseDelayMs = 0L
     private var latchClearAt = 0L
     private val pendingErrors = ArrayDeque<Int>()
+    /** Like the LUBA 2: errors (1014…) only delivered on a read of the error history (`get_error_code`). */
+    var errorsOnQuery = false
+    private var errorQueried = false
     private var clearError = false
 
     // ───── Link and log ─────
@@ -289,6 +298,7 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
         }
         if (message.hasSys()) {
             val sys = message.sys
+            if (sys.hasBidireCommCmd() && sys.bidireCommCmd.id == 5) errorQueried = true
             if (sys.hasTodevReportCfg()) {
                 reporting = true
                 reportPeriodMs = sys.todevReportCfg.period.toLong().coerceIn(200, 1000)
@@ -343,11 +353,12 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
                     l = 0; v = 0.0
                     if (contactAt == null) {
                         contactAt = position; contacts++
-                        injectError(1014)
+                        if (bumperReports && (manual || !contactOnlyInManual)) injectError(1014)
                         if (latchOnContact) { selfCheck = 25; latchRelease = true }
                     }
                 }
             }
+            mud?.let { (c, r) -> if (position.distance(c) <= r && l > 0) { l = 0; v = 0.0 } }
             val linear = sign(l.toDouble()) * max(0, abs(l) - friction)
             val angular = sign(a.toDouble()) * max(0, abs(a) - ANGULAR_FRICTION)
             val k = 1 - exp(-0.05 / TAU_S)
@@ -380,7 +391,10 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
         val target = link?.takeIf { it.connected } ?: return
         if (!reporting || silent) return
         if (clearError) { clearError = false; target.notify(errorMessage(0)) }
-        pendingErrors.removeFirstOrNull()?.let { code -> target.notify(errorMessage(code)); clearError = true }
+        if (!errorsOnQuery || errorQueried) {
+            errorQueried = false
+            pendingErrors.removeFirstOrNull()?.let { code -> target.notify(errorMessage(code)); clearError = true }
+        }
         val withPosition = tick % 5 == 0L
         if (!withPosition && now - lastDevAt < reportPeriodMs) return
         lastDevAt = now

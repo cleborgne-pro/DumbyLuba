@@ -87,8 +87,11 @@ stop mowing ("Local obstacle inside the robot envelope").
 **Limits and stops maintained**
 
 - 8 bypasses at most per mission.
-- An object larger than the estimated disc is touched again further on; at the 5th contact within 2.5 m, the
-  mission stops (object too large, to be drawn as a no-go zone).
+- An object larger than the estimated disc is touched again further on; at the 5th contact within 2.5 m (object too
+  large, to be drawn as a no-go zone), or when no detour exists, the segment is deferred to the end of the mowing and
+  tried again there, given up if blocked again ([smart resume](mowing-resume.md#smart-resume-after-a-recharge-or-a-blockage)).
+- Wheels turning without the robot moving (soft ground, root, object without bumper code): the place is recorded as a
+  blockage and an estimated obstacle in front of the robot, bypassed like a contact.
 - Back-off impossible, no link, obstacle in a narrow passage, contact during docking: stop, progress kept for the
   [resume](mowing-resume.md). A contact on the return route to recharge or on the resume link is bypassed as during
   mowing (since 0.47.0).
@@ -165,12 +168,26 @@ Data and tests are kept apart:
 
 | Tab | Role |
 |---|---|
-| **Contact** | check that the bumper is received, robot stationary: **Listen to the bumper · manual mode (30 s)** (manual mowing mode with blades OFF, state 20, where the LUBA 2 publishes the contact) or **Listen in ready mode (30 s)**, then press the front bumper; **I heard the beep / touched the bumper** timestamps the observation. A 1014 contact validates detection for this connection (required for Learn) |
-| **Learn** | **Slow approach until contact (1 m max)**: robot placed 30 to 80 cm from the obstacle, in line; it moves forward very slowly (raw speed 20, 30 s and 1 m at most) until contact, then suggests an obstacle (type, radius 0.05 to 2 m, margin 0 to 2 m, 0.2 m by default) to **Save** or **Ignore**. Requires a validated contact on the same connection |
+| **Contact** | check that the bumper is received, robot stationary: **Listen to the bumper · manual mode (30 s)** (manual mowing mode with blades OFF, state 20, where the LUBA 2 publishes the contact) or **Listen in ready mode (30 s)**, then press the front bumper; **I heard the beep / touched the bumper** timestamps the observation. A 1014 contact validates detection for this connection (no longer required for Learn) |
+| **Learn** | **Slow approach until contact (1 m max)**: robot placed 30 to 80 cm from the obstacle, in line; it moves forward slowly (raw speed 80, ≈ 7.6 cm/s, 30 s and 1 m at most) until contact, then suggests an obstacle (type, radius 0.05 to 2 m, margin 0 to 2 m, 0.2 m by default) to **Save** or **Ignore**. No prior Contact test is needed: without a received contact the approach still stops after 1 m or 30 s, and a contact during it validates detection. A robot that halts against the object (collision lock 25, or 3 s without moving) is no longer an interruption: the error history is read for 3 s, the 1014 or the lock give **Contact detected**, a halt after at least 5 cm without any code gives **Stopped in front of an object** with the obstacle proposed (bumper not validated); only a robot that never moved ends as Interrupted. **Obstacle in front of the robot** (Identify without contact) places an obstacle against the bumper from the robot's fresh pose, without any command: distance (0 to 4 m), type, radius and margin adjustable before saving |
+
+**Contact while driving.** With the joystick (manual control or record by driving), a bumper contact (1014), or the
+collision lock (self-check 25) that announces it, stops the robot and opens the **Obstacle touched while driving**
+sheet over any screen: object estimated in front of the bumper (behind the chassis when reversing), **Save the
+obstacle** with its type, radius and margin, or **Dismiss**. Closed without a choice, the contact stays in the
+difficulty log and on the map (origin "manual control"), where it can be saved later. The 1014 that arrives after the
+lock refines the same contact. Bumper / lift alert bits still raise the critical alert as well, since a lift is possible.
+The LUBA 2 only gives the 1014 when its error history is read: the joystick now reads it every 500 ms (before
+2026-10-22 nothing read it while driving, so a contact went unseen or ended as "Wheels commanded without progress").
+A stop on wheels without progress while driving also keeps the 3 s window open, so a late 1014 is still logged.
+The LUBA 2 also only records the contact in **manual mowing mode** (state 20): driven in ready mode (11), a pressed
+bumper left no trace at all (Fold log of 2026-10-22, 16:48-16:49: joystick and slow approach, error history unchanged,
+state 11 throughout). The joystick and the slow approach therefore drive in manual mode with blades OFF, renewed every
+500 ms like routes do; releasing the joystick leaves that mode.
 | **Bypass** | **Start bypass**: choose a saved obstacle (nearest by default); the robot goes to the opposite side (1 m beyond its avoided area) and comes back, blades stopped, at the set **Forward speed**. Start between avoided area + 0.5 m and 10 m from the center. Passed if the robot's side (0.26 m) never reached the obstacle surface; minimum observed gap shown |
 | **Border** | frontal test of an outer border or a no-go zone (see below) |
 
-Common conditions (shown live as preconditions): LUBA 2 (`Luba-VS…`), fresh state (≤ 2 s), battery > 30 %, robot
+Common conditions (shown live as preconditions): LUBA 2 (`Luba-VS…` or X series `Luba-VP…`), fresh state (≤ 2 s), battery > 30 %, robot
 ready (state 11), no protection, bumper without alert, blades stopped, no Bluetooth diagnostics, blade test or route
 running, map read. A supervision checkbox is required on each tab, and leaving the page stops the running test. A
 bumper health alert (bits 0–2 of `sensor_status`) aborts the test without a proposal. Details:

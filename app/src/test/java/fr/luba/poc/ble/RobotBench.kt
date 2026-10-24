@@ -32,9 +32,9 @@ import java.util.concurrent.TimeUnit
  * virtual time of the Robolectric main looper. Work RobotBle hands to `Dispatchers.Default` / `IO`
  * (links, route repair, disk writes) runs in real time while virtual time advances.
  */
-class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name: String = "Luba-VS-SIM01") {
+class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name: String = "Luba-VS-SIM01", seed: Long = 1) {
     val app: Application = ApplicationProvider.getApplicationContext()
-    val sim = SimRobot(start, heading)
+    val sim = SimRobot(start, heading, seed)
     private val store = ViewModelStore()
     val ble: RobotBle = ViewModelProvider(store, ViewModelProvider.AndroidViewModelFactory(app))[RobotBle::class.java]
     val links = mutableListOf<SimLink>()

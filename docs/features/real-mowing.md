@@ -36,6 +36,16 @@ During mowing, the bottom bar of the map shows, on a first line "Local mowing ·
   at launch (raised if the task needs more); absent for a task that plans no recharge;
 - **Covered x %**: share of the task zones actually mowed so far according to the track
   ([real coverage](mowing-history.md#real-coverage)), once something is mowed;
+- **Mission control** line: deviation of the robot from the edge being driven ("Deviation 4 cm left", signed
+  distance to the edge, "on the line" under 5 mm) and **waypoint** aimed at with its distance ("waypoint 12/240 in
+  3.2 m"), computed from the published route and the fresh position, the same whether the Fold drives the robot or
+  the gateway follows the route on its own (`history/LiveTracking.kt`);
+- **live end** line: "End ≈ 16:40 · 1 h 05 left · 1 recharge left", recomputed at every refresh from what this mowing
+  measured: cutting metres per active second (links, bypasses, pauses and incidents included), battery used per
+  active second, battery charged per second on the base, with the same recharge rule as the forecast and the robot
+  (`FinishPolicy`). While the robot charges, the charge up to its departure level comes first. Until 3 min of
+  activity and 10 m mowed (3 % of battery used, 5 min of charge for the charge rate), the forecast values fill in and
+  the line ends with "(forecast)" (`history/LiveEta.kt`);
 - then the current step, a **STOP** button and "⋯", with a progress bar below.
 
 "⋯" (or a tap on the bar) opens the **Local mowing** sheet: **State** (current step), **Height**, **Recharge**
@@ -54,7 +64,7 @@ height shows the current pass ("Pass 2/3 · 55 mm"); "Mowed x %" counts all pass
 Starting is refused, with an explicit message ("Start refused: …" in the mowing bar and the preview), if any of
 these conditions is missing:
 
-- LUBA 2 robot (`Luba-VS…`) connected, ready (state 11), self-check nominal;
+- LUBA 2 robot (`Luba-VS…` or X series `Luba-VP…`) connected, ready (state 11), self-check nominal;
 - state and position received less than 2 s ago;
 - map identical to that of the connected robot; base known with its docking axis;
 - blades confirmed stopped, no bumper alert;
@@ -78,7 +88,8 @@ these conditions is missing:
    prepared route carries the height of its pass; at the first edge of a new pass, tracking stops, commands the new
    height with blades running and the robot stopped, and waits for it as at the start. A bypass or a recharge keeps
    the height of the current pass. With the gateway, each pass is sent as a separate tracking job at its height.
-4. **Recharge** at the low threshold (see below), then resume at the interrupted point.
+4. **Recharge** at the low threshold (see below), then resume at the interrupted point, or at the block that saves
+   the most transit ([smart resume](mowing-resume.md#smart-resume-after-a-recharge-or-a-blockage)).
 5. **End**: route to the approach point in front of the base, then docking. Message "Mowing finished · charging
    contact confirmed".
 
@@ -161,7 +172,10 @@ mowing:
    cleared, the resume was refused ("Back-off impossible: chassis outside the zone along the whole trail") because
    the trail was ahead of the robot. Since 1.1.5 the resume leaves straight ahead in that case.
 
-The stop is kept if the protection lasts more than **30 s**, if it is the lock after STOP (self-check 11, to be
+Protection 41 is the "weak satellite signal" of the Mammotion app ([positioning lost](safety.md#positioning-lost-self-check-41)):
+for it and the other positioning conditions (40, 42, 99), the wait lasts up to **5 minutes**.
+
+The stop is kept if the protection lasts more than **30 s** (5 min for a positioning loss), if it is the lock after STOP (self-check 11, to be
 unlocked) or the Mammotion app's working hours (self-check 23), for any other robot state, or after **5 pauses** in
 the mission. Lift and bumper contact keep their own stops. Same rule whether tracking is done by the Fold or by the
 gateway (`simulation/ProtectionPause.kt`).
@@ -250,8 +264,10 @@ final field of the tracking description, ignored by an older gateway). It sends 
    resume waits for a fresh, nominal state. Only a lasting incident stops the mowing (progress kept). With the
    gateway, a Wi-Fi outage during charging is handled as during tracking: the link is not declared lost and link
    maintenance (synchronization, report subscription) is suspended until reconnection.
-4. Straight-line exit, shortest link recomputed from the actual position, resume at the interrupted point. The
-   mowing bar shows "Recharge n/total".
+4. Straight-line exit, shortest link recomputed from the actual position, resume at the interrupted point. When
+   starting with another block of the remainder saves at least 2 m of transit, the remainder is reordered instead and
+   the interrupted cell is finished later ([smart resume](mowing-resume.md#smart-resume-after-a-recharge-or-a-blockage)).
+   The mowing bar shows "Recharge n/total".
    If the gateway link still drops during this cycle (return, docking, charging), mowing resumes by itself once the
    robot is charging on the base and the link is back (0.62.0, see
    [resume](mowing-resume.md#automatic-resume-after-losing-the-gateway-during-recharging)). The

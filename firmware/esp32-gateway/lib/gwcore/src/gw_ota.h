@@ -30,6 +30,7 @@ struct Situation {
   bool robotPiloted = false;    // this pilot holds the robot link (control, mowing in progress)
   bool allowWhilePiloted = false;  // app setting "Updates during mowing"
   bool updateRunning = false;   // an update is already running
+  bool autonomyRunning = false; // the gateway follows a route on its own (autonomous tracking): never restarted
 };
 
 // Reason for refusal, or empty string if the update can start.

@@ -134,6 +134,8 @@ fun RobotUi.withMammotionMap(raw: RobotMap, corrections: List<MapCorrection> = m
     val heightSequence: HeightSequenceUi = HeightSequenceUi(),
     /** Last bumper event received from the robot (contact 1014 or fault 1207): code and wall-clock time. */
     val lastBumperCode: Int? = null, val lastBumperAt: Long? = null,
+    /** Contact during manual control (difficulty id) whose sheet is open: keep it as an obstacle or dismiss it. */
+    val manualContactId: String? = null,
     /** Last robot error received, decoded by [RobotErrorCatalog] (all codes, including informational ones). */
     val lastRobotError: RobotErrorReport? = null,
     val navTest: NavTestUi = NavTestUi(),
@@ -199,7 +201,9 @@ private data class RouteContact(val code: Int, val x: Double, val y: Double, val
 private class BackOffDeviation(message: String) : IllegalStateException(message)
 /** Obstacle discovered while tracking a route: [index] = current edge. */
 private class ObstacleEncounter(val index: Int, val contact: RouteContact?, val added: List<fr.luba.poc.obstacles.LocalObstacle>,
-                                message: String) : Exception(message)
+                                message: String,
+                                /** Wheels turning without moving ([RouteBlocked]): handled like a contact without its code, recorded as a blockage. */
+                                val blockage: Boolean = false) : Exception(message)
 /**
  * Tracking handed to the gateway and lost by it (start order lost in a Wi-Fi outage, gateway restarted):
  * robot stopped by the gateway, [index] = last known edge. The route resumes from the actual pose.
@@ -488,6 +492,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 if (DriftRecovery.recoverable(result.text)) { mergeTrail(); throw RouteDrift(result.index, result.text) }
                 // Transient protection raised by the robot: the mission waits for it to clear, then resumes.
                 if (ProtectionPause.pausable(result.text)) { mergeTrail(); throw RouteProtection(result.index, result.text) }
+                // Wheels turning without moving: the mission can defer the segment ([SmartResume]).
+                if (SmartResume.blockage(result.text)) { mergeTrail(); throw RouteBlocked(result.index, result.text) }
                 error(result.text)
             }
             fr.luba.poc.autonomy.LegOutcome.ABORTED -> error(tr("Autonomous tracking interrupted: ${result.text}", "Suivi autonome interrompu : ${result.text}"))
@@ -1027,6 +1033,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     private var manualCommand = 0 to 0
     private var manualInputAt = 0L
     private var manualBlocked = true
+    /** Last non-zero joystick speed (sign: forward / reverse), to place the object touched while driving. */
+    private var manualLastLinear = 0
+    /** Until then (elapsed realtime), a 1014 refines the contact of the joystick stopped on a protection. */
+    private var manualContactUntil = 0L
     private var preparationJob: Job? = null
     private var mowJob: Job? = null
     private var mowOrigin: Point? = null
@@ -1196,24 +1206,57 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
      */
     private fun recordDifficulty(kind: fr.luba.poc.difficulty.DifficultyKind, note: String, position: Point? = null,
                                  code: Int? = null, heading: Double? = null, obstacle: Point? = null, contactAt: Long? = null,
-                                 detour: BypassDetour? = null, source: String? = difficultySource()) {
-        if (source == null) return
+                                 detour: BypassDetour? = null, source: String? = difficultySource()): String? {
+        if (source == null) return null
         val t = state.value.telemetry
-        val p = position ?: if (t.x != null && t.y != null) Point(t.x, t.y) else return
-        if (!p.x.isFinite() || !p.y.isFinite()) return
+        val p = position ?: if (t.x != null && t.y != null) Point(t.x, t.y) else return null
+        if (!p.x.isFinite() || !p.y.isFinite()) return null
         val now = System.currentTimeMillis()
         val entry = runCatching { fr.luba.poc.difficulty.DifficultyEvent(UUID.randomUUID().toString(), now, kind, p.x, p.y,
             robotId = state.value.selected?.address ?: "", code = code, note = note.take(300), headingDeg = heading?.takeIf { it.isFinite() },
             obstacleX = obstacle?.x, obstacleY = obstacle?.y, contactAtMs = contactAt, source = source,
-            side = detour?.side, inner = detour?.inner) }.getOrNull() ?: return
+            side = detour?.side, inner = detour?.inner) }.getOrNull() ?: return null
         val events = state.value.difficulties.events
         // Contact recorded on receipt: refined (same entry) instead of being ignored as a duplicate.
         val next = fr.luba.poc.difficulty.DifficultyLog.refine(events, entry)
-        if (next == events) return
+        // Id of the logged entry (new, or the contact it refines).
+        val id = next.firstOrNull { it.id == entry.id }?.id ?: next.firstOrNull { fr.luba.poc.difficulty.DifficultyLog.sameContact(it, entry) }?.id
+        if (next == events) return id
         publishDifficulties(next, persist = true)
         event("difficulty", tr("${kind.label} recorded on the map", "${kind.label} consigné sur la carte"), mapOf("kind" to kind.code, "x" to p.x, "y" to p.y,
             "code" to code, "source" to source, "obstacleX" to obstacle?.x, "obstacleY" to obstacle?.y, "note" to note.take(120)))
+        return id
     }
+
+    /** Joystick running, or just stopped on a protection that may announce a contact ([ManualContact.GRACE_MS]). */
+    private fun manualContactContext(): Boolean = state.value.manualActive || SystemClock.elapsedRealtime() < manualContactUntil
+
+    /**
+     * Contact while driving by hand ([code] 1014, or null for a collision protection / bumper alert without code yet):
+     * logged on the map ("pilotage" origin), object in front of the bumper (behind when reversing), and its sheet opened
+     * wherever the user is, to keep it as an obstacle with its size or dismiss it. The late 1014 refines the same entry.
+     */
+    private fun recordManualContact(code: Int?) {
+        val t = state.value.telemetry
+        val x = t.x?.takeIf { it.isFinite() } ?: return
+        val y = t.y?.takeIf { it.isFinite() } ?: return
+        val fresh = positionPrevious != 0L && SystemClock.elapsedRealtime() - positionPrevious in 0..2000
+        val heading = t.heading?.takeIf { it.isFinite() && fresh }
+        manualContactUntil = SystemClock.elapsedRealtime() + ManualContact.GRACE_MS
+        val robot = Point(x, y)
+        val obstacle = ManualContact.obstacleCenter(robot, heading, manualLastLinear < 0)
+        val note = if (code != null) tr("Bumper contact ($code) while driving", "Contact pare-chocs ($code) pendant le pilotage")
+            else tr("Collision protection while driving (self-check ${t.selfCheck}, sensors ${t.sensorStatus})",
+                "Protection collision pendant le pilotage (self-check ${t.selfCheck}, capteurs ${t.sensorStatus})")
+        val id = recordDifficulty(DifficultyKind.CONTACT, note, robot, code, heading, obstacle, System.currentTimeMillis(), source = "pilotage") ?: return
+        update { it.copy(manualContactId = id) }
+        event("manual_contact", tr("Contact while driving: obstacle sheet opened", "Contact pendant le pilotage : fiche obstacle ouverte"),
+            mapOf("id" to id, "code" to code, "x" to x, "y" to y, "heading" to heading, "reversing" to (manualLastLinear < 0),
+                "obstacleX" to obstacle.x, "obstacleY" to obstacle.y, "selfCheck" to t.selfCheck, "sensorStatus" to t.sensorStatus))
+    }
+
+    /** Sheet of the contact met while driving closed (saved, dismissed or kept in the log for later). */
+    fun closeManualContact() { update { it.copy(manualContactId = null) } }
 
     /**
      * Bumper contact confirmed during an autonomous movement: recorded on the map as soon as it is received, object estimated
@@ -1647,7 +1690,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 val name = result.scanRecord?.deviceName ?: result.device.name
                 if (scanAddresses.add(result.device.address)) event("scan_advertisement", tr("BLE advertisement", "Annonce BLE"), mapOf("name" to name, "address" to result.device.address, "rssiDbm" to result.rssi, "serviceUuids" to result.scanRecord?.serviceUuids?.map { it.toString() }))
                 if (name == null) return@post
-                // Every Mammotion mower is listed; only the validated models (Luba-VS) leave read-only mode.
+                // Every Mammotion mower is listed; only the validated models (Luba-VS, Luba-VP) leave read-only mode.
                 if (!fr.luba.poc.protocol.ModelSupport.isMower(name)) return@post
                 val device = SeenRobot(name, result.device.address, result.rssi)
                 event("scan_result", tr("BLE robot detected", "Robot BLE détecté"), mapOf("name" to name, "address" to device.address,
@@ -2041,7 +2084,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 else event("lift_reported", reason, mapOf("code" to error.code, "source" to error.source))
             }
             if(BumperEvents.confirmsContact(error) || BumperEvents.latchedFault(error)) update { it.copy(lastBumperCode = error.code, lastBumperAt = System.currentTimeMillis()) }
-            if(BumperEvents.confirmsContact(error)) { armObstaclePhoto(error.code); recordContactOnReceipt(error.code) }
+            if(BumperEvents.confirmsContact(error)) { armObstaclePhoto(error.code); if (manualContactContext()) recordManualContact(error.code) else recordContactOnReceipt(error.code) }
             if(BumperEvents.confirmsContact(error) || BumperEvents.latchedFault(error)) alertMonitor.bumper(SystemClock.elapsedRealtime(), BumperEvents.latchedFault(error)) { kind, severity -> alert(kind, severity, tr("Collision / robot fault ${error.code}", "Collision / défaut robot ${error.code}")) }
 
             if (state.value.robotRoute.running && !remoteLegActive) {
@@ -2064,7 +2107,11 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 bumperValidatedConnection=-1L
                 update { it.copy(teach=it.teach.copy(contactValidated=false)) }
             }
-            if (state.value.manualActive) { alert(AlertKind.UNEXPECTED_STOP, Severity.CRITICAL, tr("Control stopped: robot error ${error.code}", "Pilotage arrêté : erreur robot ${error.code}")); stopManual(tr("Robot error ${error.code}", "Erreur robot ${error.code}")) }
+            if (state.value.manualActive) {
+                // Contact while driving: STOP, and the obstacle sheet (recorded above) replaces the critical alert.
+                if (BumperEvents.confirmsContact(error)) stopManual(tr("Bumper contact (${error.code}): robot stopped, obstacle to check", "Contact pare-chocs (${error.code}) : robot arrêté, obstacle à vérifier"))
+                else { alert(AlertKind.UNEXPECTED_STOP, Severity.CRITICAL, tr("Control stopped: robot error ${error.code}", "Pilotage arrêté : erreur robot ${error.code}")); stopManual(tr("Robot error ${error.code}", "Erreur robot ${error.code}")) }
+            }
             event("robot_error", tr("Robot error ${error.code}", "Erreur robot ${error.code}"), mapOf("code" to error.code, "source" to error.source, "robotErrorTime" to error.timestamp))
             if (borderBumperWatch) {
                 // Frontal test: contact is the expected result, immediate stop; any other error stops the test.
@@ -2234,7 +2281,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             }
             if (previousTelemetry.robotState != t.robotState || previousTelemetry.selfCheck != t.selfCheck || previousTelemetry.sensorStatus != t.sensorStatus) {
                 event("robot_state_change", tr("State / protection change", "Changement état / protection"), mapOf("beforeState" to previousTelemetry.robotState,
-                    "state" to t.robotState, "selfCheck" to t.selfCheck, "sensorStatus" to t.sensorStatus))
+                    "state" to t.robotState, "selfCheck" to t.selfCheck, "selfCheckName" to SelfCheck.name(t.selfCheck), "sensorStatus" to t.sensorStatus))
                 // Undocumented protection (25, on 2026-10-14): request the self-check details (read-only, response
                 // logged as protobuf_decoded). Never during tracking handed over to the gateway (no write from the pilot).
                 if (previousTelemetry.selfCheck != t.selfCheck && StopUnlock.blocked(t.selfCheck) && !remoteLegActive)
@@ -2258,7 +2305,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         // Read-only mode (docs/features/supported-models.md): a model that is not validated only receives read and
         // stop commands. Last barrier, whatever the screen or the activity that built the command.
         val robotName = state.value.selected?.name
-        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(robotName) && !fr.luba.poc.protocol.ReadOnlyPolicy.allows(payload)) {
+        // Model trial armed by the owner: the payloads of the three unlocking tests too, within the trial ceilings.
+        val trialAllows = fr.luba.poc.protocol.ModelTrial.active(robotName, SystemClock.elapsedRealtime()) && fr.luba.poc.protocol.ReadOnlyPolicy.allowsTrial(payload)
+        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(robotName) && !fr.luba.poc.protocol.ReadOnlyPolicy.allows(payload) && !trialAllows) {
             readOnlyRefused++
             event("read_only_refused", tr("Command refused: robot model in read-only mode", "Commande refusée : modèle de robot en lecture seule"),
                 mapOf("label" to label, "robotName" to robotName, "model" to fr.luba.poc.ui.RobotModel.detect(robotName).name,
@@ -2362,7 +2411,34 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     }
     /** Consecutive failures of the automatic reconnection to the gateway (spacing of attempts). */
     private var gatewayFailures = 0
+    /**
+     * Arms the trial of the connected model that is not validated ([fr.luba.poc.protocol.ModelTrial]): the three
+     * unlocking tests only, for [fr.luba.poc.protocol.ModelTrial.DURATION_MS]. Returns the refusal, null once armed.
+     */
+    fun armModelTrial(): String? {
+        val name = state.value.selected?.name
+        if (!state.value.ready) return tr("Connect the robot first", "Connecter d'abord le robot")
+        return try {
+            val armed = fr.luba.poc.protocol.ModelTrial.arm(name, SystemClock.elapsedRealtime())
+            event("model_trial_armed", tr("Model trial armed: command cutoff, low-speed joystick and blade test only", "Essai du modèle armé : coupure des commandes, joystick lent et essai des lames seulement"),
+                mapOf("robotName" to name, "model" to fr.luba.poc.ui.RobotModel.detect(name).name, "firmware" to state.value.telemetry.firmware,
+                    "durationMs" to fr.luba.poc.protocol.ModelTrial.DURATION_MS, "maxLinear" to fr.luba.poc.protocol.ModelTrial.MAX_LINEAR,
+                    "maxAngular" to fr.luba.poc.protocol.ModelTrial.MAX_ANGULAR, "untilMs" to armed.untilMs))
+            null
+        } catch (error: IllegalArgumentException) { error.message }
+    }
+
+    /** Ends the model trial (button, disconnection); a running test stops through its own guards. */
+    fun endModelTrial(reason: String) {
+        val ended = fr.luba.poc.protocol.ModelTrial.end() ?: return
+        stopManual(tr("Model trial ended", "Essai du modèle terminé"))
+        stopSilenceTest(tr("Model trial ended", "Essai du modèle terminé"))
+        if (state.value.bladeTestActive) stopOwnedBladeTest(tr("Model trial ended", "Essai du modèle terminé"))
+        event("model_trial_ended", reason, mapOf("robotName" to ended.robotName, "durationMs" to SystemClock.elapsedRealtime() - ended.sinceMs))
+    }
+
     fun disconnect() {
+        endModelTrial(tr("Disconnection", "Déconnexion"))
         userDisconnected = true
         gatewayUpdateResume?.cancel(); gatewayUpdateResume = null
         wantLink = false; reconnectTimer?.cancel(); reconnectTimer = null
@@ -2506,7 +2582,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         val plan = routePlan ?: return
         if (routeIndex >= plan.mowingTo) { finishCheckpoint(tr("All mowing stripes covered", "Toutes les bandes de tonte parcourues")); return }
         val edge = plan.engineEdge(routeIndex) ?: return
-        MissionProgress.advance(checkpoint, routeEngineEdges, edge, position, System.currentTimeMillis())?.let { next ->
+        SmartResume.advance(checkpoint, routeEngineEdges, edge, position, System.currentTimeMillis())?.let { next ->
             routeCheckpoint = next; persistCheckpoint(next)
         }
     }
@@ -2877,9 +2953,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     tr("Re-prepared route differs (base, access or obstacles changed): resume impossible, start a new mowing", "Trajet re-préparé différent (base, accès ou obstacles modifiés) : reprise impossible, relancer une tonte") }
             }
             // "Resume further on": point chosen on the map, further along the remaining stripes, without overlap.
-            val resume = saved?.let { MissionProgress.skipped(it, engine.edges, skipTo) }
-            val skippedNow = if (saved != null && resume != null) resume.skippedMeters - saved.skippedMeters else 0.0
-            if (resume != null) check(!MissionProgress.mowingDone(engine.edges, resume.edge, resume.point)) { tr("Mowing already finished: use return to base", "Tonte déjà terminée : utiliser le retour à la base") }
+            if (saved != null && skipTo != null) check(saved.linear) { tr("Resume further on unavailable: the remainder was reordered (smart resume)", "Reprendre plus loin indisponible : le reste a été réordonné (reprise intelligente)") }
+            val savedResume = saved?.let { MissionProgress.skipped(it, engine.edges, skipTo) }
+            val skippedNow = if (saved != null && savedResume != null) savedResume.skippedMeters - saved.skippedMeters else 0.0
+            if (savedResume != null) check(!SmartResume.mowingDone(engine.edges, savedResume)) { tr("Mowing already finished: use return to base", "Tonte déjà terminée : utiliser le retour à la base") }
             state.value.cutHeights.refusal(heightMm)?.let { throw IllegalArgumentException(it) }
             // Working hours: neither mowing nor leaving the base outside them; return to base remains allowed.
             if (intent != RouteIntent.RETURN_TO_BASE) fr.luba.poc.mowing.WorkWindowSetting.value.refusal(java.time.LocalTime.now())?.let { error(it) }
@@ -2913,6 +2990,15 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 recordedBoundary = !engine.map.source.contains("DÉMONSTRATION", true))
             routePhysicalRoutes = physicalRoutes
             val routeStart = if (initiallyDocked) engine.baseApproach else Point(requireNotNull(t.x),requireNotNull(t.y))
+            // Resume from the base (after a recharge): order of the remainder that minimises the transit ([SmartResume]).
+            val smartResume = if (savedResume != null && skipTo == null && initiallyDocked) runCatching {
+                val dockHeading = (engine.dockEntryHeading + 180.0) % 360.0
+                SmartResume.afterRecharge(engine.edges, savedResume, engine.baseApproach, dockHeading, engine.baseApproach, dockHeading, SmartResume.linkMeters(engine.routes))
+            }.getOrNull() else null
+            val resume = smartResume?.checkpoint ?: savedResume
+            smartResume?.let { choice -> event("route_smart_resume", tr("Resume from the base reordered: shortest transit", "Reprise depuis la base réordonnée : transit le plus court"),
+                mapOf("defaultTransitM" to choice.defaultTransitM, "transitM" to choice.transitM, "entryX" to choice.entry.x, "entryY" to choice.entry.y,
+                    "portions" to 1 + choice.checkpoint.deferred.size)) }
             // Obstacles near the docking corridor: same adjusted margin as when computing the route ([DockClearance]),
             // for the Fold's guards as well as the gateway's.
             val dockCorridor = fr.luba.poc.planning.DockClearance.corridor(engine.base, engine.config.baseEntryHeadingDegrees, engine.config.baseApproachMeters)
@@ -2922,7 +3008,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     "radiusM" to o.radiusM, "marginM" to o.marginM, "savedMarginM" to state.value.obstacles.firstOrNull { it.id == o.id }?.marginM))
             }
             val missionPlan = if (intent == RouteIntent.FOLLOW) RobotRoute.missionEdges(engine,routeStart,requireNotNull(t.heading),physicalRoutes,
-                resume?.let { MissionResume(it.edge,it.point,overlap = skipTo == null) }) else null
+                resume?.let { MissionResume.of(it,overlap = skipTo == null) }) else null
             val edges = missionPlan?.edges ?: RobotRoute.actionEdges(engine,routeStart,requireNotNull(t.heading),intent,physicalRoutes)
             // Resume during a second pass, for example: the first remaining mowing edge gives the starting height.
             if (cutting) edges.firstNotNullOfOrNull { it.heightMm }?.let { heightMm = it }
@@ -3222,9 +3308,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             if (follower.index > bestIndex || distance < best-0.03) { bestIndex=follower.index; best=distance; progressAt=now }
                             val (linear,angular) = command.linear to command.angular
                             if (linear == 0) progressAt=now
-                            check(now-progressAt < 15000) { tr("No progress for 15 s (edge ${follower.index+1})", "Absence de progression depuis 15 s (arête ${follower.index+1})") }
+                            if (now-progressAt >= 15000) throw RouteBlocked(follower.index,tr("No progress for 15 s (edge ${follower.index+1})", "Absence de progression depuis 15 s (arête ${follower.index+1})"))
                             check(now-begin < budgetMs) { tr("Range too long: %.0f m not covered in %d s", "Plage trop longue : %.0f m non parcourus en %d s").format(meters,budgetMs/1000) }
-                            check(!motionProgress.blocked(position,positionPrevious,now,linear)) { tr("Presumed blockage: no translation for 3 s, bumper contact not confirmed", "Blocage présumé : aucune translation depuis 3 s, contact bumper non confirmé") }
+                            if (motionProgress.blocked(position,positionPrevious,now,linear)) throw RouteBlocked(follower.index,tr("Presumed blockage: no translation for 3 s, bumper contact not confirmed", "Blocage présumé : aucune translation depuis 3 s, contact bumper non confirmé"))
                             val rad = Math.toRadians(heading)
                             // Projection ahead of the robot: distance covered before the next position (1 Hz)
                             // and the reaction, bounded by the next stop (corner or end of range).
@@ -3612,6 +3698,108 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                      * (or added), straight back-off along the trail after a contact, then the remaining route repaired by the
                      * mission's navigation (borders, no-go, obstacles, base zone). Returns the resume edge.
                      */
+                    /** Station route in progress ([followStation]): the mission route is not the one being followed. */
+                    var stationActive=false
+                    /**
+                     * Mission route rebuilt from [start] (heading [heading]) for the reordered progress [next] ([SmartResume]):
+                     * prepared edges of the remaining portions, blades-OFF links between them, return in front of the base, then
+                     * the same repair around the obstacles discovered during the mission. False if no safe route exists (the
+                     * caller keeps its usual behaviour).
+                     */
+                    suspend fun replanMission(next: MissionCheckpoint, start: Point, heading: Double): Boolean {
+                        if (routePlan == null) return false
+                        val obstaclesNow=dockFitted(discovered.toList())
+                        val zones=engine.map.shapes.filter { it.kind==ShapeKind.ZONE && it.id in engine.preview.zoneIds }.map { it.points }
+                        val escape=routePhysicalRoutes ?: physicalRoutes
+                        val built=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { runCatching {
+                            val mission=RobotRoute.missionEdges(engine,start,heading,escape,MissionResume.of(next))
+                            mission to if (obstaclesNow.isEmpty()) null else ObstacleBypass.repair(engine.routes,physicalRoutes,mission.edges,null,0,start,heading,obstaclesNow,zones,false)
+                        } }.getOrElse { error ->
+                            event("route_replan_failed",tr("Reordered remainder impossible to follow: usual resume kept", "Reste réordonné impossible à suivre : reprise habituelle conservée"),mapOf("reason" to error.message))
+                            return false
+                        }
+                        val (mission,repair)=built
+                        routeEdges=repair?.edges ?: mission.edges; routeOrigins=repair?.origins
+                        repair?.let { missionRoutes=it.routes; routePhysicalRoutes=it.physical }
+                        routePlan=mission
+                        routeCheckpoint=next.copy(updatedAt=System.currentTimeMillis()).also { persistCheckpoint(it,force=true) }
+                        update { it.copy(robotRoute=it.robotRoute.copy(count=routeEdges.size,planned=listOf(routeEdges.first().a)+routeEdges.map { e -> e.b })) }
+                        return true
+                    }
+                    /** Return from [start] to the approach point once nothing is left to mow ([next]): the stripes are finished on the first progress. */
+                    suspend fun homeRoute(next: MissionCheckpoint, start: Point, heading: Double): Boolean {
+                        val plan=routePlan ?: return false
+                        val routesNow=missionRoutes; val escape=routePhysicalRoutes ?: physicalRoutes
+                        val path=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { runCatching {
+                            RobotRoute.departure(routesNow,escape,start,heading,engine.baseApproach,(engine.dockEntryHeading+180.0)%360.0) }.getOrNull() }
+                        if (path.isNullOrEmpty()) return false
+                        routeEdges=path; routeOrigins=path.map { plan.mowingTo }
+                        routeCheckpoint=next.copy(updatedAt=System.currentTimeMillis()).also { persistCheckpoint(it,force=true) }
+                        update { it.copy(robotRoute=it.robotRoute.copy(count=routeEdges.size,planned=listOf(routeEdges.first().a)+routeEdges.map { e -> e.b })) }
+                        return true
+                    }
+                    var blockages=0
+                    /**
+                     * Blockage while mowing (wheels turning without moving, bypass impossible, repeated exits at the same place):
+                     * position memorised (difficulty and deferred portion), short straight back-off along the trail, then the
+                     * segment is deferred to the end of the mowing and the mowing goes on [SmartResume.CLEARANCE_M] further
+                     * ([SmartResume.deferBlocked]); blocked again during that retry, the segment is given up. Otherwise (station
+                     * route, no progress saved, too many blockages, no remainder far enough), the stop [reason] is kept.
+                     * Returns the resume edge.
+                     */
+                    suspend fun deferBlockage(reason: String, contact: Boolean = false): Int {
+                        val checkpoint=routeCheckpoint
+                        if (stationActive || intent!=RouteIntent.FOLLOW || checkpoint==null || blockages>=SmartResume.MAX_BLOCKAGES) error(reason)
+                        routeStatus(RoutePhase.FOLLOWING,tr("$reason · stop, blades OFF", "$reason · arrêt, lames OFF"))
+                        bladesOff(contactLatch=contact)
+                        val live=freshState(contactLatch=contact)
+                        val position=Point(requireNotNull(live.x),requireNotNull(live.y))
+                        val heading=routeReckoning.heading(requireNotNull(live.heading))
+                        val deferral=SmartResume.deferBlocked(engine.edges,checkpoint,position) ?: error(reason)
+                        blockages++
+                        recordDifficulty(DifficultyKind.BLOCKED,reason,position,null,heading)
+                        val physical=routePhysicalRoutes ?: missionRoutes
+                        val starts=DriftRecovery.starts(physical,position,heading,state.value.robotRoute.trail.takeLast(400)).filterNotNull()
+                        val backOff=starts.firstOrNull { it.distance(position)>=SmartResume.BACK_OFF_M } ?: starts.lastOrNull()
+                        if (contact && backOff==null) error(tr("$reason: back-off impossible", "$reason : recul impossible"))
+                        backOff?.let { target ->
+                            routeStatus(RoutePhase.FOLLOWING,tr("Blockage: straight back-off of %.0f cm · blades OFF", "Blocage : recul de %.0f cm en ligne droite · lames OFF").format(target.distance(position)*100))
+                            try { reverseStraight(position,target,heading,physical,heightMm,"ROUTE",recovering=!contact,afterContact=contact,degreesPerUnit=routeReckoning.degreesPerUnit) }
+                            catch (deviation: BackOffDeviation) { event("route_blockage_back_off",deviation.message ?: tr("Back-off deviation", "Écart au recul")) }
+                        }
+                        if (contact) awaitCollisionLatchCleared("ROUTE",heightMm)
+                        val after=freshState()
+                        val start=Point(requireNotNull(after.x),requireNotNull(after.y))
+                        val startHeading=routeReckoning.heading(requireNotNull(after.heading))
+                        // Nothing left to mow (last retried segment given up): straight back to the base.
+                        suspend fun follow(checkpoint: MissionCheckpoint) = if (SmartResume.mowingDone(engine.edges,checkpoint)) homeRoute(checkpoint,start,startHeading)
+                            else replanMission(checkpoint,start,startHeading)
+                        var next=deferral.checkpoint; var abandoned=deferral.abandonedM
+                        if (!follow(next)) {
+                            // Deferred segment impossible to route around the obstacles found there: given up.
+                            val (fallback,dropped)=SmartResume.abandonNear(engine.edges,next,position)
+                            if (dropped<=0.0 || !follow(fallback)) error(reason)
+                            next=fallback; abandoned+=dropped
+                        }
+                        event("route_blockage_deferred",tr("Blockage: segment deferred to the end of the mowing", "Blocage : segment reporté en fin de tonte"),mapOf("reason" to reason,
+                            "x" to position.x,"y" to position.y,"heading" to heading,"contact" to contact,"count" to blockages,"deferredM" to deferral.deferredM,
+                            "abandonedM" to abandoned,"targetX" to deferral.target.x,"targetY" to deferral.target.y,"backOffM" to backOff?.distance(position),
+                            "portions" to 1+next.deferred.size))
+                        routeStatus(RoutePhase.FOLLOWING,if (abandoned>0.0) tr("Blocked again at the same place: %.1f m given up, mowing goes on", "Bloqué de nouveau au même endroit : %.1f m abandonnés, la tonte continue").format(abandoned)
+                            else tr("Blockage: %.1f m deferred to the end of the mowing, mowing goes on", "Blocage : %.1f m reportés en fin de tonte, la tonte continue").format(deferral.deferredM))
+                        return 0
+                    }
+                    /**
+                     * Wheels turning without moving (soft ground, root, hidden object without bumper code): the place is
+                     * memorised as an estimated obstacle in front of the robot and bypassed like after a contact (back-off, tight
+                     * detour, blockage on the map); a bypass impossible defers the segment ([deferBlockage]).
+                     */
+                    fun stallEncounter(blocked: RouteBlocked): ObstacleEncounter {
+                        val live=state.value.telemetry
+                        val x=live.x ?: throw blocked; val y=live.y ?: throw blocked; val h=live.heading ?: throw blocked
+                        return ObstacleEncounter(blocked.index,RouteContact(0,x,y,routeReckoning.heading(h),System.currentTimeMillis()),emptyList(),
+                            blocked.message ?: tr("Presumed blockage", "Blocage présumé"),blockage=true)
+                    }
                     suspend fun avoidObstacle(encounter: ObstacleEncounter): Int {
                         val contact = encounter.contact
                         routeContact = null
@@ -3629,10 +3817,15 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                         if (contact != null) {
                             // Stopped position (two stationary positions): more accurate than the contact report (1 Hz).
                             val obstacle=ObstacleBypass.contactObstacle("mission-${UUID.randomUUID()}",position,heading,System.currentTimeMillis())
+                                .let { if (encounter.blockage) it.copy(label=tr("Blockage during the mission", "Blocage pendant la mission")) else it }
                             touched = obstacle
-                            ObstacleBypass.contactFailure(discovered,obstacle,bypassCount-1)?.let { error(tr("${encounter.message}: $it", "${encounter.message} : $it")) }
+                            ObstacleBypass.contactFailure(discovered,obstacle,bypassCount-1)?.let { failure ->
+                                // Object too large to bypass: avoided by the links, its segment deferred to the end of the mowing.
+                                discovered += obstacle; plannedObstacles += obstacle.id
+                                return deferBlockage(tr("${encounter.message}: $failure", "${encounter.message} : $failure"),contact=true)
+                            }
                             discovered += obstacle; plannedObstacles += obstacle.id
-                            update { it.copy(teach=it.teach.copy(proposal=TeachSafety.proposal(TeachContact(position.x,position.y,heading,contact.atMs),ObstacleKind.OTHER.defaultRadiusM))) }
+                            if (!encounter.blockage) update { it.copy(teach=it.teach.copy(proposal=TeachSafety.proposal(TeachContact(position.x,position.y,heading,contact.atMs),ObstacleKind.OTHER.defaultRadiusM))) }
                         } else encounter.added.forEach { obstacle -> discovered += obstacle; plannedObstacles += obstacle.id }
                         val zones=engine.map.shapes.filter { it.kind==ShapeKind.ZONE && it.id in engine.preview.zoneIds }.map { it.points }
                         val trail=state.value.robotRoute.trail.takeLast(400)
@@ -3642,12 +3835,13 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             ObstacleBypass.repair(engine.routes,physicalRoutes,pathNow,originsNow,encounter.index,position,heading,
                                 obstaclesNow,zones,contact!=null,trail,hardship) } }
                             catch (error: IllegalArgumentException) {
-                                touched?.let { recordDifficulty(DifficultyKind.CONTACT, tr("${encounter.message}: bypass impossible", "${encounter.message} : contournement impossible"), position,
+                                touched?.let { recordDifficulty(if (encounter.blockage) DifficultyKind.BLOCKED else DifficultyKind.CONTACT, tr("${encounter.message}: bypass impossible", "${encounter.message} : contournement impossible"), position,
                                     contact?.code, heading, Point(it.x,it.y), state.value.obstaclePhoto.request?.contactAt ?: contact?.atMs) }
-                                throw IllegalStateException(tr("${encounter.message}: ${error.message}", "${encounter.message} : ${error.message}"))
+                                // Bypass impossible: the segment is deferred to the end of the mowing rather than stopping it.
+                                return deferBlockage(tr("${encounter.message}: ${error.message}", "${encounter.message} : ${error.message}"),contact=contact!=null)
                             }
                         // Obstacle encountered: on the map (Encountered obstacles layer), linked to its photo by the contact time.
-                        touched?.let { recordDifficulty(DifficultyKind.CONTACT, encounter.message ?: tr("Bumper contact", "Contact pare-chocs"), position, contact?.code, heading,
+                        touched?.let { recordDifficulty(if (encounter.blockage) DifficultyKind.BLOCKED else DifficultyKind.CONTACT, encounter.message ?: tr("Bumper contact", "Contact pare-chocs"), position, contact?.code, heading,
                             Point(it.x,it.y), state.value.obstaclePhoto.request?.contactAt ?: contact?.atMs,
                             repair.detours.firstOrNull { d -> d.center.distance(Point(it.x,it.y)) < 1e-6 }) }
                         missionRoutes=repair.routes; routePhysicalRoutes=repair.physical
@@ -3670,7 +3864,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                                 if (contact != null) awaitCollisionLatchCleared("ROUTE",heightMm)
                                 throw RouteDrift(0,deviation.message ?: tr("Back-off deviation", "Écart au recul"))
                             }
-                            if (contact != null) {
+                            if (contact != null && !encounter.blockage) {
                                 routeStatus(RoutePhase.FOLLOWING,tr("Obstacle photo · robot still, blades OFF", "Photo de l'obstacle · robot immobile, lames OFF"))
                                 holdForObstaclePhoto("ROUTE",heightMm)
                             }
@@ -3703,7 +3897,14 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                         if (!protection) {
                             driftStreak=if (lastDrift?.let { it.distance(position) < DriftRecovery.SAME_SPOT_M } == true) driftStreak+1 else 0
                             lastDrift=position
-                            DriftRecovery.refusal(driftRecoveries,driftStreak)?.let { error(tr("${drift.message}: $it", "${drift.message} : $it")) }
+                            DriftRecovery.refusal(driftRecoveries,driftStreak)?.let { refusal ->
+                                // Same tricky passage again and again: deferred to the end of the mowing ([SmartResume]).
+                                if (driftStreak>=DriftRecovery.MAX_SAME_SPOT && !stationActive && routeCheckpoint!=null) {
+                                    driftStreak=0; lastDrift=null
+                                    return deferBlockage(tr("${drift.message}: $refusal", "${drift.message} : $refusal"))
+                                }
+                                error(tr("${drift.message}: $refusal", "${drift.message} : $refusal"))
+                            }
                             driftRecoveries++
                         }
                         val physical=routePhysicalRoutes ?: missionRoutes
@@ -3751,7 +3952,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                         routeStatus(RoutePhase.FOLLOWING,tr("${pause.message} · paused, blades OFF, resuming as soon as the robot clears its protection", "${pause.message} · pause, lames OFF, reprise dès que le robot lève sa protection"))
                         val began=SystemClock.elapsedRealtime()
                         event("route_protection_pause",tr("Robot protection during mowing: waiting for it to clear", "Protection du robot pendant la tonte : attente de sa levée"),mapOf("reason" to pause.message,
-                            "edge" to pause.index,"count" to protectionPauses,"waitMs" to ProtectionPause.WAIT_MS))
+                            "edge" to pause.index,"count" to protectionPauses,"waitMs" to ProtectionPause.waitMs(state.value.telemetry.selfCheck),
+                            "selfCheckName" to SelfCheck.name(state.value.telemetry.selfCheck)))
                         val wait=ProtectionPause.Wait(began)
                         try {
                             while (true) {
@@ -3796,6 +3998,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                         val missionEdges=routeEdges; val missionOrigins=routeOrigins
                         val shownPlan=state.value.robotRoute.let { it.count to it.planned }
                         routeEdges=path; routeOrigins=null
+                        val stationBefore=stationActive
+                        stationActive=true
                         try {
                             var at=0
                             while (at<routeEdges.size) {
@@ -3805,8 +4009,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                                     catch (drift: RouteDrift) { recoverDrift(drift) }
                                     catch (pause: RouteProtection) { pauseForProtection(pause) }
                                     catch (lost: RouteLegLost) { recoverLostLeg(lost) }
+                                    catch (blocked: RouteBlocked) { try { avoidObstacle(stallEncounter(blocked)) } catch (drift: RouteDrift) { recoverDrift(drift) } }
                             }
                         } finally {
+                            stationActive=stationBefore
                             routeEdges=missionEdges; routeOrigins=missionOrigins
                             update { it.copy(robotRoute=it.robotRoute.copy(count=shownPlan.first,planned=shownPlan.second)) }
                         }
@@ -3819,6 +4025,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             catch (drift: RouteDrift) { index=recoverDrift(drift); continue }
                             catch (pause: RouteProtection) { index=pauseForProtection(pause); continue }
                             catch (lost: RouteLegLost) { index=recoverLostLeg(lost); continue }
+                            catch (blocked: RouteBlocked) { index=try { avoidObstacle(stallEncounter(blocked)) } catch (drift: RouteDrift) { recoverDrift(drift) }; continue }
                         if (reached>=routeEdges.size) {
                             index=reached
                         } else {
@@ -3881,6 +4088,20 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             val out=freshState()
                             val outPose=Point(requireNotNull(out.x),requireNotNull(out.y))
                             val outHeading=requireNotNull(out.heading)
+                            // Smart resume: rather than going back to the interrupted point, the remainder may start with the block
+                            // that minimises the total transit from here back to the base, the interrupted cell finished later ([SmartResume]).
+                            val routesNow=missionRoutes
+                            val smart=routeCheckpoint?.let { checkpoint -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                runCatching { SmartResume.afterRecharge(engine.edges,checkpoint,outPose,outHeading,engine.baseApproach,(engine.dockEntryHeading+180.0)%360.0,
+                                    SmartResume.linkMeters(routesNow)) }.getOrNull() } }
+                            if (smart!=null && replanMission(smart.checkpoint,outPose,outHeading)) {
+                                event("route_smart_resume",tr("Resume after recharge reordered: shortest transit", "Reprise après recharge réordonnée : transit le plus court"),
+                                    mapOf("defaultTransitM" to smart.defaultTransitM,"transitM" to smart.transitM,"entryX" to smart.entry.x,"entryY" to smart.entry.y,
+                                        "interruptedX" to saved.x,"interruptedY" to saved.y,"portions" to 1+smart.checkpoint.deferred.size))
+                                routeStatus(RoutePhase.RESUMING,tr("Smart resume after recharge: %.0f m of transit saved, interrupted point mowed later", "Reprise intelligente après recharge : %.0f m de transit économisés, point interrompu tondu plus tard").format(smart.savedM))
+                                index=0
+                                continue
+                            }
                             val resuming=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                                 runCatching { RobotRoute.departure(missionRoutes,routePhysicalRoutes,outPose,outHeading,saved,savedHeading) }.getOrNull()
                             } ?: paths.resuming
@@ -3926,11 +4147,18 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     /** Immediate stop on lift: critical alert, zero-speed STOP and end of any activity in progress. */
     private fun liftDetected(reason: String, source: String) {
         val t = state.value.telemetry
+        // Joystick stopped by the wheels without progress: often the bumper pushing against an object. Its 1014 comes with
+        // the next error read: same grace window as a collision protection, so the contact is still logged on the map.
+        val manualStall = source == "wheel_progress" && state.value.manualActive
         event("lift_detected", reason, mapOf("source" to source, "sensorStatus" to t.sensorStatus, "x" to t.x, "y" to t.y,
             "robotState" to t.robotState, "selfCheck" to t.selfCheck))
         liftGuard.reset()
         alert(AlertKind.LIFTED, Severity.CRITICAL, reason)
         requestStop(false, reason)
+        if (manualStall) {
+            manualContactUntil = SystemClock.elapsedRealtime() + ManualContact.GRACE_MS
+            if (state.value.ready && !closing) send(commands.errorQuery(), "MANUAL_STALL_ERRORS")
+        }
     }
     private fun requestStop(close: Boolean, reason: String, intentional: Boolean = false) {
         if (stopPending) {
@@ -4001,7 +4229,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (stopPending) return
         stopPending = true
         // The TX sequence is assigned in pump(), after the purge, without creating a gap.
-        if (bumperManualMode || bladeMayBeOn || (fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name) && state.value.telemetry.sensorStatus?.let { ((it shr 9) and 7) != 0 } == true)) {
+        if (bumperManualMode || bladeMayBeOn || (fr.luba.poc.protocol.ModelTrial.testAllowed(state.value.selected?.name, SystemClock.elapsedRealtime()) && state.value.telemetry.sensorStatus?.let { ((it shr 9) and 7) != 0 } == true)) {
             val offBatch = ++batchCounter
             blufi.fragment(commands.manualBlades(false, bladeHeightRequest), state.value.mtu).forEach { queue.addLast(Operation.Write(it, "BLADES_OFF", offBatch)) }
         }
@@ -4233,7 +4461,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         }
         return true
     }
-    private fun bladeGuard(heightMm: Int) {
+    /** [modelAllowed]: model check of the blade test, which a model trial opens (height adjustments keep the validated model). */
+    private fun bladeGuard(heightMm: Int, modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name)) {
         check(!state.value.robotRoute.running && !state.value.mowing.active) { tr("Finish the mowing mission first", "Terminer la mission de tonte") }
         check(!state.value.taskStopPending && gatt != null && state.value.ready && !closing && log.healthy) { tr("BLE / log not ready", "BLE / journal non prêt") }
         check(!state.value.navTest.running) { tr("Finish the random walk before this cutting test", "Terminer la marche aléatoire avant cet essai de coupe") }
@@ -4241,7 +4470,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         val t = state.value.telemetry
         BladeSafety.requireReady(state.value.selected?.name,
             if (bladeDeviceAt == 0L) null else SystemClock.elapsedRealtime() - bladeDeviceAt,
-            t.battery, t.robotState, t.sensorStatus, t.selfCheck, state.value.campaign.running, heightMm, state.value.cutHeights)
+            t.battery, t.robotState, t.sensorStatus, t.selfCheck, state.value.campaign.running, heightMm, state.value.cutHeights, modelAllowed)
     }
     /**
      * Height adjustment outside a mission. Firmware 1.30.29.26 (logs of 10-10): `todev_knife_height_set` alone
@@ -4339,7 +4568,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (state.value.mowing.active) return
         if (heightTarget != null) { update { it.copy(bladeStatus = tr("Height pending: cancel the wait or wait for its result before checking OFF", "Hauteur en attente : annuler l’attente ou attendre son résultat avant de vérifier OFF")) }; return }
         if (!state.value.ready || closing || state.value.teach.running || state.value.campaign.running || state.value.bladeTestActive || state.value.navTest.running || heightTarget != null) return
-        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name)) return
+        if (!fr.luba.poc.protocol.ModelTrial.testAllowed(state.value.selected?.name, SystemClock.elapsedRealtime())) return
         bladeHeightRequest = state.value.cutHeights.clamp(heightMm)
         bladeStopVerified = false; bladeOffWrittenAt = 0; bladeOffPending = true; bladeMayBeOn = true
         update { it.copy(bladeStatus = tr("Blade stop check: OFF requested", "Vérification arrêt lames : OFF demandé")) }
@@ -4353,7 +4582,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (state.value.manualActive) { status(tr("Release the joystick before this action", "Relâcher le joystick avant cette action")); return }
         if (state.value.mapLoading) { status(tr("Wait for the map reading", "Attendre la lecture de carte")); return }
         try {
-            bladeGuard(heightMm)
+            bladeGuard(heightMm, fr.luba.poc.protocol.ModelTrial.testAllowed(state.value.selected?.name, SystemClock.elapsedRealtime()))
             check(bladeStopVerified && !bladeMayBeOn && !bladeOffPending) { tr("Check OFF, then wait for an OFF state received after the write", "Vérifier OFF puis attendre un état OFF reçu après l’écriture") }
             check(heightTarget == null && !state.value.bladeTestActive && current == null && queue.isEmpty()) { tr("Wait for the BLE / height operations to finish", "Attendre la fin des opérations BLE / hauteur") }
             bladeHeightRequest = heightMm
@@ -4558,29 +4787,47 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 !state.value.navTest.running && !state.value.teach.running && !state.value.borderFrontal.running && !state.value.campaign.running &&
                 !state.value.bladeTestActive && !state.value.mapLoading && heightTarget == null &&
                 !bladeMayBeOn && !bladeOffPending) { tr("Finish the mission or test in progress", "Terminer la mission ou l'essai en cours") }
-            check(fr.luba.poc.protocol.ModelSupport.motionValidated(state.value.selected?.name)) { tr("LUBA 2 required", "LUBA 2 requis") }
-            check(t.robotState in if (state.value.manualActive) listOf(11,20) else listOf(11)) { tr("Robot not ready", "Robot non prêt") }
+            val robotName = state.value.selected?.name
+            check(fr.luba.poc.protocol.ModelTrial.testAllowed(robotName, SystemClock.elapsedRealtime())) { tr("LUBA 2 required (or model trial armed)", "LUBA 2 requis (ou essai du modèle armé)") }
+            // 20: manual mode kept by the previous gesture for bumper detection (released a moment ago).
+            check(t.robotState in listOf(11,20)) { tr("Robot not ready", "Robot non prêt") }
             val failure = TeachSafety.tickFailure(if (devicePrevious == 0L) null else SystemClock.elapsedRealtime()-devicePrevious,
                 t.battery,t.sensorStatus,30)
             check(failure == null) { failure ?: tr("State unavailable", "État indisponible") }
-            // Beyond the mapped zones, 25 does not prevent driving freely ([offMapLatchIgnored]).
-            check(fr.luba.poc.protocol.SelfCheck.nominal(t.selfCheck) || offMapLatchIgnored(t)) { fr.luba.poc.protocol.SelfCheck.refusal(t.selfCheck) }
+            // Beyond the mapped zones, 25 does not prevent driving freely ([offMapLatchIgnored]); nor does a positioning
+            // condition (41 weak satellite signal, 2026-10-22): the joystick does not need RTK and brings the robot under open sky.
+            check(fr.luba.poc.protocol.SelfCheck.joystickAllowed(t.selfCheck) || offMapLatchIgnored(t)) { fr.luba.poc.protocol.SelfCheck.refusal(t.selfCheck) }
             check(!TeachSafety.bumperHealthAlert(t.sensorStatus)) { tr("Bumper / lift sensor alert", "Alerte capteur pare-chocs / soulèvement") }
-            manualCommand = linear to angular; manualInputAt = SystemClock.elapsedRealtime()
+            // Model trial: joystick bounded to the trial ceilings (low speed).
+            manualCommand = fr.luba.poc.protocol.ModelTrial.joystick(robotName, linear, angular); manualInputAt = SystemClock.elapsedRealtime()
+            if (manualCommand.first != 0) manualLastLinear = manualCommand.first
             if (manualJob == null) {
-                update { it.copy(manualActive = true, manualStatus = tr("Control active — release to stop", "Pilotage actif — relâchez pour arrêter")) }
-                event("manual_start", tr("Joystick control, blades OFF", "Pilotage joystick, lames OFF"))
+                val trial = !fr.luba.poc.protocol.ModelSupport.motionValidated(robotName)
+                update { it.copy(manualActive = true, manualStatus = if (trial) tr("Model trial: low-speed control — release to stop", "Essai du modèle : pilotage lent — relâchez pour arrêter")
+                    else tr("Control active — release to stop", "Pilotage actif — relâchez pour arrêter")) }
+                event("manual_start", tr("Joystick control, blades OFF", "Pilotage joystick, lames OFF"), if (trial) mapOf("modelTrial" to true, "robotName" to robotName,
+                    "maxLinear" to fr.luba.poc.protocol.ModelTrial.MAX_LINEAR, "maxAngular" to fr.luba.poc.protocol.ModelTrial.MAX_ANGULAR) else emptyMap())
                 manualJob = viewModelScope.launch {
+                    // Bumper contact: the LUBA 2 only gives code 1014 on a read of its error history (CollisionLatch). Read
+                    // every 500 ms while driving, like routes do; before 2026-10-22 nothing read it during the joystick, so a
+                    // contact was never seen (or ended as "Wheels commanded without progress").
+                    var errorsAt = 0L
+                    // The LUBA 2 only publishes the bumper contact (-1014) in manual mowing mode (state 20), never while
+                    // driven in ready mode (11): Fold log of 2026-10-22 16:48-16:49, joystick and approach against the
+                    // bumper in state 11, error history unchanged. Manual mode with blades OFF, renewed every 500 ms.
+                    var bumperModeAt = 0L
+                    manualBumperMode = true
                     try {
                         while (state.value.manualActive) {
                             val now = SystemClock.elapsedRealtime(); val currentTelemetry = state.value.telemetry
                             check(now-manualInputAt <= 500) { tr("Joystick input stale", "Entrée joystick périmée") }
+                            check(fr.luba.poc.protocol.ModelTrial.testAllowed(state.value.selected?.name, now)) { tr("Model trial ended", "Essai du modèle terminé") }
                             val guard = TeachSafety.tickFailure(if (devicePrevious == 0L) null else now-devicePrevious,
                                 currentTelemetry.battery,currentTelemetry.sensorStatus,30)
                             // Precise reason in the log: on 10-14, "Protection / incompatible robot state" did not say that
                             // the robot had just published self-check 25.
                             check(guard == null) { guard ?: "" }
-                            check(fr.luba.poc.protocol.SelfCheck.nominal(currentTelemetry.selfCheck) || offMapLatchIgnored(currentTelemetry)) {
+                            check(fr.luba.poc.protocol.SelfCheck.joystickAllowed(currentTelemetry.selfCheck) || offMapLatchIgnored(currentTelemetry)) {
                                 fr.luba.poc.protocol.SelfCheck.refusal(currentTelemetry.selfCheck) }
                             check(!TeachSafety.bumperHealthAlert(currentTelemetry.sensorStatus)) {
                                 tr("Bumper / lift sensor alert (sensors ${currentTelemetry.sensorStatus})", "Alerte capteur pare-chocs / soulèvement (capteurs ${currentTelemetry.sensorStatus})") }
@@ -4588,19 +4835,45 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             check(state.value.ready && !closing && log.healthy) { tr("Link unavailable", "Liaison indisponible") }
                             check(queue.size <= 4) { tr("BLE queue saturated", "File BLE saturée") }
                             if (current == null && queue.isEmpty()) send(commands.movement(manualCommand.first,manualCommand.second), "MANUAL_JOYSTICK")
+                            if (now >= bumperModeAt && currentTelemetry.robotState in listOf(11, 20) && !bladeMayBeOn) {
+                                send(commands.manualMow(1, 0, bladeHeightRequest), "MANUAL_BUMPER_MODE", periodic = true); bumperModeAt = now + 500 }
+                            if (now >= errorsAt) { send(commands.errorQuery(), "MANUAL_ERRORS", periodic = true); errorsAt = now + 500 }
                             delay(200)
                         }
                     } catch (cancel: CancellationException) { throw cancel }
-                    catch (error: Exception) { alert(AlertKind.UNEXPECTED_STOP, Severity.CRITICAL, error.message ?: tr("Control interrupted", "Pilotage interrompu")); stopManual(error.message ?: tr("Control interrupted", "Pilotage interrompu")) }
+                    catch (error: Exception) { manualInterrupted(error.message ?: tr("Control interrupted", "Pilotage interrompu")) }
                 }
             }
             return true
         } catch (error: Exception) {
+            // Refused while driving (finger still on the joystick): a collision protection is handled like in the loop.
+            if (state.value.manualActive && ManualContact.suspected(state.value.telemetry.selfCheck, state.value.telemetry.sensorStatus)) {
+                manualInterrupted(error.message ?: tr("Control interrupted", "Pilotage interrompu"))
+                return false
+            }
             stopManual(tr("Control refused: ${error.message}", "Pilotage refusé : ${error.message}"))
             update { it.copy(manualStatus = tr("Control refused: ${error.message}", "Pilotage refusé : ${error.message}")) }
             return false
         }
     }
+
+    /**
+     * Joystick stopped by a guard while driving. Collision lock (25) or bumper alert: probably an object touched, the
+     * obstacle sheet opens; the lock alone replaces the critical alert, bumper / lift bits keep it (lift possible).
+     */
+    private fun manualInterrupted(reason: String) {
+        val live = state.value.telemetry
+        val contact = ManualContact.suspected(live.selfCheck, live.sensorStatus)
+        if (!contact || TeachSafety.bumperHealthAlert(live.sensorStatus)) alert(AlertKind.UNEXPECTED_STOP, Severity.CRITICAL, reason)
+        stopManual(reason)
+        if (!contact) return
+        manualContactUntil = SystemClock.elapsedRealtime() + ManualContact.GRACE_MS
+        if (state.value.ready && !closing) send(commands.errorQuery(), "MANUAL_CONTACT_ERRORS")
+        recordManualContact(null)
+    }
+
+    /** Joystick drove in manual mode with blades OFF (bumper detection): left on release. */
+    private var manualBumperMode = false
 
     fun stopManual(reason: String = tr("Joystick released", "Joystick relâché"), sendStop: Boolean = true) {
         manualBlocked = true
@@ -4608,7 +4881,12 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         manualJob?.cancel(); manualJob = null; manualCommand = 0 to 0
         if (!active) return
         update { it.copy(manualActive = false, manualStatus = tr("$reason — stop requested", "$reason — arrêt demandé")) }
-        if (sendStop && state.value.ready && !closing) { purgeQueuedCommands(); send(commands.stop(), "MANUAL_STOP") }
+        if (sendStop && state.value.ready && !closing) {
+            purgeQueuedCommands(); send(commands.stop(), "MANUAL_STOP")
+            // Leaves the manual mode used for bumper detection (blades already OFF).
+            if (manualBumperMode) send(commands.manualBlades(false, bladeHeightRequest), "MANUAL_EXIT_MODE")
+        }
+        manualBumperMode = false
         event("manual_stop", reason)
     }
 
@@ -4631,7 +4909,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             check(!ui.taskStopPending && ui.ready && !closing && log.healthy && !ui.robotRoute.running && !ui.mowing.active && !ui.manualActive &&
                 !ui.navTest.running && !ui.teach.running && heightTarget == null && !bladeMayBeOn && !bladeOffPending) { tr("Finish the mission or test in progress", "Terminer la mission ou l'essai en cours") }
             TeachSafety.startFailure(ui.selected?.name, if (devicePrevious == 0L) null else now - devicePrevious, t.battery, t.robotState,
-                t.sensorStatus, t.selfCheck, ui.campaign.running, ui.bladeTestActive, ui.navTest.running, ui.mapLoading)?.let { error(it) }
+                t.sensorStatus, t.selfCheck, ui.campaign.running, ui.bladeTestActive, ui.navTest.running, ui.mapLoading,
+                modelAllowed = fr.luba.poc.protocol.ModelTrial.testAllowed(ui.selected?.name, now))?.let { error(it) }
             NavSafety.automaticPositionFailure(now - positionPrevious, t.x, t.y)?.let { error(it) }
             check(t.rtkFix) { tr("RTK FIX position required", "Position RTK FIX requise") }
             SilenceClearance.failure(ui.robotMap, ui.obstacles, Point(requireNotNull(t.x), requireNotNull(t.y)), t.heading ?: Double.NaN,
@@ -4656,6 +4935,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     val live = state.value.telemetry
                     val now = SystemClock.elapsedRealtime()
                     check(state.value.ready && !closing && log.healthy) { tr("BLE link interrupted", "Liaison BLE interrompue") }
+                    check(fr.luba.poc.protocol.ModelTrial.testAllowed(state.value.selected?.name, now)) { tr("Model trial ended", "Essai du modèle terminé") }
                     TeachSafety.tickFailure(now - devicePrevious, live.battery, live.sensorStatus, 30)?.let { error(it) }
                     check(fr.luba.poc.protocol.SelfCheck.nominal(live.selfCheck) && !TeachSafety.bumperHealthAlert(live.sensorStatus)) { tr("Protection or sensor alert", "Protection ou alerte capteur") }
                     check(live.robotState in listOf(11, 20)) { tr("Robot state changed (${live.robotState})", "État robot changé (${live.robotState})") }
@@ -4745,13 +5025,11 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             check(failure == null) { failure ?: tr("Robot unavailable", "Robot indisponible") }
             check(state.value.ready && gatt != null && !closing && log.healthy && !bladeMayBeOn && !bladeOffPending && heightTarget == null) { tr("BLE / blade stop / height not ready", "BLE / arrêt lames / hauteur non prêt") }
             check(queue.size <= 4) { tr("BLE queue busy", "File BLE occupée") }
-            check(!approach || !manualMode) { tr("Manual mode only when stationary", "Mode manuel immobile seulement") }
-            if (approach) check(bumperValidatedConnection == connectionId) {
-                tr("Detection not validated: test the stationary bumper before any approach on this connection", "Détection non validée : tester le bumper immobile avant toute approche sur cette connexion")
-            }
+            // Bumper published only in manual mode (state 20): the approach always drives in manual mode, blades OFF.
+            val bumperMode = manualMode || approach
             if (approach) check(TeachSafety.approachFailure(if (positionPrevious == 0L) null else SystemClock.elapsedRealtime() - positionPrevious, t.x, t.y, t.x, t.y) == null) { tr("Fresh position required for the approach", "Position fraîche obligatoire pour l'approche") }
             obstacleApproach = approach
-            obstacleManualMode = manualMode
+            obstacleManualMode = bumperMode
             obstacleStart = t.x?.let { x -> t.y?.let { NavSample(x, it, t.heading, 0) } }
             teachStarted = SystemClock.elapsedRealtime(); teachId = UUID.randomUUID().toString()
             update { it.copy(teach = TeachUi(id = teachId, running = true, contactValidated=bumperValidatedConnection==connectionId, outcome = "RUNNING", status = if (approach) tr("Slow approach: stop on contact, 1 m / 30 s max", "Approche lente : arrêt au contact, 1 m / 30 s max") else tr("Stationary: wait for a bumper contact, 30 s max", "Immobile : attendre un contact bumper, 30 s max"))) }
@@ -4763,7 +5041,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                     val progress=MotionProgressGuard()
                     var nextManualKeepalive = 0L
                     var nextDiagnosticQuery = 0L
-                    if (manualMode) {
+                    if (bumperMode) {
                         purgeQueuedCommands(); send(commands.stop(),"BUMPER_MODE_STOP")
                         val gate=RouteBladeGate.unique("BUMPER_MANUAL_OFF",false)
                         routeBladeGate=gate
@@ -4775,7 +5053,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             delay(200)
                         }
                         teachStarted=SystemClock.elapsedRealtime()
-                        update { it.copy(teach=it.teach.copy(status=tr("Stationary in manual mode, blades OFF confirmed: wait for the contact", "Immobile en mode manuel, lames OFF confirmées : attendre le contact"))) }
+                        update { it.copy(teach=it.teach.copy(status=if (approach) tr("Slow approach in manual mode, blades OFF: stop on contact, 1 m / 30 s max", "Approche lente en mode manuel, lames OFF : arrêt au contact, 1 m / 30 s max")
+                            else tr("Stationary in manual mode, blades OFF confirmed: wait for the contact", "Immobile en mode manuel, lames OFF confirmées : attendre le contact"))) }
                     }
                     while (SystemClock.elapsedRealtime() - teachStarted < teachConfig.maxDurationMs) {
                         val now = SystemClock.elapsedRealtime(); val currentTelemetry = state.value.telemetry
@@ -4783,7 +5062,10 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             currentTelemetry.battery, currentTelemetry.sensorStatus, teachConfig.batteryFloor)
                         check(log.healthy && state.value.ready && !closing) { tr("BLE / log unavailable", "BLE / journal indisponible") }
                         check(tickFailure == null) { tickFailure ?: tr("Sensors unavailable", "Capteurs indisponibles") }
-                        check(fr.luba.poc.protocol.SelfCheck.nominal(currentTelemetry.selfCheck)) { tr("Robot protection active", "Protection robot active") }
+                        // Slow approach: the collision lock (25) or another protection that may announce the contact is the
+                        // expected outcome, not a failure ([awaitApproachContact]).
+                        val contactProtection = approach && CollisionLatch.mayAnnounceContact(currentTelemetry.robotState, currentTelemetry.selfCheck)
+                        check(contactProtection || fr.luba.poc.protocol.SelfCheck.nominal(currentTelemetry.selfCheck)) { tr("Robot protection active", "Protection robot active") }
                         if (TeachSafety.bumperHealthAlert(currentTelemetry.sensorStatus)) {
                             finishObstacle("ABORTED", tr("Bumper health alert: STOP requested; contact not confirmed", "Alerte de santé bumper : STOP demandé ; contact non confirmé"))
                             return@launch
@@ -4793,8 +5075,18 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             val approachFailure = TeachSafety.approachFailure(if (positionPrevious == 0L) null else now - positionPrevious,
                                 currentTelemetry.x, currentTelemetry.y, obstacleStart?.x, obstacleStart?.y)
                             check(approachFailure == null) { approachFailure ?: tr("Approach unavailable", "Approche indisponible") }
-                            check(!progress.blocked(Point(requireNotNull(currentTelemetry.x),requireNotNull(currentTelemetry.y)),positionPrevious,now,teachConfig.linearSpeed)) { tr("Presumed blockage: no translation observed for 3 s, contact not confirmed", "Blocage présumé : aucune translation observée depuis 3 s, contact non confirmé") }
+                            val here = Point(requireNotNull(currentTelemetry.x), requireNotNull(currentTelemetry.y))
+                            val stalled = progress.blocked(here, positionPrevious, now, teachConfig.linearSpeed)
+                            if (stalled || contactProtection) {
+                                val start = obstacleStart
+                                awaitApproachContact(stalled, if (start == null) 0.0 else here.distance(Point(start.x, start.y)))
+                                return@launch
+                            }
                             send(commands.movement(teachConfig.linearSpeed, 0), "OBSTACLE_APPROACH")
+                            if (now >= nextManualKeepalive) {
+                                send(commands.manualMow(1,0,bladeHeightRequest), "APPROACH_MANUAL_KEEPALIVE_OFF", periodic = true)
+                                nextManualKeepalive = now + 500
+                            }
                         } else if (manualMode) {
                             if (now >= nextManualKeepalive) {
                                 send(commands.manualMow(1,0,bladeHeightRequest), "BUMPER_MANUAL_KEEPALIVE_OFF")
@@ -4803,7 +5095,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                         } else send(commands.stop(), "OBSTACLE_STATIC_ZERO")
                         if (now >= nextDiagnosticQuery) {
                             event("bumper_diagnostic", tr("State while waiting for contact", "État pendant attente contact"), mapOf("testId" to teachId,
-                                "manualRequested" to manualMode, "manualObserved" to (currentTelemetry.robotState == 20),
+                                "manualRequested" to bumperMode, "manualObserved" to (currentTelemetry.robotState == 20),
                                 "robotState" to currentTelemetry.robotState, "sensorStatus" to currentTelemetry.sensorStatus,
                                 "selfCheck" to currentTelemetry.selfCheck, "knifeStatus" to currentTelemetry.knifeStatus,
                                 "cutterRpm" to currentTelemetry.cutterRpm, "stateAgeMs" to now-devicePrevious))
@@ -4820,6 +5112,44 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         } catch (error: Exception) {
             update { it.copy(teach = it.teach.copy(status = tr("Test refused: ${error.message}", "Test refusé : ${error.message}"))) }
             event("obstacle_test_refused", error.message ?: tr("Test refused", "Test refusé"))
+        }
+    }
+
+    /**
+     * Slow approach halted by the robot itself: collision protection (25…) or no translation for 3 s. Until 2026-10-22
+     * both ended the test as ABORTED ("Robot protection active", "Presumed blockage"), although the robot stopping
+     * against the object is what the approach is for. The robot is stopped and the error history read every 500 ms for
+     * [ManualContact.GRACE_MS]: a 1014 gives CONTACT_DETECTED (error handler). Without a code: collision lock (25) =
+     * contact; robot stopped after [TeachSafety.APPROACH_MIN_TRAVEL_M] of travel = BLOCKED_AHEAD, obstacle proposed to
+     * check (bumper not validated); robot that never moved = ABORTED.
+     */
+    private suspend fun awaitApproachContact(stalled: Boolean, travelledM: Double) {
+        purgeQueuedCommands(); send(commands.stop(), "OBSTACLE_APPROACH_HALT"); send(commands.errorQuery(), "OBSTACLE_CONTACT_ERRORS")
+        val first = state.value.telemetry
+        event("obstacle_approach_halt", tr("Slow approach halted by the robot: waiting for the contact code", "Approche lente arrêtée par le robot : attente du code de contact"),
+            mapOf("testId" to teachId, "stalled" to stalled, "selfCheck" to first.selfCheck, "sensorStatus" to first.sensorStatus, "travelledM" to travelledM))
+        update { it.copy(teach = it.teach.copy(status = tr("Robot stopped in front of an object: waiting for the contact code…", "Robot arrêté devant un objet : attente du code de contact…"))) }
+        val deadline = SystemClock.elapsedRealtime() + ManualContact.GRACE_MS
+        var queryAt = SystemClock.elapsedRealtime() + 500
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (!state.value.teach.running) return
+            val now = SystemClock.elapsedRealtime()
+            if (now >= queryAt) {
+                send(commands.manualMow(1, 0, bladeHeightRequest), "APPROACH_HALT_MANUAL_KEEPALIVE_OFF", periodic = true)
+                send(commands.errorQuery(), "OBSTACLE_CONTACT_ERRORS", periodic = true); queryAt = now + 500
+            }
+            delay(200)
+        }
+        if (!state.value.teach.running) return
+        val t = state.value.telemetry
+        val cm = kotlin.math.round(travelledM * 100).toInt()
+        when {
+            CollisionLatch.latched(t.selfCheck) -> finishObstacle("CONTACT_DETECTED", tr("Contact reported by the collision lock (self-check 25) without code 1014: STOP requested; check the physical stop",
+                "Contact signalé par le verrou de collision (self-check 25) sans code 1014 : STOP demandé ; vérifier l'arrêt physique"))
+            travelledM >= TeachSafety.APPROACH_MIN_TRAVEL_M -> finishObstacle("BLOCKED_AHEAD", tr("Robot stopped in front of an object after $cm cm, without a bumper contact reported: obstacle proposed, to check",
+                "Robot arrêté devant un objet après $cm cm, sans contact pare-chocs rapporté : obstacle proposé, à vérifier"))
+            else -> finishObstacle("ABORTED", tr("The robot did not move forward at the approach speed ($cm cm): ground, slope or robot already against an object",
+                "Le robot n'a pas avancé à la vitesse d'approche ($cm cm) : terrain, pente ou robot déjà contre un objet"))
         }
     }
 
@@ -5863,6 +6193,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
 
     private suspend fun runMapNavTest(config: NavConfig, initialPlan: MapNavPlan) {
         var plan = initialPlan
+        // Kept after a recovery (new path from the actual position, built without the flag).
+        val alignAtStart = initialPlan.alignAtStart
         var index = 1
         var repairs = 0
         var recoveries = 0
@@ -6027,7 +6359,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 val rangeEnd = if (config.tonte) plan.bladeRangeEnd(index-1) else path.size
                 val endPoint = rangeEnd
                 val blades = config.tonte && plan.cutting(index-1)
-                val follower = PathFollower(path,index-1,rangeEnd,RangeArrival.TARGET_M).also { it.slide = slideVelocity() }
+                val follower = PathFollower(path,index-1,rangeEnd,RangeArrival.TARGET_M).also { it.slide = slideVelocity(); if (alignAtStart) it.alignFirst() }
                 // End of range confirmed by a position measured after the stop (the robot used to stop short).
                 val arrival = RangeArrival(DeadReckoning.NAV_COMMAND_DELAY_MS)
                 var started = SystemClock.elapsedRealtime()
@@ -6617,8 +6949,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         override fun refusal(): String? {
             val ui = state.value
             return when {
-                !fr.luba.poc.protocol.ModelSupport.motionValidated(ui.selected?.name) -> tr("Writing to the robot map is reserved for a validated LUBA 2 (Luba-VS)",
-                    "L'écriture dans la carte du robot est réservée à un LUBA 2 validé (Luba-VS)")
+                !fr.luba.poc.protocol.ModelSupport.motionValidated(ui.selected?.name) -> tr("Writing to the robot map is reserved for a validated LUBA 2 (Luba-VS, Luba-VP)",
+                    "L'écriture dans la carte du robot est réservée à un LUBA 2 validé (Luba-VS, Luba-VP)")
                 gatt == null || !ui.ready || closing -> tr("Connect the robot (Bluetooth or gateway) first", "Connectez d'abord le robot (Bluetooth ou passerelle)")
                 !ui.mammotionMap.complete || ui.mammotionMap.source.contains("DÉMONSTRATION", true) -> tr("Read the robot map first", "Lisez d'abord la carte du robot")
                 ui.mapLoading -> tr("Wait for the end of the map reading", "Attendez la fin de la lecture de la carte")
@@ -6752,7 +7084,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val plan = try { PointPlanner.tracePlan(ui.robotMap, path, ui.obstacles, accesses(ui.robotMap)) }
                 catch (e: IllegalArgumentException) { return e.message ?: e.javaClass.simpleName }
                 catch (e: IllegalStateException) { return e.message ?: e.javaClass.simpleName }
-            return drive(null) { startMapNavigation(config(null), preset = plan) }
+            // Straight join ending on the outline (half a chassis + 15 cm from the element): faced in place first, an arc
+            // under the 25° pivot threshold swung the chassis off the line towards the element (envelope refused).
+            return drive(null) { startMapNavigation(config(null), preset = plan.copy(alignAtStart = true)) }
         }
 
         override suspend fun driveTrace(trace: List<Point>, kind: fr.luba.poc.mapsync.SyncKind, progress: (Double) -> Unit): String? {
@@ -6763,7 +7097,11 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val plan = try { PointPlanner.tracePlan(ui.robotMap, path, ui.obstacles, accesses(ui.robotMap)) }
                 catch (e: IllegalArgumentException) { return e.message ?: e.javaClass.simpleName }
                 catch (e: IllegalStateException) { return e.message ?: e.javaClass.simpleName }
-            return drive(progress) { startMapNavigation(config(kind.drawState), preset = plan) }
+            // Faced along the first edge in place first: the join leaves the robot at up to 25° from the outline, and the
+            // arc that corrected it while recording took the chassis 15 cm towards the element (footprint or corridor
+            // check, outline abandoned): 53 failures out of 300 draws of the bench before, 35 after ([MapSyncSweepTest]).
+            // A pivot on the spot adds no recorded point.
+            return drive(progress) { startMapNavigation(config(kind.drawState), preset = plan.copy(alignAtStart = true)) }
         }
 
         override suspend fun endRecording(kind: fr.luba.poc.mapsync.SyncKind): String? {
@@ -6875,6 +7213,23 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     }
 
     fun dismissTeachProposal() { update { it.copy(teach = it.teach.copy(proposal = null)) } }
+
+    /**
+     * Obstacle pointed at without contact (Service → Obstacle tests → Learn): proposal from the robot's fresh pose,
+     * touching the bumper by default; type, size and distance are adjusted before saving. No robot command.
+     */
+    fun proposeObstacleAhead() {
+        val t = state.value.telemetry
+        val fresh = positionPrevious != 0L && SystemClock.elapsedRealtime() - positionPrevious in 0..2000
+        val x = t.x; val y = t.y; val heading = t.heading
+        if (!fresh || x == null || y == null || heading == null || !x.isFinite() || !y.isFinite() || !heading.isFinite()) {
+            update { it.copy(teach = it.teach.copy(status = tr("Fresh position and heading required to place an obstacle", "Position et cap frais requis pour placer un obstacle"))) }
+            return
+        }
+        val proposal = TeachSafety.pointedProposal(TeachContact(x, y, heading, System.currentTimeMillis()), ObstacleKind.OTHER.defaultRadiusM)
+        update { it.copy(teach = it.teach.copy(proposal = proposal, status = tr("Obstacle placed in front of the robot: adjust it, then save", "Obstacle placé devant le robot : ajustez-le puis enregistrez"))) }
+        event("obstacle_pointed", tr("Obstacle pointed at without contact", "Obstacle désigné sans contact"), mapOf("x" to proposal.estimated.x, "y" to proposal.estimated.y, "heading" to heading))
+    }
 
     private fun ensureHealthy(requireState: Boolean = true) {
         campaignFailure?.let { error(it) }

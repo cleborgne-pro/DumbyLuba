@@ -127,6 +127,10 @@ internal class RobotProtection(state: RobotUi, demo: Boolean, cloud: Boolean) {
     val robotBlocked = state.ready && !demo && !cloud && ((fr.luba.poc.protocol.StopUnlock.blocked(selfCheck) && !offMapLatch) || state.unlockPending)
     /** Forbidden time range of the Mammotion app (self-check 23): nothing to unlock. */
     val forbiddenTime = fr.luba.poc.protocol.SelfCheck.forbiddenTime(selfCheck)
+    /** Positioning condition (41 weak satellite signal…): nothing to unlock, joystick allowed. */
+    val positioning = fr.luba.poc.protocol.SelfCheck.positioning(selfCheck)
+    /** Condition explained by a note, without the "Robot stuck" panel and its unlock. */
+    val noteOnly = forbiddenTime || positioning
 }
 
 /**
@@ -146,6 +150,7 @@ internal fun RobotProtectionPanel(
     var offMapHidden by remember(selfCheck) { mutableStateOf(false) }
     // Forbidden time range: a message is enough (can be hidden until the next state change).
     var forbiddenHidden by remember(selfCheck) { mutableStateOf(false) }
+    var positioningHidden by remember(selfCheck) { mutableStateOf(false) }
     if (robotBlocked && protection.forbiddenTime && !state.unlockPending) {
         if (!forbiddenHidden) MapFloatingNote(tr("Outside the working hours set in the Mammotion app: the robot refuses to work " +
             "until the end of this range. Nothing to unlock. To stop being blocked, disable this range in the Mammotion " +
@@ -155,6 +160,17 @@ internal fun RobotProtectionPanel(
             "jusqu'à la fin de cette plage. Rien à déverrouiller. Pour ne plus être bloqué, désactiver cette plage dans l'app " +
             "Mammotion et utiliser celle de DumbyLuba (Paramètres de la tâche) : arrêt propre, retour à la base " +
             "et reprise au point interrompu."), NoteTone.WARNING) { forbiddenHidden = true }
+    }
+    else if (robotBlocked && protection.positioning && !state.unlockPending) {
+        if (!positioningHidden) MapFloatingNote(tr("Positioning lost: ${fr.luba.poc.protocol.SelfCheck.name(selfCheck)} (self-check $selfCheck). " +
+            "Nothing to unlock: the robot refuses to work until its positioning comes back. Wait a few minutes, or drive it " +
+            "under open sky with the joystick (blades stopped)." +
+            (blockedCheckpoint?.let { " ${it.task.title} at ${(it.progress * 100).toInt()} %: resume possible once the signal is back." } ?: ""),
+            "Positionnement perdu : ${fr.luba.poc.protocol.SelfCheck.name(selfCheck)} (self-check $selfCheck). " +
+            "Rien à déverrouiller : le robot refuse de travailler tant que son positionnement n'est pas revenu. Attendre quelques " +
+            "minutes, ou l'amener à découvert au joystick (lames arrêtées)." +
+            (blockedCheckpoint?.let { " ${it.task.title} à ${(it.progress * 100).toInt()} % : reprise possible dès le retour du signal." } ?: "")),
+            NoteTone.WARNING) { positioningHidden = true }
     }
     else if (protection.offMapLatch && !robotBlocked && !offMapHidden && !state.navTest.running && !state.manualActive)
         MapFloatingNote(tr("Beyond the mapped zones (self-check 25): ignored, joystick and move to a point stay available, blades stopped.",
@@ -512,7 +528,7 @@ internal fun InterruptedMowingPanel(
                         DropdownMenuItem(text = { Column {
                             Text(tr("Resume further on", "Reprendre plus loin"))
                             Text(tr("Skip an obstacle or a difficult passage", "Sauter un obstacle ou un passage difficile"), style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
-                        } }, onClick = { menu = false; onOpenSkip() }, enabled = !busy && !state.backOffPending)
+                        } }, onClick = { menu = false; onOpenSkip() }, enabled = !busy && !state.backOffPending && checkpoint.linear)
                         if (summary.detail != null) DropdownMenuItem(text = { Text(if (details) tr("Hide the details", "Masquer les détails") else tr("Stop details", "Détails de l'arrêt")) },
                             onClick = { menu = false; details = !details })
                     }

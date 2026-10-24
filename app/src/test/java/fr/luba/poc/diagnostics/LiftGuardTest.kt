@@ -65,6 +65,16 @@ class LiftGuardTest {
         assertNull("slip without stop", stop)
     }
 
+    /** 2026-10-22: gentle joystick (150 units) on a robot moving at a fifth of the nominal calibration: no stop. */
+    @Test fun gentleDrivingSlowerThanCalibrationIsNotALift() {
+        assertNull(drive(LiftGuard(), 150, 20_000) { t -> Point(maxOf(0L, t - 600) * 150 * 0.00095 * 0.2 / 1000, 0.0) })
+        assertNull(drive(LiftGuard(), 120, 20_000) { Point(0.0, 0.0) })
+    }
+
+    @Test fun liftAtANormalJoystickSpeedStillStops() {
+        assertNotNull(drive(LiftGuard(), 400, 12_000) { t -> Point(minOf(t, 5000L) * 400 * 0.00095 / 1000, 0.0) })
+    }
+
     @Test fun slowApproachAndPivotsAreIgnored() {
         assertNull(drive(LiftGuard(), 20, 20_000) { Point(0.0, 0.0) })
         assertNull(drive(LiftGuard(), 0, 20_000) { Point(0.0, 0.0) })

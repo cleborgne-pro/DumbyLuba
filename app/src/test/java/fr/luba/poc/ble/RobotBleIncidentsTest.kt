@@ -76,6 +76,22 @@ class RobotBleIncidentsTest {
         bench.ble.stop()
     }
 
+    /** 2026-10-22: weak satellite signal (41) held for two minutes: the mowing waits, blades OFF, then resumes. */
+    @Test fun `weak satellite signal held two minutes while mowing, wait then resume`() {
+        bench.mowingUnderway()
+        bench.sim.selfCheck = 41
+        bench.until(5000, "pause on protection") { bench.state.events.any { it.contains("attente de sa levée") } }
+        assertFalse(bench.sim.bladesOn)
+        bench.advance(120_000)
+        assertTrue(bench.state.robotRoute.status, bench.state.robotRoute.running)
+        assertFalse(bench.sim.bladesOn)
+        bench.sim.selfCheck = 10
+        bench.until(60_000, "resume") { bench.state.events.any { it.contains("Protection levée par le robot") } }
+        bench.until(60_000, "blades restarted") { bench.sim.bladesOn }
+        assertTrue(bench.state.robotRoute.running)
+        bench.ble.stop()
+    }
+
     @Test fun `lock after STOP while mowing, stop held then unlock`() {
         bench.mowingUnderway()
         bench.sim.selfCheck = 11

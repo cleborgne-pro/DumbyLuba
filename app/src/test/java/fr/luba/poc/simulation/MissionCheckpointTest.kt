@@ -129,4 +129,24 @@ class MissionCheckpointTest {
         folder.root.listFiles()!!.single { it.name.startsWith("mission-checkpoint-") }.writeText("{tronqué")
         assertNull(store.read("AA:BB"))
     }
+
+    /**
+     * Mowing interrupted under 1.14.0, resumed after the update: the save written then has none of the smart resume
+     * fields (activeEnd, deferred, activeBlocked) and must still be read, as linear progress.
+     */
+    @Test fun saveOfTheVersionBeforeSmartResumeIsStillRead() {
+        val store = MissionCheckpointStore(folder.root)
+        val e = engine()
+        val saved = checkpoint(e, edge = 3, point = e.edges[3].a)
+        store.save(saved)
+        val file = folder.root.listFiles()!!.single { it.name.startsWith("mission-checkpoint-") }
+        val json = org.json.JSONObject(file.readText())
+        listOf("activeEnd", "deferred", "activeBlocked").forEach { assertTrue(it, json.has(it)); json.remove(it) }
+        file.writeText(json.toString())
+        val read = requireNotNull(store.read("AA:BB")) { "1.14.0 save refused" }
+        assertEquals(saved, read)
+        assertNull(read.activeEnd)
+        assertTrue(read.deferred.isEmpty())
+        assertNull(read.activeBlocked)
+    }
 }

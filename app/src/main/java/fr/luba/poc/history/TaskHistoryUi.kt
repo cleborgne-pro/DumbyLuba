@@ -158,7 +158,8 @@ private fun chunks(pieces: List<TaskTrackPieces.Piece>, size: Int = 240): List<C
  */
 @Composable
 fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMap: RobotMap?, loadTrack: suspend (String) -> TaskTrack?,
-                   onExcluded: (Boolean) -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier) {
+                   onExcluded: (Boolean) -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier,
+                   onFinishing: ((fr.luba.poc.planning.FinishingOffer) -> Unit)? = null) {
     androidx.activity.compose.BackHandler(onBack = onBack)
     var track by remember(record.id) { mutableStateOf<TaskTrack?>(null) }
     var loading by remember(record.id) { mutableStateOf(true) }
@@ -185,6 +186,13 @@ fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMa
         if (!loading) TaskJournal(track, jumpTo)
         if (!loading) BlackBoxSection(track, jumpTo)
         coverage?.let { RealCoverageSection(record, it) }
+        coverage?.let { c ->
+            val offer by androidx.compose.runtime.produceState<fr.luba.poc.planning.FinishingOffer?>(null, c, record.outcome) {
+                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    runCatching { fr.luba.poc.planning.FinishingPass.offer(record.id, c, record.outcome == MowingOutcome.COMPLETE) }.getOrNull() }
+            }
+            offer?.let { FinishingOfferGroup(it, onFinishing) }
+        }
         if (record.kind == TaskKind.MOW) {
             val comparison = remember(record) { MowingComparison.of(record) }
             val calibration = remember(history, record.robotId) { MowingCalibration.from(history, record.robotId) }

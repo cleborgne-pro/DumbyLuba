@@ -5,7 +5,11 @@ import fr.luba.poc.map.Point
 
 /** Obstacle teaching configuration: slow supervised advance, blades necessarily OFF. */
 data class TeachConfig(
-    val linearSpeed: Int = 20,
+    /**
+     * 80 units (≈ 7.6 cm/s): below ≈ 60 the LUBA 2 hardly moves ([fr.luba.poc.simulation.RangeArrival.APPROACH_MIN_LINEAR]).
+     * At 20 units (until 2026-10-22) the robot stayed in place and the approach ended as "Presumed blockage".
+     */
+    val linearSpeed: Int = 80,
     val maxDurationMs: Long = 30_000,
     val batteryFloor: Int = 30,
 ) {
@@ -17,12 +21,20 @@ data class TeachConfig(
 
     companion object {
         /** Maximum raw teaching speed: deliberately slow move (uncalibrated device units). */
-        const val MAX_TEACH_SPEED = 60
+        const val MAX_TEACH_SPEED = 100
     }
 }
 
-/** Local save proposal after a bumper contact. */
-data class TeachProposal(val contact: TeachContact, val estimated: Point, val radiusM: Double)
+/**
+ * Local save proposal after a bumper contact, or for an obstacle pointed at without contact ([aheadM]: distance of the
+ * centre in front of the robot reference point, adjustable; null = centre estimated from the contact and the radius).
+ */
+data class TeachProposal(val contact: TeachContact, val estimated: Point, val radiusM: Double, val aheadM: Double? = null) {
+    /** Obstacle centre for the chosen [radiusM] and, without contact, the chosen distance [aheadM]. */
+    fun center(radiusM: Double, aheadM: Double? = this.aheadM, robot: RobotEnvelope = RobotEnvelope.LUBA2): Point =
+        if (aheadM == null) TeachObstacle.estimateCenter(contact, radiusM, robot)
+        else ManualContact.ahead(Point(contact.x, contact.y), contact.headingDeg, aheadM)
+}
 
 /** Teach mode guards. The bumper is not a failure: it is the expected contact. */
 object TeachSafety {
@@ -32,8 +44,10 @@ object TeachSafety {
         name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
         sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, bladeTestRunning: Boolean,
         navRunning: Boolean, mapLoading: Boolean, batteryFloor: Int = 30,
+        /** Model check: validated model, or a model trial for the command cutoff test ([fr.luba.poc.protocol.ModelTrial]). */
+        modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(name),
     ): List<Triple<String, Boolean, String>> = listOf(
-        Triple("Robot LUBA 2", fr.luba.poc.protocol.ModelSupport.motionValidated(name), tr("Teaching reserved for a LUBA 2 identified as Luba-VS", "Apprentissage réservé au LUBA 2 identifié Luba-VS")),
+        Triple("Robot LUBA 2", modelAllowed, tr("Reserved for a LUBA 2 identified as Luba-VS or Luba-VP (or a model trial armed)", "Réservé au LUBA 2 identifié Luba-VS ou Luba-VP (ou à un essai du modèle armé)")),
         Triple(tr("BLE diagnostics stopped", "Diagnostic BLE arrêté"), !campaignRunning, tr("Stop the BLE campaign before teaching", "Arrêter la campagne BLE avant l'apprentissage")),
         Triple(tr("No blade test", "Aucun essai de coupe"), !bladeTestRunning, tr("Finish the blade test before teaching", "Terminer l'essai de coupe avant l'apprentissage")),
         Triple(tr("No course running", "Aucun parcours en cours"), !navRunning, tr("Finish the random walk before teaching", "Terminer la marche aléatoire avant l'apprentissage")),
@@ -51,8 +65,9 @@ object TeachSafety {
         name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
         sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, bladeTestRunning: Boolean,
         navRunning: Boolean, mapLoading: Boolean, batteryFloor: Int = 30,
+        modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(name),
     ): String? = checks(name, stateAgeMs, battery, robotState, sensors, selfCheck, campaignRunning, bladeTestRunning,
-        navRunning, mapLoading, batteryFloor).firstOrNull { !it.second }?.third
+        navRunning, mapLoading, batteryFloor, modelAllowed).firstOrNull { !it.second }?.third
 
     /** Continuous check during teaching; the bumper contact is handled elsewhere. */
     fun tickFailure(stateAgeMs: Long?, battery: Int?, sensors: Int?, batteryFloor: Int): String? {
@@ -73,10 +88,20 @@ object TeachSafety {
     /** Bumper health alert: these bits do not prove a physical contact. */
     fun bumperHealthAlert(sensors: Int?): Boolean = sensors != null && sensors and 7 != 0
 
+    /** Travel before the robot halts that makes a stop without contact code a probable object ahead (BLOCKED_AHEAD). */
+    const val APPROACH_MIN_TRAVEL_M = 0.05
+
+    /** Contact reported, or robot stopped in front of an object after moving ([APPROACH_MIN_TRAVEL_M]). */
     fun canProposeObstacle(approach: Boolean, outcome: String, positionAgeMs: Long): Boolean =
-        approach && outcome == "CONTACT_DETECTED" && positionAgeMs in 0..2000
+        approach && outcome in setOf("CONTACT_DETECTED", "BLOCKED_AHEAD") && positionAgeMs in 0..2000
 
     /** Builds the proposal from a contact, with the chosen physical radius. */
     fun proposal(contact: TeachContact, radiusM: Double, robot: RobotEnvelope = RobotEnvelope.LUBA2): TeachProposal =
         TeachProposal(contact, TeachObstacle.estimateCenter(contact, radiusM, robot), radiusM)
+
+    /** Obstacle pointed at without contact, from the robot pose [pose]: touching the bumper by default, distance adjustable. */
+    fun pointedProposal(pose: TeachContact, radiusM: Double, robot: RobotEnvelope = RobotEnvelope.LUBA2): TeachProposal {
+        val ahead = ManualContact.defaultAheadM(radiusM, robot)
+        return TeachProposal(pose, ManualContact.ahead(Point(pose.x, pose.y), pose.headingDeg, ahead), radiusM, ahead)
+    }
 }

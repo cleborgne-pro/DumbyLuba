@@ -17,7 +17,7 @@ import fr.luba.poc.R
  * Newer Luba models with no established trade name (HM, ME, TR, SP) stay generic; any other "Luba…" name is a
  * LUBA 1, as in the original app. Yuka mowers (Yuka-, Yuka-MN, Yuka-YM, Yuka-VP, Yuka-MV, Yuka-ML, Yuka-CV, Yuka-HS and
  * the Ezy-VT / Ezy-LD names) share a single generic entry, without photo.
- * Only the LUBA 2 AWD `Luba-VS…` is validated for motion: see [fr.luba.poc.protocol.ModelSupport].
+ * Only the LUBA 2 AWD (`Luba-VS…` and X series `Luba-VP…`) is validated for motion: see [fr.luba.poc.protocol.ModelSupport].
  */
 enum class RobotModel(val label: String, private val photoName: String? = null) {
     LUBA_1("LUBA AWD", "robot_photo_luba1"),

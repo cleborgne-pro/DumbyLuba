@@ -179,10 +179,85 @@ class RobotBleEssaisTest {
 
     // ───── Bumper ─────
 
+    /** 2026-10-22: the approach no longer waits for a stationary contact test; a contact during it validates detection. */
+    @Test fun `approach without prior stationary test, stop on contact validates detection`() {
+        connectedInZone()
+        assertFalse(bench.state.teach.contactValidated)
+        bench.sim.obstacle = Point(5.0, 2.7) to 0.15
+        bench.sim.friction = 0
+        bench.ble.startObstacleTest(approach = true)
+        assertTrue(bench.state.teach.status, bench.state.teach.running)
+        bench.until(40_000, "approach contact") { !bench.state.teach.running }
+        assertEquals(bench.dump(), "CONTACT_DETECTED", bench.state.teach.outcome)
+        assertTrue(bench.state.teach.contactValidated)
+        assertNotNull(bench.state.teach.proposal)
+        bench.advance(2000)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+    }
+
+    /**
+     * 2026-10-22: the slow approach was interrupted as a problem. Realistic robot: low-speed dead band (60 units), 1014
+     * only on a read of the error history, collision lock (25) published with the contact.
+     */
+    @Test fun `slow approach on a realistic robot, collision lock then 1014, contact detected`() {
+        connectedInZone()
+        bench.sim.obstacle = Point(5.0, 2.7) to 0.15
+        bench.sim.friction = 60
+        bench.sim.errorsOnQuery = true
+        bench.sim.latchOnContact = true
+        bench.ble.startObstacleTest(approach = true)
+        bench.until(40_000, "approach contact") { !bench.state.teach.running }
+        assertEquals(bench.state.teach.status, "CONTACT_DETECTED", bench.state.teach.outcome)
+        assertTrue(bench.state.teach.contactValidated)
+        assertNotNull(bench.state.teach.proposal)
+        assertTrue(bench.sim.contacts > 0)
+    }
+
+    /** Soft object, no 1014: the robot stops in front of it, the obstacle is proposed without validating the bumper. */
+    @Test fun `slow approach stopped by an object without bumper code, obstacle proposed`() {
+        connectedInZone()
+        bench.sim.obstacle = Point(5.0, 2.7) to 0.15
+        bench.sim.friction = 60
+        bench.sim.errorsOnQuery = true
+        bench.sim.bumperReports = false
+        bench.ble.startObstacleTest(approach = true)
+        bench.until(40_000, "approach halt") { !bench.state.teach.running }
+        assertEquals(bench.state.teach.status, "BLOCKED_AHEAD", bench.state.teach.outcome)
+        assertFalse(bench.state.teach.contactValidated)
+        assertNotNull(bench.state.teach.proposal)
+        bench.advance(2000)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+    }
+
+    /** Robot that does not move at the approach speed: interrupted with a clear reason. */
+    @Test fun `slow approach of a robot that does not move, interrupted with the reason`() {
+        connectedInZone()
+        bench.sim.friction = 200
+        bench.ble.startObstacleTest(approach = true)
+        bench.until(40_000, "end") { !bench.state.teach.running }
+        assertEquals("ABORTED", bench.state.teach.outcome)
+        assertTrue(bench.state.teach.status, bench.state.teach.status.contains("n'a pas avancé"))
+        assertNull(bench.state.teach.proposal)
+    }
+
+    @Test fun `obstacle pointed at in front of the robot, without contact nor command`() {
+        connectedInZone()
+        bench.advance(1000)
+        val mark = bench.mark()
+        bench.ble.proposeObstacleAhead()
+        val proposal = requireNotNull(bench.state.teach.proposal) { bench.state.teach.status }
+        val ahead = fr.luba.poc.obstacles.ManualContact.defaultAheadM(fr.luba.poc.obstacles.ObstacleKind.OTHER.defaultRadiusM)
+        assertEquals(ahead, requireNotNull(proposal.aheadM), 1e-9)
+        // Robot at (5, 2) heading north: obstacle against the bumper, on the north.
+        assertEquals(bench.state.telemetry.x!!, proposal.estimated.x, 0.05)
+        assertEquals(bench.state.telemetry.y!! + ahead, proposal.estimated.y, 0.05)
+        assertTrue(bench.labelsAfter(mark).toString(), bench.labelsAfter(mark).none { it.startsWith("move") || it == "manual" })
+        bench.ble.dismissTeachProposal()
+        assertNull(bench.state.teach.proposal)
+    }
+
     @Test fun `stationary bumper test validated then approach`() {
         connectedInZone()
-        bench.ble.startObstacleTest(approach = true)
-        assertFalse("Approach refused before validation", bench.state.teach.running)
         bench.ble.startObstacleTest(approach = false)
         assertTrue(bench.state.teach.running)
         bench.advance(2000)
@@ -193,7 +268,6 @@ class RobotBleEssaisTest {
         assertTrue(bench.sim.trace.none { it.second.startsWith("move") && it.second != "move 0 0" })
         // Slow approach, stop on contact against a real object.
         bench.sim.obstacle = Point(5.0, 2.7) to 0.15
-        bench.sim.friction = 0   // approach at 20 units (≈ 2 cm/s): the simulated robot must move
         bench.advance(2000)
         bench.ble.startObstacleTest(approach = true)
         assertTrue(bench.state.teach.status, bench.state.teach.running)

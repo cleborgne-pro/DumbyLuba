@@ -53,7 +53,15 @@ data class PlanningRequest(val map: RobotMap, val zoneIds: List<Long>, val start
     val obstacles: List<PlanningObstacle> = emptyList(), val corridorWidthsM: Map<Long,Double> = emptyMap(),
     val slopes: List<SlopeRegion> = emptyList(), val navigation: PlanningNavigation? = null,
     /** Mission arrival (the base) if it differs from the start (robot position). */
-    val end: Point? = null) {
+    val end: Point? = null,
+    /** DANGER boundary portions kept away from the links ([fr.luba.poc.simulation.TrajectoryPlanner.dangerClearance]);
+     * null: those annotated on the phone, filled in by [RoutePlanning.coverage]. */
+    val dangerLines: List<List<Point>>? = null,
+    /** Typed boundary portions for the border strategy ([BorderStrategy]); null: those annotated on the phone,
+     * applied by [RoutePlanning.coverage] (empty once applied). */
+    val borders: List<BorderPortion>? = null,
+    /** Recorded map for the transits when [map] carries the outlines moved by the border strategy. */
+    val navigationMap: RobotMap? = null) {
     /** Evaluated mission end point: the base, or the start if there is no distinct arrival. */
     val finish: Point get() = end ?: start
     /** Heading on arrival: the start one for a round trip, free for a distinct arrival. */
@@ -62,7 +70,8 @@ data class PlanningRequest(val map: RobotMap, val zoneIds: List<Long>, val start
     fun snapshot() = copy(map=map.copy(shapes=map.shapes.map { it.copy(points=it.points.toList()) }),
         zoneIds=zoneIds.toList(), obstacles=obstacles.toList(), corridorWidthsM=corridorWidthsM.toSortedMap(),
         slopes=slopes.map { it.copy(polygon=it.polygon.toList()) },
-        navigation=navigation?.copy(accesses=navigation.accesses.map { it.toList() }))
+        navigation=navigation?.copy(accesses=navigation.accesses.map { it.toList() }),
+        dangerLines=dangerLines?.map { it.toList() })
     val hash: String get() = stableHash(toString())
 }
 internal fun stableHash(value: String): String = MessageDigest.getInstance("SHA-256")

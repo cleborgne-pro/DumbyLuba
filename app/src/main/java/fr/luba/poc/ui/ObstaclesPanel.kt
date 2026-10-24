@@ -153,7 +153,7 @@ private fun TeachStatus(state: RobotUi, title: String) {
     SettingsGroup(tr("Tracking", "Suivi")) {
         if (teach.running) LubaProgress(Modifier.fillMaxWidth())
         if (teach.status.isNotBlank()) StatusNote(teach.status, when { teach.running -> NoteTone.WARNING
-            teach.outcome == "CONTACT_DETECTED" -> NoteTone.SUCCESS; teach.outcome == "ABORTED" -> NoteTone.DANGER; else -> NoteTone.INFO })
+            teach.outcome == "CONTACT_DETECTED" || teach.outcome == "BLOCKED_AHEAD" -> NoteTone.SUCCESS; teach.outcome == "ABORTED" -> NoteTone.DANGER; else -> NoteTone.INFO })
         teach.results.filter { it.title == title }.asReversed().take(20).forEach {
             ResultRow(it.outcome, it.title, detail = it.detail, meta = Format.duration(it.durationMs))
         }
@@ -169,7 +169,7 @@ private fun ContactBench(robot: RobotBle, state: RobotUi, supervised: Boolean, o
         StepLine(1, tr("Confirm supervision", "Confirmer la supervision"), tr("Next to the robot, to press the bumper.", "À côté du robot, pour appuyer sur le pare-chocs."))
         LubaCheckRow(tr("I am supervising on site", "Je supervise sur place"), supervised, onSupervised, enabled = !state.teach.running)
         StepLine(2, tr("Start listening (30 s)", "Lancer l'écoute (30 s)"), tr("Manual mode: manual mowing with blades OFF (20), where the LUBA 2 publishes the contact. Alternative: robot ready (11).", "Mode manuel : tonte manuelle lames OFF (20), où le LUBA 2 publie le contact. Variante : robot prêt (11)."))
-        StepLine(3, tr("Press the front bumper", "Appuyer sur le pare-chocs avant"), tr("A 1014 contact stops the test and validates detection for this connection (required for Learn).", "Un contact 1014 arrête l'essai et valide la détection pour cette connexion (requis pour Apprendre)."))
+        StepLine(3, tr("Press the front bumper", "Appuyer sur le pare-chocs avant"), tr("A 1014 contact stops the test and validates detection for this connection.", "Un contact 1014 arrête l'essai et valide la détection pour cette connexion."))
     }
     TeachStatus(state, "Bumper immobile")
 }
@@ -193,11 +193,20 @@ private fun ColumnScope.ContactActions(robot: RobotBle, state: RobotUi, supervis
 private fun LearnBench(robot: RobotBle, state: RobotUi, supervised: Boolean, onSupervised: (Boolean) -> Unit) {
     SettingsGroup(tr("Procedure", "Déroulé")) {
         CheckLine(tr("Bumper detection validated on this connection", "Détection pare-chocs validée sur cette connexion"), state.teach.contactValidated)
-        if (!state.teach.contactValidated) InfoNote(tr("Run the Contact tab test first.", "Faites d'abord l'essai de l'onglet Contact."))
+        if (!state.teach.contactValidated) InfoNote(tr("Not required: without a received contact, the approach still stops after 1 m, 30 s or 3 s without moving. A contact during the approach validates detection.",
+            "Pas obligatoire : sans contact reçu, l'approche s'arrête quand même après 1 m, 30 s ou 3 s sans avancer. Un contact pendant l'approche valide la détection."))
         StepLine(1, tr("Place the robot facing the obstacle", "Placer le robot face à l'obstacle"), tr("30–80 cm away, in line; stops on contact or after 1 m.", "À 30–80 cm, dans l'axe ; arrêt au contact ou après 1 m."))
         StepLine(2, tr("Confirm supervision", "Confirmer la supervision"), tr("Physical stop within reach.", "Arrêt physique accessible."))
         LubaCheckRow(tr("I am supervising on site", "Je supervise sur place"), supervised, onSupervised, enabled = !state.teach.running)
         StepLine(3, tr("Check the proposal", "Vérifier la proposition"), tr("Adjust type, radius and margin before saving.", "Ajuster type, rayon et marge avant d'enregistrer."))
+    }
+    SettingsGroup(tr("Identify without contact", "Identifier sans contact")) {
+        StepLine(1, tr("Drive the robot facing the obstacle", "Amener le robot face à l'obstacle"), tr("With the joystick (manual control), blades stopped, bumper close to the obstacle.", "Au joystick (pilotage manuel), lames arrêtées, pare-chocs près de l'obstacle."))
+        StepLine(2, tr("Place the obstacle", "Placer l'obstacle"), tr("Touching the bumper by default; distance, type, radius and margin adjustable before saving. No robot movement.", "Au contact du pare-chocs par défaut ; distance, type, rayon et marge réglables avant d'enregistrer. Aucun mouvement du robot."))
+        SecondaryPillButton(tr("Obstacle in front of the robot", "Obstacle devant le robot"), robot::proposeObstacleAhead, Modifier.fillMaxWidth(),
+            enabled = state.telemetry.x != null && state.telemetry.y != null && state.telemetry.heading != null && !state.obstacleBusy())
+        InfoNote(tr("While driving with the joystick, a bumper contact stops the robot and opens the obstacle sheet directly: keep it with its size, or dismiss it.",
+            "En pilotage au joystick, un contact pare-chocs arrête le robot et ouvre directement la fiche de l'obstacle : le garder avec sa taille, ou l'écarter."))
     }
     state.teach.proposal?.let { ProposalEditor(robot, state, it) }
     TeachStatus(state, "Apprentissage d'obstacle")
@@ -208,14 +217,21 @@ private fun ProposalEditor(robot: RobotBle, state: RobotUi, proposal: TeachPropo
     var kind by remember(proposal) { mutableStateOf(ObstacleKind.OTHER) }
     var radius by remember(proposal) { mutableFloatStateOf(proposal.radiusM.toFloat()) }
     var margin by remember(proposal) { mutableFloatStateOf(0.2f) }
-    val estimated = TeachObstacle.estimateCenter(proposal.contact, radius.toDouble())
+    // Obstacle pointed at without contact: distance in front of the robot, adjustable.
+    var ahead by remember(proposal) { mutableFloatStateOf((proposal.aheadM ?: 0.0).toFloat()) }
+    var aheadSet by remember(proposal) { mutableStateOf(false) }
+    // Until the distance is set by hand, the object stays against the bumper whatever its radius.
+    fun resize(r: Float) { radius = r; if (proposal.aheadM != null && !aheadSet) ahead = ManualContact.defaultAheadM(r.toDouble()).toFloat() }
+    val estimated = proposal.center(radius.toDouble(), proposal.aheadM?.let { ahead.toDouble() })
     val draft = LocalObstacle("proposal", kind, estimated.x, estimated.y, radius.toDouble(), margin.toDouble(), label = tr("Proposal", "Proposition"))
     SettingsGroup(tr("Proposal to check", "Proposition à vérifier")) {
         ObstacleMap(state, state.obstacles + draft, planned = listOf(Point(proposal.contact.x, proposal.contact.y), estimated), height = 240)
-        ChipChoice(ObstacleKind.entries.map { it to it.label }, kind, { kind = it; radius = it.defaultRadiusM.toFloat() })
-        SliderRow(tr("Obstacle radius", "Rayon de l'obstacle"), radius, { radius = it }, 0.05f..2f, valueLabel = "${Format.num(radius.toDouble(), 2)} m", steps = 38)
+        ChipChoice(ObstacleKind.entries.map { it to it.label }, kind, { kind = it; resize(it.defaultRadiusM.toFloat()) })
+        SliderRow(tr("Obstacle radius", "Rayon de l'obstacle"), radius, { resize(it) }, 0.05f..2f, valueLabel = "${Format.num(radius.toDouble(), 2)} m", steps = 38)
         SliderRow(tr("Safety margin", "Marge de sécurité"), margin, { margin = it }, 0f..2f, valueLabel = "${Format.num(margin.toDouble(), 2)} m", steps = 39)
-        KeyValueRow("Contact", "${Format.num(proposal.contact.x, 2)} / ${Format.num(proposal.contact.y, 2)} m · ${Format.num(proposal.contact.headingDeg, 0)}°")
+        if (proposal.aheadM != null) SliderRow(tr("Center distance in front of the robot", "Distance du centre devant le robot"), ahead, { ahead = it; aheadSet = true },
+            ManualContact.AHEAD_RANGE_M.start.toFloat()..ManualContact.AHEAD_RANGE_M.endInclusive.toFloat(), valueLabel = "${Format.num(ahead.toDouble(), 2)} m", steps = 79)
+        KeyValueRow(if (proposal.aheadM != null) "Robot" else "Contact", "${Format.num(proposal.contact.x, 2)} / ${Format.num(proposal.contact.y, 2)} m · ${Format.num(proposal.contact.headingDeg, 0)}°")
         KeyValueRow(tr("Estimated center", "Centre estimé"), "${Format.num(estimated.x, 2)} / ${Format.num(estimated.y, 2)} m")
         KeyValueRow(tr("Avoided area", "Zone évitée"), tr("${Format.num(draft.keepOutDisc(RobotEnvelope.LUBA2).radiusM, 2)} m around", "${Format.num(draft.keepOutDisc(RobotEnvelope.LUBA2).radiusM, 2)} m autour"))
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
@@ -236,7 +252,7 @@ private fun ColumnScope.LearnActions(robot: RobotBle, state: RobotUi, supervised
         SecondaryPillButton(tr("I heard the beep / touched the bumper", "J'ai entendu le bip / touché le pare-chocs"), robot::recordBumperBeep, Modifier.fillMaxWidth())
         DangerPillButton(tr("STOP · stop the approach", "STOP · arrêter l'approche"), robot::stopObstacleTest, Modifier.fillMaxWidth())
     } else PrimaryPillButton(tr("Slow approach until contact (1 m max)", "Approche lente jusqu'au contact (1 m max)"), { robot.startObstacleTest(true) }, Modifier.fillMaxWidth(),
-        enabled = supervised && state.obstacleIdle() && state.teach.contactValidated, icon = Icons.Rounded.PlayArrow)
+        enabled = supervised && state.obstacleIdle(), icon = Icons.Rounded.PlayArrow)
 }
 
 // ───────────────────────────── List ─────────────────────────────

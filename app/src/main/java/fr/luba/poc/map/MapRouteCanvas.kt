@@ -168,8 +168,9 @@ Canvas(
         drawPath(path(state.robotRoute.trail, false), completedColor, style = screenStroke(2f))
     }
     (sim.engine?.preview ?: preview)?.let { route ->
-        route.cuttingPaths.firstOrNull { it.size >= 2 }?.first()?.let {
-            drawRouteStart(screen(it), camera.zoom.toFloat(), camera.rotation.toFloat())
+        route.cuttingPaths.firstOrNull { it.size >= 2 }?.let { first ->
+            drawRouteStart(screen(first.first()), camera.zoom.toFloat(), camera.rotation.toFloat(),
+                toward = routeStartAhead(first)?.let(::screen))
         }
     }
     // "Resume further on": remaining stripes, skipped stripes (not mowed), stop and resume point.

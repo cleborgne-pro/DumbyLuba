@@ -11,11 +11,20 @@ internal fun request(points: List<Point> = rectangle(),holes: List<List<Point>> 
     PlanningRequest(RobotMap(listOf(MapShape(1,0,points))+holes.mapIndexed { i,p -> MapShape(i+2L,1,p) },true,"test"),
         listOf(1),Point(1.0,1.0),config=config)
 class PlanningEngineTest {
-    @Test fun visionZonesRefuseThePlanningInsteadOfBeingIgnored() {
+    @Test fun visionObstacleZonesRefuseThePlanningInsteadOfBeingIgnored() {
         val base=request()
-        val r=base.copy(map=base.map.copy(shapes=base.map.shapes+MapShape(9,25,rectangle(4.0,3.0,1.0,1.0))))
+        val r=base.copy(map=base.map.copy(shapes=base.map.shapes+MapShape(9,26,rectangle(4.0,3.0,1.0,1.0))))
         val error=assertThrows(IllegalArgumentException::class.java) { PlanningTerrain(r) }
         assertTrue(error.message, error.message!!.contains("vision"))
+    }
+    @Test fun noStopZonesAreOrdinaryGroundForThePlanning() {
+        // Type 25 (No-Stop zone, DumbyLuba#1): mowed like the rest of the zone, same plan as without it.
+        val base=request()
+        val r=base.copy(map=base.map.copy(shapes=base.map.shapes+MapShape(9,25,rectangle(4.0,3.0,1.0,1.0))))
+        val with=CoverageEngine.plan(r).selected
+        val without=CoverageEngine.plan(base).selected
+        assertTrue(with.diagnostics.toString(),with.valid)
+        assertEquals(without.preview!!.cuttingPaths,with.preview!!.cuttingPaths)
     }
     @Test fun baselineIsPreservedAndMetricsIncludeReturn() {
         val r=request()

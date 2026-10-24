@@ -9,26 +9,35 @@ data class Point(val x: Double, val y: Double) {
 data class MapShape(val id: Long, val type: Int, val points: List<Point>, val name: String = "")
 
 /**
- * Kind of a map boundary, from the upstream `type` code (0 = zone, 1 = no-go, 2 = passage, 25/26 = zones recorded by the
- * vision of the Luba 2 AWD X / Vision models, PyMammotion `VISUAL_SAFETY_ZONE` / `VISUAL_OBSTACLE_ZONE`).
+ * Kind of a map boundary, from the upstream `type` code (0 = zone, 1 = no-go, 2 = passage, 25/26 = zones of the vision
+ * module of the Luba 2 AWD X / Vision models, PyMammotion `VISUAL_SAFETY_ZONE` / `VISUAL_OBSTACLE_ZONE`).
  */
 enum class ShapeKind {
     ZONE, NO_GO, PASSAGE, OBSTACLE,
-    /** Vision zone (types 25 and 26): meaning not confirmed, avoided by the moves, planning refused. */
+    /**
+     * No-Stop zone (type 25, PyMammotion `VISUAL_SAFETY_ZONE`): the robot keeps going there even when its vision module
+     * sees an obstacle (the bumper still stops it), as shown in the Mammotion app (DumbyLuba#1). Ordinary ground for
+     * DumbyLuba: neither avoided nor refused by the planning, only drawn.
+     */
+    NO_STOP_ZONE,
+    /** Vision obstacle zone (type 26, `VISUAL_OBSTACLE_ZONE`): never observed, meaning not confirmed, avoided by the moves, planning refused. */
     VISION_ZONE;
 
     /** Closed boundaries (zones and no-go) are filled; obstacles stay drawn as lines. */
     val isContour: Boolean get() = this == ZONE || this == NO_GO
 
     companion object {
-        /** Upstream types of the vision zones (seen: 25 on a Luba 2 AWD 3000X, firmware 1.30.31.19). */
-        val VISION_TYPES = setOf(25, 26)
+        /** Upstream type of the No-Stop zones (seen on a Luba 2 AWD 3000X, firmware 1.30.31.19). */
+        const val NO_STOP_TYPE = 25
+        /** Upstream types of the vision module zones: No-Stop (25) and vision obstacle (26, not observed yet). */
+        val VISION_TYPES = setOf(NO_STOP_TYPE, 26)
         /** Upstream types interpreted by the application; any other type leaves the map incomplete. */
         val SUPPORTED_TYPES = setOf(0, 1, 2) + VISION_TYPES
         fun from(type: Int): ShapeKind = when (type) {
             0 -> ZONE
             1 -> NO_GO
             2 -> PASSAGE
+            NO_STOP_TYPE -> NO_STOP_ZONE
             in VISION_TYPES -> VISION_ZONE
             else -> OBSTACLE
         }

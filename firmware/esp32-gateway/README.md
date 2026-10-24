@@ -9,17 +9,26 @@ Fold (planning, safety) ── Wi-Fi TCP 8766 ── ESP32 (on the robot) ──
 
 - **Connecting to the robot from the Fold**: Service → Wi-Fi gateway → Control via the gateway, the ESP32's
   six-digit code, "Find and test", then search for the robot: the Bluetooth scan is done by the ESP32; tap
-  the robot. The ESP32 connects to it (no pairing), retains it (stored on the board) and reconnects to it by
+  the robot (every Mammotion mower is listed, as by the Android gateway: Luba, Yuka, Ezy-, Kumar, Maston). The
+  ESP32 connects to it (no pairing), retains it (stored on the board) and reconnects to it by
   itself afterwards: power cut, restart, robot switched back on (new attempt every 10 s). A Bluetooth scan lasts
-  6 s.
+  6 s; a scan refused by the Bluetooth stack is reported to the pilot (FAILURE "Scanner Bluetooth indisponible"),
+  not as an empty list. A scan requested while the gateway is trying to reach its retained robot (off or out of
+  range: up to 2 × 10 s) cancels that attempt, retried after the scan, so that the end of scan reaches the app
+  within its 12 s.
 - **Relay**: BluFi frames from the Fold written to FF01 one at a time with confirmation, sequence rewritten by
   the gateway (a single sequence with its own frames), FF02 notifications forwarded starting from the beginning
   of a message. Each write must be confirmed within 1.5 s. Sync every 5 s when no pilot is connected.
 - **Safety stop**: Fold silent for more than 2 s, or Wi-Fi cut without an intentional close → blades OFF if they
-  may be turning (ON command not followed by OFF, or blade bits in the telemetry), then zero speed, each frame
-  confirmed; Bluetooth link kept. Fragmented message in progress: link closed, stop reported as
+  may be turning (ON command not followed by OFF, or blade bits in the telemetry), at the commanded or reported
+  height (20 to 100 mm, every model including the H versions, as `CutHeightRange.ANY`; 60 mm if unknown), then zero
+  speed, each frame confirmed; Bluetooth link kept. Fragmented message in progress: link closed, stop reported as
   "not guaranteed". The report is handed to the pilot when it comes back (`emergency_stop` event, 30 min).
-- **One session at a time**; another phone receives the protocol's busy refusal (`gw::proto::BUSY`, a fixed wire text matched by the app), shown as "Gateway busy with another pilot". The same phone coming
+- **One session at a time**; another phone receives the protocol's busy refusal (`gw::proto::BUSY`, a fixed wire text matched by the app), shown as "Gateway busy with another pilot".
+- **Protocol texts** (refusals, failures, link losses, stop reports: `gw::proto::wire`): in French byte for byte, the
+  same as the Android gateway's, whatever the language; the app compares some of them ("occupée", "STOP écrit") and
+  translates the known ones into the pilot phone's language (`GatewayWireText`). Console, logs and web pages are in
+  English. The same phone coming
   back waits for its previous session to end (PING, 8 s at most).
 - **Authentication**: random challenge, HMAC-SHA256 response with the code (never sent in clear), 5 wrong
   attempts per minute. Unencrypted traffic: home Wi-Fi only.
@@ -33,9 +42,13 @@ Fold (planning, safety) ── Wi-Fi TCP 8766 ── ESP32 (on the robot) ──
   `ota` capability announced in WELCOME; the Fold sends its "Updates during mowing" setting (CONFIG frame
   0x61, never sent to a gateway that does not announce it).
 
-- **No autonomous tracking**: the ESP32 does not announce the `autonomy` capability (WELCOME), so the Fold drives it
-  frame by frame and a Wi-Fi silence of more than 2 s stops the robot. The Redmi's autonomous tracking
-  ([AUTONOMOUS_GATEWAY.md](../../docs/AUTONOMOUS_GATEWAY.md)) is not ported to the ESP32.
+- **Autonomous tracking** (version 0.3.0): `autonomy` and `dock-exit` capabilities announced in WELCOME. The Fold
+  hands the route and the free physical surface over once, then the ESP32 follows them on its own with the same
+  loop and guards as the Redmi ([AUTONOMOUS_GATEWAY.md](../../docs/AUTONOMOUS_GATEWAY.md#esp32-gateway-2026-10-23)):
+  a Wi-Fi outage no longer stops the robot (stop after 20 min without a pilot), progress and survey samples are
+  replayed when the pilot returns, official Mammotion docking requested when a return ends with no pilot. A pilot
+  write or a deliberate departure stops the tracking; so does **Stop the autonomous tracking** on the gateway page.
+  No update over Wi-Fi and no **Release the robot** while a tracking runs. Routes and surfaces of 1.5 MB at most.
 
 ## Setup
 
@@ -51,7 +64,10 @@ Fold (planning, safety) ── Wi-Fi TCP 8766 ── ESP32 (on the robot) ──
    the console: `wifi NAME|PASSWORD`. The access point closes 60 s after the board has joined the network; without
    Wi-Fi, the saved network is retried every 30 s (unless someone is connected to the access point).
 2. **Code**: shown on the serial console at boot (`code` to show it again, `code NNNNNN` to change it, for
-   example to reuse the one already entered on the Fold).
+   example to reuse the one already entered on the Fold). `pair` prints the pairing link
+   `dumbyluba://pair?v=2&host=IP&port=8766&code=NNNNNN&name=ESP32`, the one behind the Android gateway's QR code:
+   opened on the pilot phone, it offers **Use this gateway?**. It carries the code, so it is never shown on the
+   web pages.
 3. **Stop the Redmi gateway** (the robot accepts only one link, and the Fold first tries the stored
    address): on the Redmi, Service → Wi-Fi gateway → **Stop**, or **Release the robot** (Service → Bluetooth
    connection).
@@ -103,6 +119,7 @@ command `ota`. While writing (~12 s), the board no longer answers over Wi-Fi.
 |---|---|
 | `status` | Full state as JSON (same content as `/status`) |
 | `code` / `code NNNNNN` | Shows / changes the six-digit code |
+| `pair` | Prints the pairing link (`dumbyluba://pair?…`, with the code) |
 | `release` | Releases the robot (Mammotion app, direct Bluetooth) and forgets it |
 | `wifi NAME\|PASSWORD` / `forget-wifi` | Wi-Fi network (saved, then restart) |
 | `ap-pass` | Shows the access point name and password again |
@@ -113,8 +130,15 @@ A state line is printed every 30 s (Wi-Fi, robot, pilot, power, free memory).
 
 ## Tests
 
-- `pio test -e native` (23 tests): BluFi (splitting, reassembly, CRC, sequence loss), protobuf encoding of the stop and
-  sync frames, blade tracking, refusal to inject in the middle of a message, TCP protocol, attempt limiting.
+- `pio test -e native` (181 tests in five suites; `-f test_core` etc. for one). `test_autonomy` (43): autonomous
+  tracking frame codecs, the Kotlin `LegRunnerTest` scenarios on a port of its simulated robot, gateway end to end
+  (upload, refusals, Wi-Fi drop with sample replay, abort, deliberate departure, pilot absent too long, docking
+  without pilot), gateway fallen off. `test_telemetry` (32): robot telemetry decoding, observer, error catalogue,
+  lift, navigation guards, tracking commands byte for byte against protobuf-java. `test_geom` (20): WKB, free
+  surface index, chassis envelope compared with JTS on the reference map. `test_follow`: path follower, dead
+  reckoning, return drift, slides, station exit. `test_core` (27): BluFi (splitting, reassembly, CRC, sequence loss), protobuf encoding of the stop and
+  sync frames, blade tracking, cutting heights of every model, refusal to inject in the middle of a message, TCP
+  protocol, protocol texts identical to the Android gateway's, mower name filter, pairing link, attempt limiting.
   The stop, blades OFF and sync bytes are identical to those of `Commands.kt` (checked by running the app's
   compiled classes).
 - `tools/gateway_client.py` plays the role of the Fold (Python standard library):
@@ -123,6 +147,25 @@ A state line is printed every 30 s (Wi-Fi, robot, pilot, power, free memory).
   `open ADDRESS --silence` (goes silent: the gateway must write the safety stop, read back on reconnection).
   It only sends syncs and, with `--stop`, a zero speed. `--ota-mowing on|off` sends the update setting;
   `hold ADDRESS [--seconds 120]` holds the robot like a Fold while mowing and shows the `ota_begin` announcement.
+
+## Status as of 2026-10-23: autonomous tracking (0.3.0)
+
+Installed over Wi-Fi and confirmed, 181 native tests passed. On the board, without a robot: `caps=autonomy,dock-exit,ota`
+in WELCOME, routes of 990 KB and surfaces of 2,000 vertices accepted three times in a row (PSRAM), tracking start refused
+for want of a robot link. Not tried with the robot yet: tick time on the board, robot MTU and the whole tracking remain to
+be checked at the first real route.
+
+## Status as of 2026-10-23: brought up to the app
+
+Installed over Wi-Fi (`pio run -e ota -t upload`, confirmed), 27 core tests passed. On the board, from the Mac:
+right code accepted, wrong code refused with "Code de passerelle incorrect", `pair` prints the link, and 5 scans in a
+row during reconnection attempts to an absent retained robot all end within 6 s, without restart.
+
+**Fixed**: the robot task was woken by FreeRTOS task notifications, which NimBLE also uses to wait for its blocking
+calls (connection, write with response, RSSI). A pilot's request (scan, write) arriving during one of them ended the
+wait early as a success: the client then stayed "busy" for good (every reconnection and scan refused) and the board
+could restart; a write could have been reported confirmed before the robot answered. The task now waits on its own
+semaphore. Not tried with the robot (held by the Redmi): real connection, relaying and safety stop.
 
 ## Status as of 2026-10-15: update over Wi-Fi (0.2.0)
 

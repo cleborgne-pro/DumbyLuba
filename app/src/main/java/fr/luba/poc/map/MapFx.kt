@@ -57,14 +57,18 @@ class MapProjection(val minX: Double, val minY: Double, val scale: Double, val o
         ox == other.ox && oy == other.oy && height == other.height
 }
 
+private val Point.finite: Boolean get() = x.isFinite() && y.isFinite()
+
 /** Metric extent of a set of points, computed once. */
 data class MapBounds(val minX: Double, val minY: Double, val width: Double, val height: Double) {
     companion object {
+        /** Non-finite points (NaN or infinite pose, trace or vertex) are ignored: one of them would poison the framing. */
         fun of(points: List<Point>, defaultW: Double = 20.0, defaultH: Double = 15.0): MapBounds {
-            if (points.isEmpty()) return MapBounds(0.0, 0.0, defaultW, defaultH)
-            val minX = points.minOf { it.x }
-            val minY = points.minOf { it.y }
-            return MapBounds(minX, minY, max(1.0, points.maxOf { it.x } - minX), max(1.0, points.maxOf { it.y } - minY))
+            val finite = if (points.all { it.finite }) points else points.filter { it.finite }
+            if (finite.isEmpty()) return MapBounds(0.0, 0.0, defaultW, defaultH)
+            val minX = finite.minOf { it.x }
+            val minY = finite.minOf { it.y }
+            return MapBounds(minX, minY, max(1.0, finite.maxOf { it.x } - minX), max(1.0, finite.maxOf { it.y } - minY))
         }
     }
 }
@@ -141,6 +145,13 @@ internal fun DrawScope.drawLawnLayers(
                 val outline = path(shape.points, true)
                 drawPath(outline, colors.ObstacleFill)
                 drawPath(outline, colors.ObstacleStroke, style = Stroke(1.25f * unit, join = StrokeJoin.Round))
+            }
+            // No-Stop zone: light blue tint and dashed outline, ordinary ground (mowed and crossed).
+            ShapeKind.NO_STOP_ZONE -> {
+                val outline = path(shape.points, true)
+                drawPath(outline, colors.Info.copy(alpha = 0.12f))
+                drawPath(outline, colors.Info.copy(alpha = 0.8f), style = Stroke(1.25f * unit, join = StrokeJoin.Round,
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(5f * unit, 3f * unit))))
             }
         }
     }
@@ -416,7 +427,8 @@ fun mapScreenProjection(bounds: MapBounds, size: Size, top: Float, bottom: Float
 /** Fitting a set of points into the canvas (embedded maps). */
 fun fitProjection(all: List<Point>, width: Float, height: Float, pad: Float = 16f): MapProjection {
     val b = MapBounds.of(all)
-    val scale = min((width - pad) / b.width, (height - pad) / b.height)
+    // View not measured yet or smaller than the margin: positive scale anyway (never zero, negative or NaN).
+    val scale = min((width - pad) / b.width, (height - pad) / b.height).takeIf { it.isFinite() && it > 0 } ?: 1e-3
     return MapProjection(b.minX, b.minY, scale, (width - b.width * scale) / 2, (height - b.height * scale) / 2, height)
 }
 

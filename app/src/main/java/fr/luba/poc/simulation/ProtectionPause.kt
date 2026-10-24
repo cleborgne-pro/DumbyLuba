@@ -19,10 +19,15 @@ class RouteProtection(val index: Int, message: String) : IllegalStateException(m
  * (self-check 23, lasting until the end of the period), robot state other than ready or manual, protection still
  * active after [WAIT_MS], more than [MAX_PAUSES] pauses per mission. Lift and bumper contact have their own stops,
  * unchanged.
+ *
+ * Positioning condition ([SelfCheck.positioning], 41 = weak satellite signal): the signal often takes minutes to come
+ * back (2026-10-22: 41 held, robot stuck once the 30 s had elapsed). The robot stays stopped, blades OFF, for up to
+ * [POSITIONING_WAIT_MS]; the resume link then checks the positioning as usual.
  */
 object ProtectionPause {
     const val MAX_PAUSES = 5
     const val WAIT_MS = 30_000L
+    const val POSITIONING_WAIT_MS = 5 * 60_000L
     const val STABLE_MS = 3_000L
 
     /** Parses the reason in French or English (the gateway and the pilot phone may use different languages). */
@@ -40,6 +45,9 @@ object ProtectionPause {
         return state in setOf(11, 20) && !SelfCheck.nominal(check) && check != SelfCheck.LOCKED && !SelfCheck.forbiddenTime(check)
     }
 
+    /** Longest wait for the protection [selfCheck] (positioning condition: [POSITIONING_WAIT_MS]). */
+    fun waitMs(selfCheck: Long?): Long = if (SelfCheck.positioning(selfCheck)) POSITIONING_WAIT_MS else WAIT_MS
+
     /** Robot able to resume: ready or manual, nominal self-check. */
     fun cleared(robotState: Int?, selfCheck: Long?): Boolean = robotState in setOf(11, 20) && SelfCheck.nominal(selfCheck)
 
@@ -53,15 +61,19 @@ object ProtectionPause {
      */
     class Wait(private val startedAt: Long) {
         private var clearedSince = Long.MIN_VALUE
+        /** Last non-cleared protection: its wait limit still applies while the clearance is being confirmed. */
+        private var active: Long? = null
 
         fun update(now: Long, robotState: Int?, selfCheck: Long?): Boolean {
             check(selfCheck != SelfCheck.LOCKED && !SelfCheck.forbiddenTime(selfCheck)) { SelfCheck.refusal(selfCheck) }
+            if (!SelfCheck.nominal(selfCheck)) active = selfCheck
             if (!cleared(robotState, selfCheck)) clearedSince = Long.MIN_VALUE
             else if (clearedSince == Long.MIN_VALUE) clearedSince = now
             if (clearedSince != Long.MIN_VALUE && now - clearedSince >= STABLE_MS) return true
-            check(now - startedAt < WAIT_MS) {
-                tr("protection still active after ${WAIT_MS / 1000} s (state $robotState, protection $selfCheck), stop kept",
-                    "protection toujours active après ${WAIT_MS / 1000} s (état $robotState, protection $selfCheck), arrêt maintenu") }
+            val limit = waitMs(active)
+            check(now - startedAt < limit) {
+                tr("protection still active after ${limit / 1000} s (state $robotState, protection $selfCheck), stop kept",
+                    "protection toujours active après ${limit / 1000} s (état $robotState, protection $selfCheck), arrêt maintenu") }
             return false
         }
     }

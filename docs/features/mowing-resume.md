@@ -9,7 +9,7 @@ does a [move to a point](station-and-moves.md#move-to-a-point) towards the same 
 |---|---|
 | **Access** | Map → **Mowing interrupted · X %** panel (title of the interrupted task) |
 | **Status** | Implemented and covered by JVM tests; to be validated on a long real mowing |
-| **Code** | `simulation/MissionCheckpoint.kt`, `simulation/PointResume.kt`, `simulation/MissionTrail.kt`, `simulation/ResumeBackOff.kt`, `map/ResumeSkipView.kt`, `map/InterruptionSummary.kt`, `map/MapScreen.kt` (`InterruptedMowingPanel`), `simulation/DockResume.kt`, `planning/RoutePlanning.kt` (`resume`), `ble/RobotBle.kt` |
+| **Code** | `simulation/MissionCheckpoint.kt`, `simulation/SmartResume.kt`, `simulation/PointResume.kt`, `simulation/MissionTrail.kt`, `simulation/ResumeBackOff.kt`, `map/ResumeSkipView.kt`, `map/InterruptionSummary.kt`, `map/MapScreen.kt` (`InterruptedMowingPanel`), `simulation/DockResume.kt`, `planning/RoutePlanning.kt` (`resume`), `ble/RobotBle.kt` |
 | **Reference** | [Resume: saving, resuming and limitations](../MOWING_RESUME.md) |
 
 <p align="center">
@@ -75,8 +75,39 @@ percentage) and the layers bar are hidden to keep the map visible; the same goes
   remaining stripes. **Resume at + X m** starts from that point, without overlap; links with blades stopped do not
   count in the distance. The cross closes this mode. With less than one meter left: "Less than one meter of stripe
   left: nothing to skip." The skipped meters are added to the progress and recalled in the panel ("12 m skipped").
+  Not offered once the remainder has been reordered by a smart resume (below): the menu entry is greyed out.
 
 All the start conditions of a [real mowing](real-mowing.md#start-conditions) apply.
+
+## Smart resume after a recharge or a blockage
+
+The remainder of a mowing is kept as an ordered list of portions of the prepared route: the portion in progress, then
+the portions set aside. Reordering never drops a stripe: every metre still to mow stays in exactly one portion, with
+its height, and the progress, the percentage and the save follow the portions (the file keeps them; an older save
+stays a plain "from the interrupted point" progress).
+
+- **After a recharge**, the robot leaves the base and no longer goes back to the interrupted point first when that
+  costs transit: the remainder may start with the block (whole cell, or portion set aside) that minimises the total
+  transit base → first block → … → base, the interrupted cell being finished later, from its interrupted point with
+  the usual 30 cm overlap. Applied when the saving is at least 2 m, otherwise the usual resume is kept. Same prepared
+  stripes, same checks of the route; the links between portions are computed on the mission navigation with blades
+  stopped, around the obstacles discovered during the mowing. Status "Smart resume after recharge: 34 m of transit
+  saved, interrupted point mowed later". Applies to the recharge cycle of a running mowing and to **Resume** (or the
+  automatic resume) of a mowing whose robot is charging on the base. Not applied with height passes (a lower pass
+  never comes before a higher one).
+- **After a blockage** (wheels turning without the robot moving, for 3 s or 15 s without progress), the place is
+  memorised: "Blockage" on the map (difficulties) and an estimated obstacle in front of the robot, bypassed like after
+  a bumper contact (straight back-off, tight detour, the rest of the route repaired around it). When the bypass is
+  impossible (object too large: 5th contact within 2.5 m, no detour, repeated exits from the route at the same
+  place), the **segment is deferred** instead of stopping the mowing: from the progress to 1.5 m past the blocked
+  place, set aside to the end of the mowing with the blocked position, the robot backing off 50 cm and carrying on
+  further. Status "Blockage: 1.5 m deferred to the end of the mowing, mowing goes on". At the end, the deferred
+  segment is tried again; blocked again at the same place, it is given up ("Blocked again at the same place: 1.5 m
+  given up, mowing goes on") and its metres are counted as skipped. At most 6 blockages handled per mowing, then the
+  stop is kept as before (progress saved). On a route to or from the base, a bypass impossible still stops.
+
+The simulation of the map keeps resuming at the interrupted point after a recharge: its transit is an upper bound of
+the real one.
 
 ## Automatic resume after losing the gateway during recharging
 
@@ -97,7 +128,9 @@ resumed: a robot protection, a contact or a refused docking leave the resume to 
 - the map has changed ("Map changed since the interruption: resume impossible, start a new mowing");
 - the re-prepared route differs ("Re-prepared route differs (base, access or obstacles changed): resume impossible,
   start a new mowing": base moved by more than 25 cm or 15°, accesses or obstacles changed);
-- the mowing was already finished ("Mowing already finished: use return to base").
+- the mowing was already finished ("Mowing already finished: use return to base");
+- **Resume further on** after a reordered remainder ("Resume further on unavailable: the remainder was reordered
+  (smart resume)").
 
 These messages appear as "Start refused: …" on the panel.
 

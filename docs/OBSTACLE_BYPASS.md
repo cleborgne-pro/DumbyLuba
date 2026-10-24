@@ -178,11 +178,16 @@ The stop "Robot envelope outside the safe corridor" when leaving the 14:16 bypas
 ## Limits and stops that remain
 
 - 8 bypasses at most per mission (`ObstacleBypass.MAX_BYPASSES`). An object larger than the estimated disc is hit
-  again further on: each contact adds a disc; a 5th contact within 2.5 m of four already discovered obstacles:
-  stop (object too large, to be drawn as a no-go zone). Rule shared by real mowing and simulation
-  (`ObstacleBypass.contactFailure`).
-- Back-off impossible (no trace, chassis blocked behind), no link, route end inside the reserve, obstacle in a
-  narrow passage (forced axis): stop, progress kept for the resume.
+  again further on: each contact adds a disc; a 5th contact within 2.5 m of four already discovered obstacles
+  (object too large, to be drawn as a no-go zone, `ObstacleBypass.contactFailure`): in real mowing the segment is now
+  deferred to the end of the mowing (`SmartResume.deferBlocked`, see [resume](MOWING_RESUME.md#smart-resume)); the
+  obstacle simulation still stops there.
+- No link, route end inside the reserve, obstacle in a narrow passage (forced axis): segment deferred the same way in
+  real mowing. Back-off impossible after a contact (no trace, chassis blocked behind): stop, progress kept for the
+  resume.
+- Wheels commanded without translation for 3 s ("Presumed blockage") or without progress for 15 s, on the Fold or the
+  gateway (`RouteBlocked`): handled as a contact without its code (estimated obstacle `contactObstacle`, labelled
+  "Blockage during the mission", back-off, bypass, `DifficultyKind.BLOCKED`), no obstacle photo nor teach proposal.
 - Contact during docking, the cutting test (Blade test → While moving) or the bypass course of Service → Obstacle
   tests: stop as before. Since 0.47.0, a contact on the return route to recharge or on the resume link is bypassed as
   during mowing.

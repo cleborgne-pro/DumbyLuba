@@ -52,7 +52,7 @@ fun MowingPreview(map: RobotMap, plan: Preview?, obstacles: List<LocalObstacle>,
     val reveal = drawing?.takeIf { traced.value < 1f }?.reveal(traced.value.toDouble())
     val order = remember(zoneIds) { zoneIds.toList() }
     val overlays = remember(requestedStart) { listOfNotNull(requestedStart?.let { MapOverlay(listOf(it), colors.Info, widthDp = 3f, dots = true) }) }
-    val routeStart = remember(plan) { plan?.cuttingPaths?.firstOrNull { it.size >= 2 }?.first() }
+    val firstPass = remember(plan) { plan?.cuttingPaths?.firstOrNull { it.size >= 2 } }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
         PreviewMetric(Icons.Rounded.Schedule, tr("Total time", "Temps total"), estimate?.let { "≈ ${durationLabel(it.totalSeconds)}" } ?: simplified?.let { "≈ ${durationLabel(it.totalSeconds)}" } ?: "…",
             Modifier.weight(1f), loading = computing)
@@ -63,6 +63,14 @@ fun MowingPreview(map: RobotMap, plan: Preview?, obstacles: List<LocalObstacle>,
         PreviewMetric(Icons.Rounded.Grass, tr("Area", "Surface"), "${Format.num(area, 0)} m²", Modifier.weight(1f))
         PreviewMetric(Icons.Rounded.Route, "Distance", plan?.let { "${Format.num(it.meters, 0)} m" } ?: "—", Modifier.weight(1f), loading = computing)
     }
+    // Border strategy applied per type ([BorderStrategy]): one line per border type of the selected zones.
+    val borderStrategy = remember(map, zoneIds, BorderTypeRepository.annotations, plan?.mode) {
+        if (plan?.mode?.isSurvey == true) emptyList()
+        else BorderStrategy.summary(BorderTypeRepository.portions(map), zoneIds + map.shapes.filter { it.kind == ShapeKind.NO_GO }.map { it.id },
+            OuterOffsetSetting.meters)
+    }
+    if (borderStrategy.isNotEmpty()) Text(tr("Borders by type", "Bordures par type") + "\n" + borderStrategy.joinToString("\n") { "• $it" },
+        style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
     if ((plan?.skippedBorderLoops ?: 0) > 0) Text(
         tr("${plan?.skippedBorderLoops} border fragment(s) too narrow to maneuver: not driven.", "${plan?.skippedBorderLoops} fragment(s) de bordure trop étroit(s) pour manœuvrer : non parcouru(s)."),
         style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
@@ -78,7 +86,8 @@ fun MowingPreview(map: RobotMap, plan: Preview?, obstacles: List<LocalObstacle>,
         MapLive(map = map, cuttingZoneIds = zoneIds, zoneOrder = order, cuttingPasses = reveal?.runs ?: plan?.passes.orEmpty(), plannedBands = reveal?.runs ?: plan?.runs.orEmpty(),
             plannedBorders = reveal?.borders ?: plan?.borders.orEmpty(), obstacles = obstacles,
             start = reveal?.tip,
-            routeStart = routeStart,
+            routeStart = firstPass?.first(),
+            routeStartAhead = routeStartAhead(firstPass),
             overlays = overlays,
             onTap = onPickStart,
             // Drag, pinch, rotate; compass at the top left (a tap brings north back to the top).

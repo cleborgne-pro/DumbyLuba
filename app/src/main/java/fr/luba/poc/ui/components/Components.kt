@@ -307,6 +307,7 @@ fun ResultRow(
         "RUNNING" -> tr("In progress", "En cours")
         "CONTACT_DETECTED" -> tr("Contact detected", "Contact détecté")
         "NOT_DETECTED" -> tr("No contact detected", "Aucun contact détecté")
+        "BLOCKED_AHEAD" -> tr("Stopped in front of an object", "Arrêté devant un objet")
         "CONTACT" -> "Contact"
         "EDGE" -> tr("Edge found", "Bord constaté")
         "NO_EDGE" -> tr("No edge encountered", "Aucun bord rencontré")

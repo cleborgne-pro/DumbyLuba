@@ -6,7 +6,7 @@ These tests were added after the initial "blades OFF" scope. They are **separate
 
 ## Height
 
-In Service → Robot → **Cutting height**, choose between 25 and 70 mm, then **Apply X mm** (formerly **TEST HEIGHT** in the Blades tab). The app requires a Luba-VS, READY mode=11, a state no older than ≤2 s, battery >30 %, bumper free, blades OFF and self-check 0 or 10 (11 = robot locked after STOP: "Unlock" button on the map, or Grass then Start on the robot). No campaign or other cutting test in parallel.
+In Service → Robot → **Cutting height**, choose between 25 and 70 mm, then **Apply X mm** (formerly **TEST HEIGHT** in the Blades tab). The app requires a Luba-VS or Luba-VP, READY mode=11, a state no older than ≤2 s, battery >30 %, bumper free, blades OFF and self-check 0 or 10 (11 = robot locked after STOP: "Unlock" button on the map, or Grass then Start on the robot). No campaign or other cutting test in parallel.
 
 The command is `MctlDriver.todev_knife_height_set` (field 2), `DrvKnifeHeight.knifeHeight` (field 1). Source: [MessageDriver.set_blade_height](https://github.com/mikey0000/PyMammotion/blob/0bf120b2b390603266c8fe8a4b44347bdc994006/pymammotion/mammotion/commands/messages/driver.py). The 25–70 mm range is the one from [Mammotion-HA.number](https://github.com/mikey0000/Mammotion-HA/blob/9b77f9defe692300800192800b89a6688a3829c9/custom_components/mammotion/number.py). Since 1.13.0 the range follows the connected model (H versions 55–100 mm): see [cutting heights by model](features/supported-models.md#cutting-heights-by-model-version-1130).
 

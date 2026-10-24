@@ -20,6 +20,8 @@ object InterruptionSummary {
         val detail = PREFIXES.fold(reason) { text, prefix -> text.removePrefix(prefix) }.trim()
         fun has(vararg words: String) = words.any { detail.contains(it, ignoreCase = true) }
         val label = when {
+            Regex("""protection (40|41|42|99)\b""").containsMatchIn(detail) || has("Positionnement indisponible", "Positioning not available") ->
+                tr("Robot positioning lost (weak satellite or RTK signal)", "Positionnement du robot perdu (signal satellite ou RTK faible)")
             has("Recul impossible", "Back-off impossible", "could not back off") -> tr("Obstacle contact: the robot could not back off", "Contact avec un obstacle : le robot n'a pas pu reculer")
             has("protection 25", "verrou de collision", "collision lock", "Contact bumper", "Contact pare-chocs", "Bumper contact",
                 "contournements déjà effectués", "bypasses already done", "bypasses already made") ->

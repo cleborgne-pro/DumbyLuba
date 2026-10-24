@@ -180,4 +180,50 @@ class HistoryComposeTest {
         compose.onNodeWithText("Voir dans le replay").performScrollTo().performClick()
         compose.onNodeWithText("Incident 1 / 2 · Contact pare-chocs").performScrollTo().assertExists()
     }
+
+    /** Lawn 10 m × 6 m mowed in stripes, 2 m × 1.5 m left unmowed in the middle. */
+    private fun holedLawn(at: Long): TaskTrack {
+        val lawn = fr.luba.poc.map.MapShape(1, 0, listOf(Point(0.0, 0.0), Point(10.0, 0.0), Point(10.0, 6.0), Point(0.0, 6.0)), "Pelouse")
+        val samples = mutableListOf<TrackSample>()
+        var y = 0.2; var right = true; var t = at
+        while (y <= 5.8) {
+            for (i in 0..96) {
+                val x = if (right) 0.2 + i * 0.1 else 9.8 - i * 0.1
+                val skip = x in 4.0..6.0 && y in 2.0..3.5
+                samples += TrackSample(t, x, y, 0.0, if (skip) TrackPhase.TRAVEL else TrackPhase.CUTTING); t += 1_000
+            }
+            right = !right; y += 0.35
+        }
+        return TaskTrack(TrackMeta(fr.luba.poc.map.RobotMap(listOf(lawn), true, "test"), zoneIds = listOf(1L)), samples)
+    }
+
+    @Test fun `report offers the finishing of the gaps`() {
+        val done = record("t1", reason = "Tonte terminée · contact de charge confirmé")
+        val track = holedLawn(done.startedAt)
+        val asked = CopyOnWriteArrayList<fr.luba.poc.planning.FinishingOffer>()
+        compose.setContent { LubaTheme(false) { MowingReportDialog(done, listOf(done), {}, {}, loadTrack = { track }, onFinishing = { asked += it }) } }
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("Préparer la finition")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("en 1 manque", substring = true).assertExists()
+        compose.onNodeWithText("Préparer la finition").performScrollTo().performClick()
+        assertEquals(1, asked.size)
+        assertEquals("t1", asked.single().taskId)
+        assertTrue(asked.single().areaM2 > 1.0)
+    }
+
+    @Test fun `finishing without the robot of the mowing asks to connect it`() {
+        val done = record("t1")
+        val track = holedLawn(done.startedAt)
+        compose.setContent { LubaTheme(false) { MowingReportDialog(done, listOf(done), {}, {}, loadTrack = { track }) } }
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("Reste à tondre")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Préparer la finition").assertDoesNotExist()
+        compose.onNodeWithText("Connectez le robot de cette tonte", substring = true).performScrollTo().assertExists()
+    }
+
+    @Test fun `interrupted mowing offers no finishing`() {
+        val stopped = record("t2", outcome = MowingOutcome.INTERRUPTED, reason = "STOP manuel")
+        val track = holedLawn(stopped.startedAt)
+        compose.setContent { LubaTheme(false) { MowingReportDialog(stopped, listOf(stopped), {}, {}, loadTrack = { track }, onFinishing = {}) } }
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("/ 100", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Reste à tondre").assertDoesNotExist()
+    }
 }

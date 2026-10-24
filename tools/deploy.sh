@@ -12,6 +12,25 @@ if [ -z "$ADB" ]; then
 fi
 [ -n "$ADB" ] || { echo "ERROR: adb not found (add platform-tools to PATH)." >&2; exit 1; }
 
+# Fresh ADB session on every deployment (rule of 2026-10-22): a server left running for hours stopped seeing the
+# wireless devices (empty `adb devices` and mDNS list) until it was restarted. The old server is stopped with
+# `adb kill-server` (never by process name), then a new one waits for the devices to reconnect. ADB_KEEP_SERVER=1 skips it.
+if [ "${ADB_KEEP_SERVER:-}" != "1" ]; then
+  echo ">> New ADB session (old server stopped)"
+  "$ADB" kill-server >/dev/null 2>&1 || true
+  "$ADB" start-server >/dev/null 2>&1
+  for _ in $(seq 1 20); do
+    if [ -n "${DEPLOY_SERIALS:-}" ]; then
+      missing=0
+      for s in $DEPLOY_SERIALS; do "$ADB" devices | grep -q "^$s[[:space:]]*device$" || missing=1; done
+      [ "$missing" = 0 ] && break
+    else
+      "$ADB" devices | tail -n +2 | grep -q "device$" && { sleep 3; break; }
+    fi
+    sleep 1
+  done
+fi
+
 # Devices: all distinct ADB devices (Fold, Redmi gateway...), deduplicated by hardware serial number
 # (the same phone can appear over IP and over mDNS). DEPLOY_SERIALS="s1 s2" to restrict.
 targets=()

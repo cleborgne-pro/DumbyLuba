@@ -14,7 +14,7 @@ class TeachTest {
     }
 
     @Test fun `teach config slow and bounded`() {
-        assertEquals(20, TeachConfig().linearSpeed)
+        assertEquals(80, TeachConfig().linearSpeed)
         assertTrue(TeachConfig().linearSpeed <= TeachConfig.MAX_TEACH_SPEED)
         val scenarios = listOf<() -> Unit>(
             { TeachConfig(linearSpeed = 0) },

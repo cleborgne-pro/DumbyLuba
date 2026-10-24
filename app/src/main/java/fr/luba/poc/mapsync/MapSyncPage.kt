@@ -363,6 +363,7 @@ private fun DrawScope.drawShape(shape: MapShape, path: (List<Point>, Boolean) ->
         ShapeKind.NO_GO, ShapeKind.VISION_ZONE -> { val p = path(shape.points, true); drawPath(p, colors.NoGoFill); drawPath(p, colors.NoGoStroke, style = stroke) }
         ShapeKind.PASSAGE -> drawPath(path(shape.points, false), colors.TextTertiary, style = stroke)
         ShapeKind.OBSTACLE -> drawPath(path(shape.points, false), colors.ObstacleStroke, style = stroke)
+        ShapeKind.NO_STOP_ZONE -> drawPath(path(shape.points, true), colors.Info, style = stroke)
     }
 }
 

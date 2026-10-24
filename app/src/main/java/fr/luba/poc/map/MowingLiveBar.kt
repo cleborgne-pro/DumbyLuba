@@ -44,6 +44,11 @@ fun MowingLiveBar(state: RobotUi, onStop: () -> Unit, onDetails: () -> Unit) {
     val record = state.mowingRecord?.takeIf { route.cutProgress != null }
     val stats = MowingLiveStats.of(state.telemetry, route, record?.totals?.totalSeconds, record?.forecast?.totalSeconds,
         recharges = record?.recharges, expectedRecharges = record?.forecast?.recharges)
+    // End recomputed on the measured cutting speed, battery use and charge rate of this mowing.
+    val eta = record?.takeIf { route.running && route.cutProgress?.let { it < 1.0 } == true }?.let {
+        fr.luba.poc.history.LiveEta.of(it, state.telemetry.battery, route.cutProgress, System.currentTimeMillis(),
+            charging = route.phase == fr.luba.poc.simulation.RoutePhase.CHARGING, chargeTarget = route.chargeTarget)
+    }
     Surface(shape = MaterialTheme.shapes.large, color = colors.Surface, shadowElevation = 4.dp, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(top = 4.dp, bottom = 10.dp)) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -59,6 +64,13 @@ fun MowingLiveBar(state: RobotUi, onStop: () -> Unit, onDetails: () -> Unit) {
                         stats.recharges?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = colors.TextSecondary) }
                         LiveCoverageLabel(state.mowingRecord?.id)
                     }
+                    // Mission control: deviation from the edge being driven and waypoint aimed at (direct or gateway).
+                    fr.luba.poc.history.LiveTracking.of(route, state.telemetry.x, state.telemetry.y)?.takeIf { route.running }?.let {
+                        Text(fr.luba.poc.history.LiveTracking.text(it), style = MaterialTheme.typography.labelMedium, color = colors.TextSecondary,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    eta?.let { Text(MowingLiveStats.etaText(it), style = MaterialTheme.typography.labelMedium, color = colors.TextPrimary,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     Text(route.status, style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (route.running) StopAction(onStop)

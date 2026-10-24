@@ -30,6 +30,46 @@ constexpr const char *EMERGENCY_STOP_EVENT = "emergency_stop";
 // Name sent in WELCOME and expected by the app (protocol text, unchanged).
 constexpr const char *GATEWAY_NAME = "DumbyLuba passerelle";
 
+// Texts sent to the pilot (DENIED, FAILURE, LOST reasons, stop reports). Like the Android gateway, they stay in French
+// byte for byte whatever the language: the app compares some of them and translates the known ones at display
+// (GatewayWireText in app/.../gateway/GatewayProtocol.kt). Console and web pages stay in English.
+namespace wire {
+constexpr const char *TOO_MANY_ATTEMPTS = "Trop d'essais : attendre une minute";
+constexpr const char *VERSION_MISMATCH = "Version de passerelle différente : mettre à jour les deux téléphones";
+constexpr const char *WRONG_CODE = "Code de passerelle incorrect";
+constexpr const char *LINK_ALREADY_OPEN = "Liaison robot déjà ouverte";
+constexpr const char *SCANNER_UNAVAILABLE = "Scanner Bluetooth indisponible";
+constexpr const char *CONNECTION_NOT_ANSWERED = "connexion sans réponse";
+constexpr const char *GATT_NOT_ANSWERED = "opération GATT sans réponse";
+constexpr const char *BLE_LOST = "Perte BLE (robot)";
+constexpr const char *NO_ROBOT_NO_STOP = "robot non connecté : aucun arrêt à écrire";
+constexpr const char *LINK_LOST_NO_STOP = "liaison robot perdue : arrêt non transmis";
+constexpr const char *WRITE_STUCK = "écriture GATT bloquée : liaison fermée, arrêt non garanti";
+constexpr const char *MID_MESSAGE =
+    "message fragmenté en cours : arrêt non injectable, liaison fermée (arrêt non garanti)";
+// Robot link set-up failures specific to the ESP32 (the Android stack reports its own).
+constexpr const char *SERVICE_MISSING = "Service Mammotion FFFF absent";
+constexpr const char *WRITE_CHAR_MISSING = "Caractéristique FF01 absente";
+constexpr const char *WRITE_UNAVAILABLE = "Écriture avec réponse indisponible";
+constexpr const char *NOTIFY_CHAR_MISSING = "Caractéristique FF02 absente";
+constexpr const char *NOTIFY_UNAVAILABLE = "Notifications indisponibles";
+constexpr const char *SUBSCRIBE_REFUSED = "Abonnement aux notifications refusé";
+std::string unknownFrame(int type);
+std::string holdsAnotherRobot(const std::string &robot);
+// "STOP écrit par la passerelle (N trame(s)), liaison Bluetooth conservée": the app checks the "STOP écrit" prefix.
+std::string stopWritten(size_t frames);
+// GATT code of the refused stop frame, or the timeout when [code] is negative.
+std::string stopNotConfirmed(int code);
+}  // namespace wire
+
+// Mammotion mower recognised from its Bluetooth name (ModelSupport.isMower): Luba, Yuka, Ezy-, Kumar, Maston,
+// case-insensitive, leading/trailing blanks ignored. Pool cleaners and RTK stations are not listed.
+bool isMower(const std::string &name);
+
+// Pairing link read by the app (GatewayPairing.kt), the one the Android gateway shows as a QR code:
+// dumbyluba://pair?v=2&host=…&port=8766&code=NNNNNN&name=…
+std::string pairingUri(const std::string &host, uint16_t port, const std::string &code, const std::string &name);
+
 // Gateway → client
 constexpr uint8_t CHALLENGE = 0x01, WELCOME = 0x03, DENIED = 0x04, SCAN_RESULT = 0x11, SCAN_END = 0x12;
 constexpr uint8_t DISCOVERING = 0x21, READY = 0x22, LOST = 0x23, FAILURE = 0x24, WRITTEN = 0x31, RSSI_RESULT = 0x33;
@@ -54,6 +94,10 @@ int32_t readInt(const Bytes &payload, size_t offset);
 Bytes scanResult(const std::string &name, const std::string &address, int rssi);
 // OPEN: address, then optional name after a line break.
 void parseOpen(const Bytes &payload, std::string &address, std::string &name);
+// Capabilities announced in WELCOME (GatewayProtocol.CAP_*): autonomous tracking of a route prepared by the pilot
+// (frames 0x80..0x97, gw_leg_frames.h) and station exit run by the gateway (LegSpec.dockExit).
+constexpr const char *CAP_AUTONOMY = "autonomy";
+constexpr const char *CAP_DOCK_EXIT = "dock-exit";
 // WELCOME: name then "caps=a,b" (GatewayProtocol.welcome).
 Bytes welcome(const std::string &capabilities);
 // CONFIG: value of [key] (one "key=value" per line); false if absent.

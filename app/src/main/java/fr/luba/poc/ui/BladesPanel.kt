@@ -8,6 +8,7 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -204,9 +205,12 @@ private fun ColumnScope.HeightActions(robot: RobotBle, state: RobotUi, height: I
 private fun StaticBench(robot: RobotBle, state: RobotUi, height: Int, knifeAlt: Boolean, onKnifeAlt: (Boolean) -> Unit,
                         supervised: Boolean, onSupervised: (Boolean) -> Unit) {
     val t = state.telemetry
+    // Model trial armed (read from its state so that the list follows it): the blade test is open to this model.
+    val trial by fr.luba.poc.protocol.ModelTrial.state.collectAsStateWithLifecycle()
+    val modelAllowed = trial.let { fr.luba.poc.protocol.ModelTrial.testAllowed(state.selected?.name, android.os.SystemClock.elapsedRealtime()) }
     SettingsGroup(tr("Preconditions", "Préconditions")) {
         PreconditionList(BladeSafety.checks(state.selected?.name, state.ageMs, t.battery, if (state.bladeTestActive) 11 else t.robotState,
-            if (state.bladeTestActive) 0 else t.sensorStatus, t.selfCheck, state.campaign.running, height, state.cutHeights).map { it.label to it.ok })
+            if (state.bladeTestActive) 0 else t.sensorStatus, t.selfCheck, state.campaign.running, height, state.cutHeights, modelAllowed).map { it.label to it.ok })
     }
     SettingsGroup(tr("Procedure", "Déroulé")) {
         StepLine(1, tr("Check that the blades are stopped", "Vérifier l'arrêt des lames"), tr("OFF sent, then a fresh OFF state is awaited.", "OFF envoyé, puis état OFF frais attendu."))

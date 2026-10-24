@@ -703,7 +703,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
                 val interruptedShown = checkpoint != null && !robotBlocked && !state.robotRoute.running && !mapView.demo && !args.cloud && !pointMove.pointMode && !actions.placingAccess && sim.engine == null
                 // Incident panel (robot stuck, task interrupted): it carries the progress and the actions; the stopped mowing
                 // bar and the layer strip are hidden to keep the map visible (small Fold screen, 2026-10-16).
-                val problemShown = interruptedShown || (robotBlocked && !protection.forbiddenTime)
+                val problemShown = interruptedShown || (robotBlocked && !protection.noteOnly)
                 if (checkpoint != null && interruptedShown)
                     InterruptedMowingPanel(checkpoint, map, state, actions.resumeBusy, actions.resumeError,
                         resumeEnabled = state.ready && mapBase != null && map.complete && !actions.resumeBusy && !prep.computing && !prep.simBuilding && !state.campaign.running &&

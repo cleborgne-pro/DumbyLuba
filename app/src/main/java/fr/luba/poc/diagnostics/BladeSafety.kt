@@ -16,8 +16,10 @@ object BladeSafety {
     /** All preconditions, in [requireReady] order: the first failing one is the refusal reason. */
     fun checks(name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
                sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int,
-               heights: CutHeightRange = CutHeightRange.forRobot(name)): List<BladeCheck> = listOf(
-        BladeCheck("Robot LUBA 2", fr.luba.poc.protocol.ModelSupport.motionValidated(name), tr("Test reserved for a LUBA 2 identified as Luba-VS", "Test réservé au LUBA 2 identifié Luba-VS")),
+               heights: CutHeightRange = CutHeightRange.forRobot(name),
+               /** Model check: validated model, or a model trial for the blade test ([fr.luba.poc.protocol.ModelTrial]). */
+               modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(name)): List<BladeCheck> = listOf(
+        BladeCheck("Robot LUBA 2", modelAllowed, tr("Test reserved for a LUBA 2 identified as Luba-VS or Luba-VP (or a model trial armed)", "Test réservé au LUBA 2 identifié Luba-VS ou Luba-VP (ou à un essai du modèle armé)")),
         BladeCheck(tr("BLE diagnostics stopped", "Diagnostic BLE arrêté"), !campaignRunning, tr("Stop the BLE campaign before this test", "Arrêter la campagne BLE avant ce test")),
         BladeCheck(tr("Height ${heights.label}", "Hauteur ${heights.label}"), heightMm in heights, heights.refusal(heightMm) ?: ""),
         BladeCheck(tr("Fresh robot state (≤ 2 s)", "État robot frais (≤ 2 s)"), stateAgeMs != null && stateAgeMs in 0..2000, tr("Robot state missing or older than 2 s", "État robot absent ou âgé de plus de 2 s")),
@@ -28,8 +30,9 @@ object BladeSafety {
     )
 
     fun requireReady(name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
-        sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int, heights: CutHeightRange = CutHeightRange.forRobot(name)) {
-        checks(name, stateAgeMs, battery, robotState, sensors, selfCheck, campaignRunning, heightMm, heights)
+        sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int, heights: CutHeightRange = CutHeightRange.forRobot(name),
+        modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(name)) {
+        checks(name, stateAgeMs, battery, robotState, sensors, selfCheck, campaignRunning, heightMm, heights, modelAllowed)
             .firstOrNull { !it.ok }?.let { throw IllegalArgumentException(it.detail) }
     }
 }

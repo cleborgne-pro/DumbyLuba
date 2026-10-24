@@ -40,8 +40,33 @@ the zones, splits it into simple temporary zones and plans and prepares it exact
 automatic planner, navigation and route checks on the unchanged robot map). `CoverageMapTest` leaves a 3 m band
 unmowed across Aire de jeux on the reference map, plans its gaps, replays the blades-on edges of the prepared mission
 into the track and checks that the coverage rises and less than 20 % of the gap area is left. Narrow gaps (about 1 m)
-are poorly served by this preparation (0.6 m margin of painted zones): the finishing phase (roadmap) will need a
-dedicated route.
+are poorly served by this preparation: the edge of a temporary zone counts as a recorded outline, so the lap and the
+passes stay inside the gap.
+
+## Finishing
+
+`planning/FinishingPass` turns the gaps into a dedicated finishing route:
+
+- **Offer** (`FinishingPass.offer`): finished mowing (`MowingOutcome.COMPLETE`) with a measured coverage, gaps totalling
+  at least `MIN_OFFER_M2` (1 m²) and at most `MAX_GAP_SHARE` (30 %) of the task zones (beyond, resume or mow again).
+  Computed with the score in the end-of-mowing report (`rememberMowingAnalysis`) and in the task sheet.
+- **Target** (`FinishingPass.target`): `gapArea()` buffered by the lap inset of a recorded outline (`targetInsetM`:
+  half width + outer margin) plus `OVERLAP_M` (0.2 m). The lap of each temporary zone then runs 0.2 m outside the gap,
+  on its ragged edge, and the zigzags cover the gap; where the gap touches the zone boundary, the clipping to the zones
+  makes that lap the usual border lap. Nearby gaps merge into a single piece.
+- **Preparation** (`FinishingPass.prepare`): `PaintedZone.prepare(map, target, …, borders = true)` with temporary
+  zones named "Finishing n", then `check`: every cutting path against `TrajectoryEnvelope(engine.routes.physicalSurface)`
+  (the surface the BLE route follows) and the whole route length against a new mowing of the task zones (area /
+  spacing, cutting only). Refused when a pass collides or when the ratio exceeds `MAX_ROUTE_RATIO` (0.5).
+- **Launch**: `FinishingDraft` (UI state, per map) set from the report for the connected robot of that mowing with its
+  complete map; Service → Trial mowing then targets the gaps, shows the route length, its share of a new mowing and
+  the envelope result, and starts it like a painted zone (`startRobotRoute`).
+
+`FinishingPassTest` leaves a 1 m and a 3 m band unmowed across Aire de jeux on the reference map: the 1 m band is closed
+entirely, the 3 m band to 2 % (what is left lies along the boundary), routes of 79 m and 168 m against 636 m for a new
+mowing; the former painted preparation of the 1 m band leaves more. Variants measured before choosing: without a lap,
+3.8 m² stayed along the boundary of the 3 m band (passes 0.55 m from the edge); a lap with no overlap refused the 1 m
+band (empty target after the inset).
 
 ## Live layer
 

@@ -20,6 +20,8 @@ class InterruptionSummaryTest {
         assertEquals("Passerelle tombée du robot", InterruptionSummary.of("Trajet interrompu : Passerelle tombée du robot vers x=4.0 m, " +
             "y=0.0 m (Bluetooth -52 dBm au lieu de -24 dBm, robot à 1.6 m)").label)
         assertEquals("Passerelle tombée du robot", InterruptionSummary.of("Gateway probably fell off the robot near x=4.0 m, y=0.0 m").label)
+        assertEquals("Positionnement du robot perdu (signal satellite ou RTK faible)", InterruptionSummary.of("Trajet interrompu : Protection / " +
+            "état robot changé (état 20, protection 41) : protection toujours active après 300 s (état 20, protection 41), arrêt maintenu").label)
         assertEquals("Arrêtée avec le bouton STOP", InterruptionSummary.of("STOP manuel").label)
         assertEquals("Liaison perdue avec le robot", InterruptionSummary.of("FAILED — timeout GATT, STOP potentiellement indisponible").label)
         assertEquals("Liaison perdue avec le robot", InterruptionSummary.of("FAILED — timeout GATT (sync(2) sans confirmation en 5,0 s), STOP potentiellement indisponible").label)

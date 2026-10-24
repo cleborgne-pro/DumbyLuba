@@ -24,6 +24,8 @@ void setCode(const String &code);
 void poll();
 // Frame from the robot link to session [id] (no effect if it has ended).
 void deliver(int id, uint8_t type, const gw::proto::Bytes &payload);
+// Autonomous tracking frame to session [id]: only if its pilot announced them (LEG_HELLO).
+void deliverLeg(int id, uint8_t type, const gw::proto::Bytes &payload);
 Info info();
 // Event to the connected pilot (EVENT frame "kind\ntext").
 void announce(const String &kind, const String &text);

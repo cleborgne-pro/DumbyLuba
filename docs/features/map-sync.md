@@ -8,7 +8,7 @@ on the phone are replaced by their corrected outline.
 |---|---|
 | **Access** | Map → **Map** sheet → *Local corrections* → **Sync with the Mammotion app** (with at least one active correction) |
 | **Status** | Implemented and checked end to end on the simulated robot of the test bench (real `RobotBle`, BLE frames, moves, map reading); **not yet tried on the robot** (first real recording to supervise, blades stopped) |
-| **Models** | LUBA 2 AWD (`Luba-VS…`) only; every other model is in read-only mode and its writes are refused |
+| **Models** | LUBA 2 AWD (`Luba-VS…`, X series `Luba-VP…`) only; every other model is in read-only mode and its writes are refused |
 | **Code** | `mapsync/MapSync.kt` (differences, outlines driven, recognition of the recorded element), `mapsync/MapSyncRunner.kt` (sequence, stop on failure), `mapsync/MapSyncPage.kt` (page), `ble/RobotBle.kt` (`MapSyncLink`, outline drive in recording mode), `protocol/Commands.kt` (`startMapRecording`, `endMapRecording`, `cancelMapRecording`, `deleteMapElement`), `simulation/PointPlanner.kt` (`tracePlan`) |
 | **Tests** | `MapSyncTest`, `MapSyncRunnerTest`, `MapSyncPageTest`, `ReadOnlyPolicyTest`, end to end `ble/MapSyncBenchTest` (robot `ble/SimRobot`) |
 
@@ -77,13 +77,18 @@ closer tracking on tight curves, evenly spaced points.
 3. Join onto the outline in a straight line, still without recording: among the points of the loop (every 25 cm,
    nearest first), the first whose join and following turn pass the footprint checks. The robot reaches the outline
    at a shallow angle instead of facing the boundary (facing a no-go zone 34 cm away, its nose would enter it).
+   The robot first faces the join point in place, then drives the line straight: the tracking otherwise turns while
+   moving below 25° of misalignment, and that arc took the chassis towards the element the line ends next to (join
+   refused by the envelope check on 8 draws of the noise out of 40 on the simulated robot).
 4. Every move waits for the robot to be READY again (state 11, after it leaves the manual mode of the previous one), or
    charging on its base (states 15 and 39: the first move leaves the station in a straight line, as a move to a point).
    Recording started (`todev_get_commondata` action 0, type 0 zone / 1 no-go zone / 2 passage); the robot must enter
    its recording state within 10 s (31, 32 or 34, APK `DeviceWorkState`).
 5. The outline is driven exactly from the join point, in recording mode: the manual mode is never sent (it would end the recording), and
    no recovery, bypass or replanning is done (it would draw a detour into the element): a contact, a deviation or a
-   robot state that changes stops the drive.
+   robot state that changes stops the drive. The robot first faces the first edge of the outline in place: the join
+   leaves it up to 25° off, and the arc that corrected it while driving took the chassis about 15 cm towards the
+   element (footprint check, outline abandoned). A pivot on the spot adds no recorded point.
 6. Recording ended (action 1); the robot must leave its recording state within 20 s.
 7. The robot map is read again; the new element is recognised by a new identifier of the same type overlapping the
    wanted outline by at least 50 % (passage: axis within 1 m on average). If it is missing, the mapping is saved
@@ -111,7 +116,7 @@ activity running, battery above 40 %. Writing to the map only goes through the r
 
 ## Safety
 
-- Only the LUBA 2 (`Luba-VS…`) can write: the read-only barrier now refuses the map writing commands (recording,
+- Only the LUBA 2 (`Luba-VS…`, X series `Luba-VP…`) can write: the read-only barrier now refuses the map writing commands (recording,
   erasing, deletion: `todev_get_commondata` with `subCmd` 0) to every other model, and the cloud filter refuses them to
   every model.
 - Blades are always stopped; the moves keep the checks of a move to a point (fresh position, footprint, battery,
@@ -136,6 +141,13 @@ deleted, with the no-go zone the robot removed with it recorded again (overlap a
 while recording (recording cancelled, map and corrections unchanged), a robot pushed off its outline (recording
 cancelled, nothing saved), an outline too close to the station refused, a sync started with the robot on its base. The manual mode and the blades are never sent
 while the robot records.
+
+**Success rate under the position noise** (`MapSyncSweepTest`, optional: `MAPSYNC_SWEEP=121-420`): the same no-go zone
+over many draws of the simulated RTK and heading noise. Measured on 2026-10-24 over 300 draws: 35 outlines abandoned
+(11.7 %; 53, i.e. 17.7 %, before the outline was faced in place), none at the join any more, all safe aborts (recording
+cancelled, nothing saved, corrections kept on the phone: start the sync again). The remaining failures are the
+footprint and corridor checks of the drive with the chassis 15 cm from the element; their margins are kept until the
+first real tries say how the LUBA 2 tracks an outline.
 
 **Not verified until a first real try**: that the LUBA 2 firmware accepts the motion commands of the app while it
 records (the official app does the same over Bluetooth), the exact moment it saves the element, how it treats a new

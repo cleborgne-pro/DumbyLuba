@@ -19,6 +19,13 @@ class PointNavPlannerTest {
         assertEquals(start.distance(end),plan.meters,1e-9)
         assertTrue(plan.bands.isEmpty() && plan.borders.isEmpty())
     }
+    @Test fun noStopZoneIsCrossedAndVisionObstacleZoneIsAvoided() {
+        val start=Point(3.0,7.0); val end=Point(17.0,7.0); val box=rect(7.0,6.0,6.0,8.0)
+        val noStop=RobotMap(map().shapes+MapShape(9,25,box),true,"BLE")
+        assertEquals(listOf(start,end),TrajectoryPlanner.pointPlan(noStop,start,end,emptyList()).points)
+        val visionObstacle=RobotMap(map().shapes+MapShape(9,26,box),true,"BLE")
+        assertTrue(TrajectoryPlanner.pointPlan(visionObstacle,start,end,emptyList()).points.size>2)
+    }
     @Test fun exclusionUsesTheShorterSideAndEveryLegHasClearance() {
         val hole=rect(7.0,6.0,6.0,8.0)
         val start=Point(3.0,7.0); val end=Point(17.0,7.0)

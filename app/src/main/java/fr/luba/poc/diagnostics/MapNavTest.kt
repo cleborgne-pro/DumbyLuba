@@ -23,6 +23,9 @@ data class MapNavPlan(
     val mapped: Area? = null,
     /** Straight exit from the base to the link point, driven before [points] (robot on its base); null otherwise. */
     val departure: fr.luba.poc.simulation.BaseDeparture.Exit? = null,
+    /** Each range starts with an in-place pivot towards its first edge ([fr.luba.poc.simulation.PathFollower.alignFirst]),
+     * kept for the paths replanned by a recovery. */
+    val alignAtStart: Boolean = false,
 ) {
     val meters: Double get() = points.zipWithNext().sumOf { (a, b) -> a.distance(b) }
 

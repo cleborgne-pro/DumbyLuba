@@ -19,7 +19,11 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
     private val dockLine: List<Point>? = null,
     /** Difficult areas (difficulty heatmap) that transits bypass when the detour stays reasonable
      * ([AVOID_DETOUR_FACTOR]); never an exclusion: the safe surface and the checks are unchanged. */
-    private val avoidAreas: List<List<Point>> = emptyList()) {
+    private val avoidAreas: List<List<Point>> = emptyList(),
+    /** DANGER boundary portions ([fr.luba.poc.map.BorderType.DANGER], polylines): transits keep the chassis at least
+     * [DANGER_TRANSIT_MARGIN_M] away from them whenever the terrain allows it ([dangerClearance]); never an exclusion
+     * of the safe surface, the passes and the checks are unchanged. */
+    private val dangerLines: List<List<Point>> = emptyList()) {
     companion object {
         private val surfaceCache = object : LinkedHashMap<Any,Surfaces>(8,0.75f,true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Any,Surfaces>?) = size > 6
@@ -44,9 +48,13 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
         const val AVOID_DETOUR_M = 4.0
         /** Margin around the avoided difficult areas. */
         const val AVOID_MARGIN_M = 0.25
+        /** Minimum distance between the chassis side and a DANGER boundary portion in transit (m). */
+        const val DANGER_TRANSIT_MARGIN_M = 0.8
+        /** Robot centre distance kept from a DANGER portion in transit: half a width plus [DANGER_TRANSIT_MARGIN_M]. */
+        fun dangerCenterDistance(robot: RobotEnvelope = RobotEnvelope.LUBA2): Double = robot.halfWidthM + DANGER_TRANSIT_MARGIN_M
         fun withDock(map: RobotMap, margin: Double, holes: List<List<Point>>, accesses: List<List<Point>>, base: Point,
                      heading: Double?, distance: Double, robot: RobotEnvelope = RobotEnvelope.LUBA2, recordedBoundary: Boolean = false,
-                     avoidAreas: List<List<Point>> = emptyList()): TrajectoryPlanner {
+                     avoidAreas: List<List<Point>> = emptyList(), dangerLines: List<List<Point>> = emptyList()): TrajectoryPlanner {
             val dock = heading?.let {
                 val angle = Math.toRadians(it)
                 listOf(base, Point(base.x-cos(angle)*distance, base.y-sin(angle)*distance))
@@ -55,7 +63,7 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
             // base through the approach point, in front of it, then reverses into the corridor.
             val safety = heading?.let { baseSafetyZone(base, it, distance, robot) }
             return TrajectoryPlanner(map, margin, holes, accesses + listOfNotNull(dock), robot, recordedBoundary,
-                routingExclusions = listOfNotNull(safety), dockLine = dock, avoidAreas = avoidAreas)
+                routingExclusions = listOfNotNull(safety), dockLine = dock, avoidAreas = avoidAreas, dangerLines = dangerLines)
         }
         /** Safety zone radius: the pivot at the approach point stays just outside. */
         fun baseSafetyRadius(approachDistance: Double, robot: RobotEnvelope = RobotEnvelope.LUBA2): Double =
@@ -79,7 +87,9 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
                             /** Drawn outline (zones, corridors, exclusions) to which the comfort distance applies. */
                             private val drawn: org.locationtech.jts.geom.Geometry? = null,
                             /** Union of the difficult areas to avoid in transit, or null. */
-                            private val avoid: org.locationtech.jts.geom.Geometry? = null) {
+                            private val avoid: org.locationtech.jts.geom.Geometry? = null,
+                            /** Band kept from the DANGER portions in transit (robot centre), or null. */
+                            private val danger: org.locationtech.jts.geom.Geometry? = null) {
         val envelope = TrajectoryEnvelope(physicalFree, robot)
         /** Physical surface shrunk by the tracking tolerance ([FOLLOW_TOLERANCE_M]): check of tight detours. */
         val followEnvelope by lazy { TrajectoryEnvelope(physicalFree.buffer(-FOLLOW_TOLERANCE_M, curveSegments), robot) }
@@ -91,9 +101,23 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
         val drawnDistance by lazy { drawn?.let { org.locationtech.jts.operation.distance.IndexedFacetDistance(it.boundary) } }
         val comfort: PreferredArea? get() = preferred?.first
         val crossing: PreferredArea? get() = preferred?.second
+        private fun guard(area: PreferredArea?): PreferredArea? {
+            val band = danger ?: return null
+            val surface = area?.area ?: return null
+            return try {
+                val kept = surface.difference(band)
+                if (kept.isEmpty) null else PreferredArea(kept)
+            } catch (_: RuntimeException) { null }
+        }
+        /** Comfort and crossing without the DANGER band: first choices for transits, with no detour limit. */
+        val guardedComfort: PreferredArea? by lazy { guard(comfort) }
+        val guardedCrossing: PreferredArea? by lazy { guard(crossing) }
+        /** Distance to the DANGER portions, indexed (null without DANGER portion). */
+        val dangerDistance by lazy { danger?.let { org.locationtech.jts.operation.distance.IndexedFacetDistance(it.boundary) } }
+        val dangerIndex by lazy { danger?.let { AreaIndex(it, 0.0) } }
         /** Comfort without the difficult areas ([avoid]): first choice for transits, if the detour stays reasonable. */
         val calm: PreferredArea? by lazy {
-            val comfortArea = comfort?.area ?: return@lazy null
+            val comfortArea = (guardedComfort ?: comfort)?.area ?: return@lazy null
             val zone = avoid ?: return@lazy null
             try {
                 val area = comfortArea.difference(zone)
@@ -119,7 +143,7 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
     private data class SurfaceKey(val shapes: List<MapShape>, val margin: Double, val holes: List<List<Point>>,
         val accesses: List<List<Point>>, val robot: RobotEnvelope, val recordedBoundary: Boolean,
         val limitCenter: Point?, val limitRadius: Double?, val curveSegments: Int, val routingExclusions: List<List<Point>>,
-        val avoidAreas: List<List<Point>>)
+        val avoidAreas: List<List<Point>>, val dangerLines: List<List<Point>>)
     private fun cachedSurfaces(key: SurfaceKey, build: () -> Surfaces): Surfaces {
         synchronized(surfaceCache) { surfaceCache[key] }?.let { return it }
         val built = build()
@@ -132,7 +156,7 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
     private val factory = GeometryFactory()
     private fun polygon(p: List<Point>) = factory.createPolygon((p + p.first()).map { Coordinate(it.x, it.y) }.toTypedArray())
     private val surfaces = cachedSurfaces(SurfaceKey(map.shapes,margin,holes,accesses,robot,recordedBoundary,
-        limitCenter,limitRadius,curveSegments,routingExclusions,avoidAreas)) { buildSurfaces() }
+        limitCenter,limitRadius,curveSegments,routingExclusions,avoidAreas,dangerLines)) { buildSurfaces() }
     private fun buildSurfaces(): Surfaces {
         require(margin.isFinite() && margin >= 0) { tr("Invalid margin", "Marge invalide") }
         val zones = map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
@@ -171,7 +195,12 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
             // Margin: a transit does not run along the edge of a difficult area.
             runCatching { UnaryUnionOp.union(areas.map { polygon(it).buffer(AVOID_MARGIN_M, 4) }) }.getOrNull()?.takeIf { !it.isEmpty }
         }
-        return Surfaces(physicalFree,routed,robot,margin,curveSegments,free,drawn,avoid)
+        val danger = dangerLines.filter { it.size >= 2 }.takeIf { it.isNotEmpty() }?.let { lines ->
+            runCatching { UnaryUnionOp.union(lines.map { line ->
+                factory.createLineString(line.map { Coordinate(it.x, it.y) }.toTypedArray()).buffer(dangerCenterDistance(robot), 8)
+            }) }.getOrNull()?.takeIf { !it.isEmpty }
+        }
+        return Surfaces(physicalFree,routed,robot,margin,curveSegments,free,drawn,avoid,danger)
     }
     /**
      * Same terrain, same settings (margin, accesses, base, safety zone), with extra exclusions: obstacles discovered
@@ -179,7 +208,7 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
      */
     fun withHoles(extra: List<List<Point>>): TrajectoryPlanner = if (extra.isEmpty()) this else
         TrajectoryPlanner(map, margin, holes + extra, accesses, robot, recordedBoundary, limitCenter, limitRadius,
-            curveSegments, routingExclusions, dockLine, avoidAreas)
+            curveSegments, routingExclusions, dockLine, avoidAreas, dangerLines)
     private val physicalFree get() = surfaces.physicalFree
     private val envelope get() = surfaces.envelope
     private val free get() = surfaces.free
@@ -199,6 +228,15 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
     fun borderClearance(p: Point): Double {
         val index = surfaces.drawnDistance ?: return Double.POSITIVE_INFINITY
         return index.distance(factory.createPoint(Coordinate(p.x, p.y)))
+    }
+    /**
+     * Distance from the robot centre at [p] to the nearest DANGER portion minus the kept distance
+     * ([dangerCenterDistance]): negative inside the band, +∞ without DANGER portion.
+     */
+    fun dangerClearance(p: Point): Double {
+        val index = surfaces.dangerDistance ?: return Double.POSITIVE_INFINITY
+        val d = index.distance(factory.createPoint(Coordinate(p.x, p.y)))
+        return if (surfaces.dangerIndex?.covers(p) == true) -d else d
     }
     fun safe(a: Point, b: Point): Boolean {
         queryCount.incrementAndGet()
@@ -313,7 +351,7 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
     private val entryNodes by lazy { passagePaths.flatMap { listOf(it.first(),it.last()) }.toSet() }
     private val zoneRoutes by lazy { TrajectoryPlanner(map.copy(shapes = map.shapes.filter { it.kind != ShapeKind.PASSAGE }), margin, holes, robot = robot, recordedBoundary = recordedBoundary, limitCenter=limitCenter,limitRadius=limitRadius,curveSegments=curveSegments,
         // Shortcuts and local links: same base safety zone as the routes.
-        routingExclusions=routingExclusions, avoidAreas=avoidAreas) }
+        routingExclusions=routingExclusions, avoidAreas=avoidAreas, dangerLines=dangerLines) }
     private data class Link(val target: Int, val path: List<Point>)
     private val passageNodes by lazy { passagePaths.flatten().distinct() }
     private val passageGraph by lazy {
@@ -718,10 +756,12 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
             val path = (listOf(start) + middle + end).withoutAlignedVertices()
             return path.takeIf { it.zipWithNext().all { (p,q) -> safe(p,q) } }
         }
-        for (area in listOfNotNull(surfaces.comfort, surfaces.crossing)) {
+        // DANGER portions: the guarded surfaces come first whatever the detour; the usual ones only if they cannot
+        // connect the ends (the robot then keeps to the shortest safe transit, unchanged).
+        for (area in listOfNotNull(surfaces.guardedComfort, surfaces.guardedCrossing, surfaces.comfort, surfaces.crossing)) {
             val path = through(area) ?: continue
             // Difficult areas avoided if the detour stays reasonable (otherwise the usual path).
-            if (avoidAreas.isNotEmpty() && area === surfaces.comfort) surfaces.calm?.let(::through)?.let { calm ->
+            if (avoidAreas.isNotEmpty() && (area === surfaces.comfort || area === surfaces.guardedComfort)) surfaces.calm?.let(::through)?.let { calm ->
                 if (calm.length() <= AVOID_DETOUR_FACTOR * path.length() + AVOID_DETOUR_M) return calm
             }
             return path

@@ -40,7 +40,7 @@ data class MowUi(
 object MowSafety {
     fun failure(name: String?, ready: Boolean, busy: Boolean, t: Telemetry, now: Long): String? {
         if (!ready) return tr("Connect the robot over BLE", "Connecter le robot en BLE")
-        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Command reserved for the LUBA 2 Luba-VS", "Commande réservée au LUBA 2 Luba-VS")
+        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Command reserved for the LUBA 2 (Luba-VS, Luba-VP)", "Commande réservée au LUBA 2 (Luba-VS, Luba-VP)")
         if (busy) return tr("Finish the tests / map reading first", "Terminer les essais / la lecture de carte")
         if (t.lastDeviceAt == null || now - t.lastDeviceAt !in 0..2000) return tr("Robot state missing or stale", "État robot absent ou périmé")
         if (!fr.luba.poc.protocol.SelfCheck.nominal(t.selfCheck)) return fr.luba.poc.protocol.SelfCheck.refusal(t.selfCheck)

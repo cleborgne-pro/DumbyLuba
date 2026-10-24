@@ -20,7 +20,7 @@ everything can be interrupted with STOP. This page summarizes these protections 
 
 ## Read-only mode for the models that are not validated
 
-Motion and blade commands are reserved for the validated model, the LUBA 2 AWD (`Luba-VS…`). Every other Mammotion
+Motion and blade commands are reserved for the validated model, the LUBA 2 AWD (`Luba-VS…` and X series `Luba-VP…`). Every other Mammotion
 mower is in read-only mode: the Bluetooth send lets through only read and stop commands, routes and the native
 return are refused before they start. See [supported models](supported-models.md).
 
@@ -49,11 +49,11 @@ Stops triggered by a guard (below) use the same sequence without closing the lin
 |---|---|
 | Freshness | state and position less than 2 s old in every moving mode; telemetry watchdog from 5 to 30 s (10 s by default, Service → Advanced settings → **Telemetry validity delay**, 1 s steps, changeable with the robot disconnected) |
 | Battery | 5 % reserve when mowing; 30 % minimum for the joystick, tests and the diagnostic campaign |
-| Self-check | only states 0 and 10 are nominal; 11 = locked after STOP; 23 = outside the Mammotion app's working hours; 25 = collision lock; any other or missing value = active protection |
+| Self-check | only states 0 and 10 are nominal; 11 = locked after STOP; 23 = outside the Mammotion app's working hours; 25 = collision lock; 40, 41, 42, 99 = positioning lost (joystick allowed, [details](#positioning-lost-self-check-41)); any other or missing value = active protection |
 | Bumper | contact (1014) = stop then [back-off and bypass](obstacles.md); stuck fault (1207) never taken for a contact. **Only obstacle detection**: the ultrasonic sensors are not read |
 | Progress | stop if there is no progress for 15 s, or less than 3 cm in 3 s |
 | Deviation | stop beyond 30 cm of deviation from the route (60 cm during a pivot and the reconvergence after it); during mowing, a route exit is recovered by a back-off and a link ([real mowing](real-mowing.md#leaving-the-trajectory-back-off-and-resume)) |
-| Transient protection | non-nominal self-check during mowing: STOP, then resume only if it returns to 0/10 and stays there for 3 s (at most 30 s, 5 times per mission, never on lock 11 or 23; [details](real-mowing.md#transient-protection-pause-then-resume)) |
+| Transient protection | non-nominal self-check during mowing: STOP, then resume only if it returns to 0/10 and stays there for 3 s (at most 30 s, 5 min for a positioning loss, 5 times per mission, never on lock 11 or 23; [details](real-mowing.md#transient-protection-pause-then-resume)) |
 | Geometry | chassis envelope checked against borders, no-go zones and obstacles before every move |
 | Blades | rotation confirmed within 5 s, stop within 3 s; links outside the zone with blades stopped |
 | Native commands | `ExternalNavigationPolicy` forbids native mowing and native leaving of the base at send time; only the native return to base is allowed, for docking |
@@ -95,7 +95,7 @@ offers **Unlock**: zero speed, task cancellation, error read, then up to 8 s wai
 report received after the write; no movement. If that fails, the app advises pressing the robot's Grass button, then
 Start. The same **Unlock** is offered in the "Action blocked" dialog when a Service test is refused for this reason.
 
-Any other protection (for example self-check 41) shows the **Robot protection active** panel: **Unlock** sends the
+Any other protection (for example self-check 34) shows the **Robot protection active** panel: **Unlock** sends the
 same commands without movement and also asks the robot for its self-check details (logged). If it fails: free the
 robot, press STOP then Start. During mowing, a short protection is first waited for (resume if it clears and stays
 clear for 3 s, 30 s at most, 5 times per mission). **Details** shows what the button does and the stop cause.
@@ -151,6 +151,27 @@ DumbyLuba's, nothing to unlock (**OK** hides it until the state changes). Joysti
 lasts; a mowing that runs into it stops without a waiting pause. DumbyLuba's
 [working hours](real-mowing.md#working-hours) do better: clean stop, return to base and resume at the
 interrupted point.
+
+### Positioning lost (self-check 41)
+
+Self-check values are named after the table of the Mammotion app (`BlockErrorBeanChangeUtils`, as listed by the
+Home Assistant integration): 11 emergency stop, 23 non-working hours, 25 outside the task area, 34 rain protection…
+which matches what was observed on the robot. **41 is "weak satellite signal"**; 40 (RTK station not ready), 42
+(positioning failure) and 99 (weak RTK signal) are of the same family (`SelfCheck.positioning`).
+
+On 2026-10-22 the robot stayed stuck in 41: the app showed **Robot protection active** and, after a failed
+**Unlock**, advised to free the robot and press STOP then Start, which cannot bring a satellite signal back, while
+the joystick was refused. Now:
+
+- map: a dismissible note "Positioning lost: weak satellite signal (self-check 41). Nothing to unlock…" replaces
+  the panel and its button; it gives the mowing progress to resume once the signal is back;
+- **joystick** allowed, blades OFF, to drive the robot under open sky (bumper and lift alerts still stop it; the
+  robot itself remains free to refuse the commands);
+- mowing, routes, moves and tests stay refused while it lasts (no usable position);
+- during mowing, the pause waits **5 minutes** instead of 30 s for the signal to come back, robot stopped, blades
+  OFF, then resumes through the usual link; beyond that, the stop is kept and the interruption reads "Robot
+  positioning lost (weak satellite or RTK signal)";
+- the log records the name of the condition (`selfCheckName`), and the Robot tab shows it next to the value.
 
 ## Command cutoff (motor watchdog)
 

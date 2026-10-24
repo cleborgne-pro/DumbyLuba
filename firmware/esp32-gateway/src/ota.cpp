@@ -67,6 +67,7 @@ G::Situation situation() {
   s.pilotConnected = hooks.pilotConnected && hooks.pilotConnected();
   s.robotPiloted = hooks.robotPiloted && hooks.robotPiloted();
   s.allowWhilePiloted = allowPiloted;
+  s.autonomyRunning = hooks.autonomyRunning && hooks.autonomyRunning();
   s.updateRunning = running;
   return s;
 }
@@ -176,7 +177,8 @@ void handleUpload() {
 void handleDone() {
   if (!accepted || !failure.isEmpty()) {
     const bool auth = failure.startsWith("Wrong gateway code") || failure.startsWith("Unknown or expired challenge");
-    const bool conflict = failure.startsWith("Robot being piloted") || failure.startsWith("Update already");
+    const bool conflict = failure.startsWith("Robot being piloted") || failure.startsWith("Update already") ||
+                          failure.startsWith("Autonomous route tracking");
     server->send(auth ? 403 : (conflict ? 409 : 400), "text/plain; charset=utf-8",
                  failure.isEmpty() ? String("No image received") : failure);
     if (!failure.isEmpty()) remember("refused: " + failure);

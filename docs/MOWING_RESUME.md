@@ -91,6 +91,41 @@ holds the link (`GatewayLink.holdUntil`) and waits up to 1 min for a fresh state
 
 Starting a new mowing replaces the checkpoint; the preview says so before **Start**.
 
+## Smart resume
+
+`simulation/SmartResume.kt`. The checkpoint keeps, besides `edge`/`point` (position in the portion in progress), the
+end of that portion (`activeEnd`, null: end of the plan), the following portions in order (`deferred`, list of
+`MissionSpan(from, to, blockedAt)` of `PlanPos(edge, point)`) and the blocked pose when the portion in progress is a
+deferred retry (`activeBlocked`). Without them the progress is linear, as before; older files are read as linear.
+`doneMeters` is the total minus the cutting metres of the portions.
+
+- **Route**: `RobotRoute.missionEdges` with `MissionResume.of(checkpoint)` builds the portions (`spanRoute`: prepared
+  edges of each portion without its leading/trailing transits, blades-OFF links `TrajectoryPlanner.between` between
+  portions, overlap of 30 cm at a portion starting mid-edge), then the usual departure, return and checks
+  (`requirePath`, base zone). `MissionEdges.engineIndex` maps each route edge to its prepared edge (-1: link).
+- **Progress** (`SmartResume.advance`): monotonic in the portion in progress; a position inside a later portion makes
+  it the portion in progress (what is left of the previous one beyond the overlap stays deferred); a position within
+  the overlap before the resume point is ignored.
+- **After a recharge** (`afterRecharge`): candidates = rotations of the remainder at a block start (cutting edge after
+  a prepared transit) or at the start of a deferred portion; cost = transits kept inside the portions + links start →
+  … → approach point computed by the navigation, straight-line lower bound to prune (40 evaluations at most). Chosen
+  if it saves at least `MIN_GAIN_M` (2 m); plans with several heights are not reordered. Used by `RobotBle.startRoute`
+  when the robot starts docked (manual or automatic resume, event `route_smart_resume`) and by the in-mission recharge
+  cycle after the base exit (`replanMission`: same building, then `ObstacleBypass.repair` around the obstacles
+  discovered during the mission; failure ⇒ usual resume at the interrupted point, event `route_replan_failed`).
+- **After a blockage**: `RouteBlocked` (presumed blockage 3 s, no progress 15 s, Fold or gateway leg) goes through
+  the contact bypass with an estimated obstacle (`ObstacleEncounter.blockage`). `deferBlockage` is called when the
+  bypass is impossible (repair failure, 5th contact within 2.5 m) or after `DriftRecovery.MAX_SAME_SPOT` exits in a
+  row at the same place: `deferBlocked` moves the segment from the progress to the first point of the remainder at
+  least `CLEARANCE_M` (1.5 m) from the blocked pose and `MIN_SKIP_M` (0.5 m) further to the end, with `blockedAt`;
+  back-off of `BACK_OFF_M` (0.5 m) along the trail (`DriftRecovery.starts`), route rebuilt from there. A retry blocked
+  within `SAME_SPOT_M` (1.5 m) of its `blockedAt` gives the segment up (`skippedMeters`), and a deferred segment that
+  cannot be routed around the discovered obstacles is given up too (`abandonNear`). Nothing left: straight return to
+  the approach point. At most `MAX_BLOCKAGES` (6) per mission; on a station route, no deferral (stop as before).
+  Events `route_blockage_deferred` (position, deferred and given-up metres, target), difficulty `BLOCKED`.
+- **Not covered**: the map simulation (`MowingSimulation`) still resumes at the interrupted point after a recharge;
+  "Resume further on" is refused on a reordered remainder.
+
 ## Limitations
 
 - Borders already done are not redone; the stripe between the robot's actual stop and the saved point is covered by the 30 cm overlap and by the projection of the measured position.
@@ -113,6 +148,17 @@ skipped stripes, start without overlap, refusal before the stop or on a link, sa
 moved by one meter still refused, same-station tolerance (axis around 0°/360°, unknown axis), base read back from
 storage. `RobotBleIncidentsTest` "station re-observed on redocking" replays the mowing interrupted by the end of
 working hours, redocked 6 cm further, then resumed through the app's path (`RobotBench.resumeEngine`).
+
+`SmartResumeTest` (JVM): reordering after a recharge on a synthetic plan (far cell, cell near the base, far cell:
+≥ 15 m of transit saved, same cutting metres on every prepared edge), no reordering when the interrupted point is on
+the way or with height passes, progress followed across the portions to the end, overlap not taken as a jump, blockage
+deferred then given up when blocked again, deferred portion given up near the blocked place only, storage of the
+portions. `SmartResumeReferenceTest` (JVM, reference map, Aire de jeux + Potager + Piscine + Fosse, real navigation):
+interrupted at 20 / 35 / 50 / 65 / 80 % of the plan, the reordered route from the approach point has 17.4 / 33.2 /
+35.4 / 19.0 m less transit than the usual resume (unchanged at 80 %), passes `missionEdges` and keeps every
+remaining stripe. `RobotBleBlockageTest` (bench, end to end): wheels spinning on soft ground ⇒ blockage on the map,
+back-off, bypass, mowing complete; checkpoint with a deferred segment restored after a restart, resumed from the base,
+the robot goes back over the blocked place and the mowing completes.
 
 `MissionResumeAvoidanceTest` (JVM) reproduces the contact on the interrupted stripe: original plan recovered with the saved context or the one recomputed as of the start date, context preserved by storage, old files read. `MissionCheckpointTest` (JVM) covers: exact round trip of the preview and same fingerprint after re-preparation, sensitivity of the fingerprint and of the map key, overlap and bounds of the resume, cutting meters, monotonic progress, matching of the resumed route's indices, refusal with no mowing left, storage, deletion and corrupted file.
 

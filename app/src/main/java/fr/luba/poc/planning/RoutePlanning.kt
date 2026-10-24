@@ -27,6 +27,7 @@ object RoutePlanning {
     fun coverage(request: PlanningRequest, mode: CoverageMode = CoverageMode.LINES,
         checkpoint: () -> Unit = {}, progress: (Int,Int,String) -> Unit = { _,_,_ -> }): CoveragePlan {
         progress(0,1,tr("Computing passes and local links", "Calcul des passes et raccords locaux"))
+        val request=withBorderStrategy(request)
         val result=calculate(request,mode,checkpoint)
         val preview=requireNotNull(result.selected.preview) { result.selected.diagnostics.joinToString(" ; ") }
         // Only the production facade publishes a usable plan: the model must
@@ -42,6 +43,21 @@ object RoutePlanning {
         val links=if(ready && transits.size==mission.count { it.cutting }+1 &&
             mission.filter { it.cutting }.map { it.path }==preview.cuttingPaths) transits.drop(1).dropLast(1) else null
         return CoveragePlan(preview.copy(localOnly=!ready,plannerLabel="Automatique",links=links),result)
+    }
+
+    /**
+     * Border types of the request ([PlanningRequest.borders], or those annotated on the phone): DANGER portions kept
+     * away from the links like the mission transits ([PlanningRequest.dangerLines]), and, for a recorded boundary,
+     * outlines moved by the border strategy of each type ([BorderStrategy.effectiveMap]) for the passes and the border
+     * laps, the transits keeping the recorded map ([PlanningRequest.navigationMap]).
+     */
+    internal fun withBorderStrategy(request: PlanningRequest): PlanningRequest {
+        val portions=request.borders ?: BorderTypeRepository.portions(request.map)
+        val danger=request.dangerLines ?: portions.filter { it.type==BorderType.DANGER && it.points.size>=2 }.map { it.points }
+        val moved=if(request.config.boundary==BoundaryMeaning.RECORDED_TRACE)
+            BorderStrategy.effectiveMap(request.map,portions,request.config.outerOffsetM) else request.map
+        return request.copy(dangerLines=danger,borders=emptyList(),map=moved,
+            navigationMap=if(moved===request.map) request.navigationMap else request.navigationMap ?: request.map)
     }
 
     /** Scientific comparisons only, never called by the interface. */
@@ -94,14 +110,14 @@ object RoutePlanning {
         accesses: List<List<Point>> = emptyList(),base: MapBase? = null,
         robot: RobotEnvelope = RobotEnvelope.LUBA2,recordedBoundary: Boolean = false,
         limitCenter: Point? = null,limitRadius: Double? = null,curveSegments: Int = 8,
-        avoidAreas: List<List<Point>> = emptyList()): TrajectoryPlanner {
+        avoidAreas: List<List<Point>> = emptyList(),dangerLines: List<List<Point>> = emptyList()): TrajectoryPlanner {
         if(base!=null) {
             require(limitCenter==null && limitRadius==null && curveSegments==8)
             return TrajectoryPlanner.withDock(map,margin,holes,accesses,base.point,
-                base.entryHeadingDegrees,base.approachDistanceM,robot,recordedBoundary,avoidAreas)
+                base.entryHeadingDegrees,base.approachDistanceM,robot,recordedBoundary,avoidAreas,dangerLines)
         }
         return TrajectoryPlanner(map,margin,holes,accesses,robot,recordedBoundary,
-            limitCenter,limitRadius,curveSegments,avoidAreas=avoidAreas)
+            limitCenter,limitRadius,curveSegments,avoidAreas=avoidAreas,dangerLines=dangerLines)
     }
 
     /**
@@ -128,9 +144,11 @@ object RoutePlanning {
      * (exclusion radius) as holes, local accesses and oriented base. Shared by the map and
      * debug mowing so that simulation and actual execution prepare the same route.
      * Obstacles near the docking corridor: margin adjusted by [DockClearance] (pivot at the approach point).
+     * DANGER boundary portions annotated on the phone ([BorderTypeRepository.dangerLines]) are kept away from the transits.
      */
     fun mission(map: RobotMap,obstacles: List<LocalObstacle>,accesses: List<List<Point>>,base: MapBase,
-        recordedBoundary: Boolean = true,avoidAreas: List<List<Point>> = emptyList()): TrajectoryPlanner {
+        recordedBoundary: Boolean = true,avoidAreas: List<List<Point>> = emptyList(),
+        dangerLines: List<List<Point>> = BorderTypeRepository.dangerLines(map)): TrajectoryPlanner {
         DockClearance.requireReachable(obstacles,base)
         val obstacleHoles=DockClearance.fit(obstacles,base).map { obstacle ->
             (0 until 64).map { i ->
@@ -141,7 +159,7 @@ object RoutePlanning {
         }
         return navigation(map,RobotEnvelope.LUBA2.halfWidthM+0.05,
             map.shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points }+obstacleHoles,
-            accesses,base=base,recordedBoundary=recordedBoundary,avoidAreas=avoidAreas)
+            accesses,base=base,recordedBoundary=recordedBoundary,avoidAreas=avoidAreas,dangerLines=dangerLines)
     }
 
     /** Physical navigation for escapes and back-offs: no-go zones and learnt obstacles at their physical radius

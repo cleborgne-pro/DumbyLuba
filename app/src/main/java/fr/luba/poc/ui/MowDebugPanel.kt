@@ -23,6 +23,9 @@ import fr.luba.poc.map.PaintedMission
 import fr.luba.poc.map.PaintedZone
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
+import fr.luba.poc.planning.FinishingCheck
+import fr.luba.poc.planning.FinishingOffer
+import fr.luba.poc.planning.FinishingPass
 import fr.luba.poc.simulation.BaseStore
 import fr.luba.poc.simulation.MissionAvoidance
 import fr.luba.poc.simulation.MowingSimulation
@@ -48,6 +51,16 @@ private object PaintDraft {
     private var draft by mutableStateOf<Pair<RobotMap, List<PaintStroke>>?>(null)
     fun strokes(map: RobotMap): List<PaintStroke> = draft?.takeIf { it.first == map }?.second.orEmpty()
     fun update(map: RobotMap, change: (List<PaintStroke>) -> List<PaintStroke>) { draft = map to change(strokes(map)) }
+}
+
+/**
+ * Finishing asked from a mowing report ([fr.luba.poc.history.FinishingOfferGroup]): the trial mowing page targets
+ * the gaps of that mowing instead of the painted zone, for the map it was asked on.
+ */
+object FinishingDraft {
+    private var draft by mutableStateOf<Pair<RobotMap, FinishingOffer>?>(null)
+    fun offer(map: RobotMap): FinishingOffer? = draft?.takeIf { it.first == map }?.second
+    fun set(map: RobotMap, offer: FinishingOffer?) { draft = offer?.let { map to it } }
 }
 
 /** Service → Trial mowing: the painted zone (border following has its own page, see [BorderDebugPage]). */
@@ -80,10 +93,12 @@ private fun PaintDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, he
     var retained by remember { mutableStateOf(emptyList<List<Point>>() to 0.0) }
     var pieceCount by remember { mutableIntStateOf(0) }
     var mission by remember { mutableStateOf<PaintedMission?>(null) }
+    var check by remember { mutableStateOf<FinishingCheck?>(null) }
     var computing by remember { mutableStateOf(false) }
     var stage by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val finishing = FinishingDraft.offer(map)
     val strokes = PaintDraft.strokes(map)
     val route = state.robotRoute
     val routeStarted = route.started && route.running
@@ -97,7 +112,7 @@ private fun PaintDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, he
         }
         pieceCount = pieces.size
     }
-    LaunchedEffect(map, strokes, spacing, borders, state.obstacles, base) { mission = null; error = "" }
+    LaunchedEffect(map, strokes, spacing, borders, state.obstacles, base, finishing) { mission = null; check = null; error = "" }
 
     val idle = state.ready && !route.running && !state.manualActive && !state.mowing.active && !state.navTest.running &&
         !state.teach.running && !state.campaign.running && !state.bladeTestActive && !state.mapLoading && !state.bladeHeightPending &&
@@ -109,17 +124,20 @@ private fun PaintDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, he
         // Start as close as possible to the robot; the base if it is charging or its position is unknown.
         val start = if (t.x != null && t.y != null && t.chargeState !in setOf(1, 2)) Point(t.x, t.y) else b.point
         val inputs = Triple(strokes, spacing, borders)
-        computing = true; error = ""; mission = null; stage = tr("Preparation", "Préparation")
+        val target = finishing
+        computing = true; error = ""; mission = null; check = null; stage = tr("Preparation", "Préparation")
         scope.launch {
             try {
                 val prepared = withContext(Dispatchers.Default) {
                     val coroutine = currentCoroutineContext()
-                    PaintedZone.prepare(map, strokes, start, b, accesses, state.obstacles, spacing.toDouble(), borders, 0.3,
-                        checkpoint = { coroutine.ensureActive() }, progress = { scope.launch { stage = it } })
+                    if (target != null) FinishingPass.prepare(map, target, start, b, accesses, state.obstacles, spacing.toDouble(), 0.3,
+                        checkpoint = { coroutine.ensureActive() }, progress = { scope.launch { stage = it } }).let { it.mission to it.check }
+                    else PaintedZone.prepare(map, strokes, start, b, accesses, state.obstacles, spacing.toDouble(), borders, 0.3,
+                        checkpoint = { coroutine.ensureActive() }, progress = { scope.launch { stage = it } }) to null
                 }
-                if (inputs == Triple(PaintDraft.strokes(map), spacing, borders) && map == robot.state.value.robotMap) {
-                    mission = prepared
-                    robot.recordMapPreview(prepared.preview)
+                if (inputs == Triple(PaintDraft.strokes(map), spacing, borders) && target == FinishingDraft.offer(map) && map == robot.state.value.robotMap) {
+                    mission = prepared.first; check = prepared.second
+                    robot.recordMapPreview(prepared.first.preview)
                 } else error = tr("Zone or settings changed during computation: compute again", "Zone ou réglages modifiés pendant le calcul : recalculez")
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = e.message ?: tr("Computation impossible", "Calcul impossible") }
@@ -141,29 +159,57 @@ private fun PaintDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, he
     }
 
     PushedPage(ServicePage.MOW_DEBUG.title, back, bottomBar = {
-        MowDebugActions(robot, state, mission?.engine, height, supervised, idle, computing, base != null && strokes.isNotEmpty() && idle, ::compute,
+        MowDebugActions(robot, state, mission?.engine, height, supervised, idle, computing, base != null && (finishing != null || strokes.isNotEmpty()) && idle, ::compute,
             onStart = ::forgetBorderFollow)
     }) {
         header()
-        SafetyNotice(tr("Real mowing, blades running, limited to the painted zone. Area cleared (toys, cables, stones), no people or animals, physical stop within reach.", "Vraie tonte, lames en marche, limitée à la zone peinte. Zone dégagée (jouets, câbles, cailloux), personne ni animal, arrêt physique accessible."))
-        MowDebugMap(state, strokes + listOfNotNull(drawing), retained.first, mission, painter.takeIf { tool != PaintTool.MOVE && !routeStarted })
-        SettingsGroup(tr("Painted zone", "Zone peinte")) {
-            Segmented(PaintTool.entries.map { it to it.label }, tool, { tool = it }, enabled = !routeStarted)
-            SliderRow(tr("Brush size", "Taille du pinceau"), brush, { brush = it }, 0.3f..2f, valueLabel = "Ø ${Format.num(2.0 * brush, 1)} m", enabled = !routeStarted)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
-                SecondaryPillButton(tr("Undo", "Annuler"), { PaintDraft.update(map) { it.dropLast(1) } }, Modifier.weight(1f),
-                    enabled = strokes.isNotEmpty() && !routeStarted && !computing, icon = Icons.AutoMirrored.Rounded.Undo)
-                SecondaryPillButton(tr("Clear all", "Tout effacer"), { PaintDraft.update(map) { emptyList() } }, Modifier.weight(1f),
-                    enabled = strokes.isNotEmpty() && !routeStarted && !computing, icon = Icons.Rounded.Delete)
+        SafetyNotice(if (finishing != null) tr("Real mowing, blades running, limited to the gaps of the last mowing and their edges. Area cleared (toys, cables, stones), no people or animals, physical stop within reach.",
+                "Vraie tonte, lames en marche, limitée aux manques de la dernière tonte et à leurs bords. Zone dégagée (jouets, câbles, cailloux), personne ni animal, arrêt physique accessible.")
+            else tr("Real mowing, blades running, limited to the painted zone. Area cleared (toys, cables, stones), no people or animals, physical stop within reach.", "Vraie tonte, lames en marche, limitée à la zone peinte. Zone dégagée (jouets, câbles, cailloux), personne ni animal, arrêt physique accessible."))
+        if (finishing != null) {
+            MowDebugMap(state, emptyList(), finishing.gaps.flatMap { it.outlines }, mission, null)
+            FinishingTarget(finishing, check, locked = routeStarted || computing) { FinishingDraft.set(map, null) }
+        } else {
+            MowDebugMap(state, strokes + listOfNotNull(drawing), retained.first, mission, painter.takeIf { tool != PaintTool.MOVE && !routeStarted })
+            SettingsGroup(tr("Painted zone", "Zone peinte")) {
+                Segmented(PaintTool.entries.map { it to it.label }, tool, { tool = it }, enabled = !routeStarted)
+                SliderRow(tr("Brush size", "Taille du pinceau"), brush, { brush = it }, 0.3f..2f, valueLabel = "Ø ${Format.num(2.0 * brush, 1)} m", enabled = !routeStarted)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+                    SecondaryPillButton(tr("Undo", "Annuler"), { PaintDraft.update(map) { it.dropLast(1) } }, Modifier.weight(1f),
+                        enabled = strokes.isNotEmpty() && !routeStarted && !computing, icon = Icons.AutoMirrored.Rounded.Undo)
+                    SecondaryPillButton(tr("Clear all", "Tout effacer"), { PaintDraft.update(map) { emptyList() } }, Modifier.weight(1f),
+                        enabled = strokes.isNotEmpty() && !routeStarted && !computing, icon = Icons.Rounded.Delete)
+                }
+                KeyValueRow(tr("Retained area", "Surface retenue"), if (pieceCount == 0) "—" else tr("${Format.num(retained.second, 1)} m² outside no-go zones", "${Format.num(retained.second, 1)} m² hors no-go") + " · ${Format.plural(pieceCount, tr("temporary zone", "zone temporaire"), tr("temporary zones", "zones temporaires"))}")
+                InfoNote(tr("One finger paints, two fingers pan and zoom. Only paint inside existing zones is kept (orange outline): " +
+                    "no-go zones bypassed, learned obstacles and base surroundings excluded, pieces under ${Format.num(PaintedZone.MIN_PIECE_M2, 1)} m² ignored.",
+                    "Un doigt peint, deux doigts déplacent et zooment. Seule la peinture dans les zones existantes est retenue (contour orange) : " +
+                    "no-go contournés, obstacles appris et abords de la base exclus, morceaux de moins de ${Format.num(PaintedZone.MIN_PIECE_M2, 1)} m² ignorés."))
             }
-            KeyValueRow(tr("Retained area", "Surface retenue"), if (pieceCount == 0) "—" else tr("${Format.num(retained.second, 1)} m² outside no-go zones", "${Format.num(retained.second, 1)} m² hors no-go") + " · ${Format.plural(pieceCount, tr("temporary zone", "zone temporaire"), tr("temporary zones", "zones temporaires"))}")
-            InfoNote(tr("One finger paints, two fingers pan and zoom. Only paint inside existing zones is kept (orange outline): " +
-                "no-go zones bypassed, learned obstacles and base surroundings excluded, pieces under ${Format.num(PaintedZone.MIN_PIECE_M2, 1)} m² ignored.",
-                "Un doigt peint, deux doigts déplacent et zooment. Seule la peinture dans les zones existantes est retenue (contour orange) : " +
-                "no-go contournés, obstacles appris et abords de la base exclus, morceaux de moins de ${Format.num(PaintedZone.MIN_PIECE_M2, 1)} m² ignorés."))
         }
         MowDebugStatus(state, mission, computing, stage, error, base != null)
-        MowDebugSettings(robot, state, height, { height = it }, spacing, { spacing = it }, borders, { borders = it }, supervised, { supervised = it }, routeStarted || computing)
+        MowDebugSettings(robot, state, height, { height = it }, spacing, { spacing = it }, borders, { borders = it }, supervised, { supervised = it },
+            routeStarted || computing, finishing = finishing != null)
+    }
+}
+
+/** Gaps targeted by the finishing and checks of the prepared route ([FinishingPass.check]). */
+@Composable
+private fun FinishingTarget(offer: FinishingOffer, check: FinishingCheck?, locked: Boolean, onDiscard: () -> Unit) {
+    SettingsGroup(tr("Finishing of the gaps", "Finition des manques")) {
+        KeyValueRow(tr("Left unmowed", "Reste à tondre"), tr("${Format.num(offer.areaM2, 1)} m² in ${Format.plural(offer.count, "gap", "gaps")}",
+            "${Format.num(offer.areaM2, 1)} m² en ${Format.plural(offer.count, "manque", "manques")}"))
+        check?.let { c ->
+            KeyValueRow(tr("Route", "Trajet"), tr("${Format.num(c.routeM, 0)} m · ${(c.ratio * 100).toInt()} % of a new mowing (${Format.num(c.newMowingM, 0)} m)",
+                "${Format.num(c.routeM, 0)} m · ${(c.ratio * 100).toInt()} % d'une nouvelle tonte (${Format.num(c.newMowingM, 0)} m)"))
+            KeyValueRow(tr("Robot envelope", "Gabarit du robot"), if (c.safe) tr("Every pass inside the safe surface", "Toutes les passes dans la surface sûre")
+                else tr("${c.collisions.size} pass(es) outside", "${c.collisions.size} passe(s) hors surface"))
+        }
+        InfoNote(tr("Gaps of the last mowing, in orange: each one is widened a little over the mowed grass so that the lap runs on its edge and the passes cover it. " +
+            "Route refused if a pass leaves the safe surface or if it exceeds ${(FinishingPass.MAX_ROUTE_RATIO * 100).toInt()} % of a new mowing.",
+            "Manques de la dernière tonte, en orange : chacun est un peu élargi sur l'herbe tondue pour que le tour passe sur son bord et que les passes le couvrent. " +
+            "Trajet refusé si une passe sort de la surface sûre ou s'il dépasse ${(FinishingPass.MAX_ROUTE_RATIO * 100).toInt()} % d'une nouvelle tonte."))
+        SecondaryPillButton(tr("Paint a zone instead", "Peindre une zone à la place"), onDiscard, Modifier.fillMaxWidth(), enabled = !locked, icon = Icons.Rounded.Brush)
     }
 }
 
@@ -190,7 +236,8 @@ private fun MowDebugMap(state: RobotUi, paint: List<PaintStroke>, pieces: List<L
 
 @Composable
 private fun MowDebugSettings(robot: RobotBle, state: RobotUi, height: Int, onHeight: (Int) -> Unit, spacing: Float, onSpacing: (Float) -> Unit,
-                             borders: Boolean, onBorders: (Boolean) -> Unit, supervised: Boolean, onSupervised: (Boolean) -> Unit, locked: Boolean) {
+                             borders: Boolean, onBorders: (Boolean) -> Unit, supervised: Boolean, onSupervised: (Boolean) -> Unit, locked: Boolean,
+                             finishing: Boolean = false) {
     SettingsGroup(tr("Mowing settings", "Réglages de la tonte")) {
         SliderRow(tr("Cutting height", "Hauteur de coupe"), height.toFloat(), { onHeight(it.toInt()) }, state.cutHeights.floatRange(),
             valueLabel = "$height mm", steps = state.cutHeights.sliderSteps, enabled = !locked)
@@ -198,7 +245,7 @@ private fun MowDebugSettings(robot: RobotBle, state: RobotUi, height: Int, onHei
             valueLabel = "${(spacing * 100).toInt()} cm", steps = 3, enabled = !locked)
         SliderRow(tr("Forward speed", "Vitesse d'avance"), state.trajectorySpeedPercent.toFloat(), { robot.setTrajectorySpeed(it.toInt()) }, 10f..100f,
             valueLabel = "${state.trajectorySpeedPercent} %", enabled = !locked)
-        ToggleRow(tr("Border of the painted zone", "Bordure de la zone peinte"), borders, onBorders, enabled = !locked, subtitle = tr("One lap of the retained outline before the passes", "Un tour du contour retenu avant les passes"))
+        if (!finishing) ToggleRow(tr("Border of the painted zone", "Bordure de la zone peinte"), borders, onBorders, enabled = !locked, subtitle = tr("One lap of the retained outline before the passes", "Un tour du contour retenu avant les passes"))
         LubaCheckRow(tr("I am supervising on site, area cleared", "Je supervise sur place, zone dégagée"), supervised, onSupervised, enabled = !state.robotRoute.running)
     }
     InfoNote(tr("Like mowing from the map: link from the robot, passes with blades running, links with blades stopped, return to base. " +

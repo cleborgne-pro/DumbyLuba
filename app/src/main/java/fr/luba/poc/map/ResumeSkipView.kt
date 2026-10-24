@@ -23,7 +23,8 @@ data class ResumeSkipView(
             maxOf(0.0, MissionProgress.remainingCuttingMeters(edges, checkpoint.edge, checkpoint.point) - END_RESERVE_M)
 
         fun of(edges: List<SimEdge>, checkpoint: MissionCheckpoint, meters: Double): ResumeSkipView? {
-            if (checkpoint.edge !in edges.indices) return null
+            // Remainder reordered by a smart resume (recharge, blockage): no skip along the prepared order.
+            if (checkpoint.edge !in edges.indices || !checkpoint.linear) return null
             val max = maxMeters(edges, checkpoint)
             val skip = meters.coerceIn(0.0, max)
             val from = MissionResume(checkpoint.edge, checkpoint.point)

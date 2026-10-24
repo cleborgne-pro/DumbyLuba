@@ -7,19 +7,24 @@ import fr.luba.poc.proto.LubaMulProto.SocMul
 import fr.luba.poc.proto.MctrlDriverProto.MctlDriver
 import fr.luba.poc.proto.MctrlNavProto.MctlNav
 import fr.luba.poc.proto.MctrlSysProto.MctlSys
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.abs
 
 /**
  * Support level of the connected Mammotion mower, from its Bluetooth name.
  *
  * Only the models validated in the field may receive motion, blade, blade-height or navigation-task commands: today
- * the LUBA 2 AWD identified as `Luba-VS…`. Every other Mammotion mower (LUBA 1, LUBA 2 X series `Luba-VP`, LUBA 3,
- * LUBA mini, Yuka…) is connected in **read-only** mode: connection, telemetry, map reading, error and self-check
+ * the LUBA 2 AWD identified as `Luba-VS…` and its X series `Luba-VP…` (same platform and firmware, unlocked after the
+ * report of a 3000X owner, DumbyLuba#1). Every other Mammotion mower (LUBA 1, LUBA 3, LUBA mini, Yuka…) is connected
+ * in **read-only** mode: connection, telemetry, map reading, error and self-check
  * queries, camera and diagnostics export, with the stop commands still available. Name prefixes come from the
  * Mammotion app table (PyMammotion `DeviceType`); pool cleaners (Spino) and RTK stations are not mowers.
  */
 object ModelSupport {
     /** Bluetooth name prefixes of the models validated on a real robot (motion and blades allowed). */
-    val VALIDATED_PREFIXES = listOf("Luba-VS")
+    val VALIDATED_PREFIXES = listOf("Luba-VS", "Luba-VP")
 
     /** Bluetooth name prefixes of Mammotion mowers listed by the scan. */
     val MOWER_PREFIXES = listOf("Luba", "Yuka", "Ezy-", "Kumar", "Maston")
@@ -42,8 +47,58 @@ object ModelSupport {
 
     /** Refusal shown when a motion or blade action is requested on a model that is not validated, null otherwise. */
     fun refusal(name: String?): String? = if (motionValidated(name)) null else
-        tr("Read-only: this robot model is not validated yet, motion and blades are disabled (only the LUBA 2 AWD Luba-VS is validated)",
-            "Lecture seule : ce modèle de robot n'est pas encore validé, mouvements et lames désactivés (seul le LUBA 2 AWD Luba-VS est validé)")
+        tr("Read-only: this robot model is not validated yet, motion and blades are disabled (only the LUBA 2 AWD, Luba-VS and X series Luba-VP, is validated)",
+            "Lecture seule : ce modèle de robot n'est pas encore validé, mouvements et lames désactivés (seul le LUBA 2 AWD, Luba-VS et série X Luba-VP, est validé)")
+}
+
+/**
+ * Trial of a model that is not validated ([unlocking a model](docs/features/supported-models.md#unlocking-a-model)):
+ * armed by the owner for the connected robot only, it opens the three unlocking tests and nothing else:
+ * the command cutoff test, the joystick at low speed ([MAX_LINEAR], [MAX_ANGULAR]) and the blade test. Routes,
+ * mowing, moves to a point, return to base, gateway tracking, cutting height and map writing stay refused.
+ * Kept in memory only: off at every app start, after [DURATION_MS], on disconnection, or for another robot.
+ */
+object ModelTrial {
+    /** Duration of an armed trial. */
+    const val DURATION_MS = 30 * 60_000L
+    /** Joystick ceilings during a trial (≈ 0.3 m/s, ≈ 15 °/s), also the bound of [ReadOnlyPolicy.allowsTrial]. */
+    const val MAX_LINEAR = 300
+    const val MAX_ANGULAR = 150
+
+    /** Armed trial: exact Bluetooth name of the robot and validity (elapsed realtime, ms). */
+    data class Armed(val robotName: String, val sinceMs: Long, val untilMs: Long) {
+        fun remainingMs(now: Long) = (untilMs - now).coerceAtLeast(0)
+    }
+
+    private val armed = MutableStateFlow<Armed?>(null)
+    val state: StateFlow<Armed?> = armed.asStateFlow()
+
+    /** A Mammotion mower recognized by its name and not validated: the trial can be armed for it. */
+    fun eligible(name: String?): Boolean =
+        !name.isNullOrBlank() && ModelSupport.isMower(name) && !ModelSupport.motionValidated(name)
+
+    fun arm(name: String?, now: Long): Armed {
+        require(eligible(name)) { tr("Trial reserved for a connected mower in read-only mode", "Essai réservé à une tondeuse connectée en lecture seule") }
+        return Armed(name!!.trim(), now, now + DURATION_MS).also { armed.value = it }
+    }
+
+    /** Ends the trial; returns the trial that was armed, if any. */
+    fun end(): Armed? = armed.value.also { armed.value = null }
+
+    /** Trial armed for [name] and not expired at [now]. */
+    fun active(name: String?, now: Long): Boolean =
+        armed.value?.let { name != null && it.robotName == name.trim() && now < it.untilMs } == true
+
+    /** One of the three unlocking tests may run on [name]: validated model, or trial armed for this robot. */
+    fun testAllowed(name: String?, now: Long): Boolean = ModelSupport.motionValidated(name) || active(name, now)
+
+    /** Joystick setpoint bounded for a trial (unchanged on a validated model). */
+    fun joystick(name: String?, linear: Int, angular: Int): Pair<Int, Int> =
+        if (ModelSupport.motionValidated(name)) linear to angular
+        else linear.coerceIn(-MAX_LINEAR, MAX_LINEAR) to angular.coerceIn(-MAX_ANGULAR, MAX_ANGULAR)
+
+    /** Tests only. */
+    internal fun resetForTests() { armed.value = null }
 }
 
 /**
@@ -101,6 +156,25 @@ object ReadOnlyPolicy {
                 SocMul.SubMulCase.SET_VIDEO, SocMul.SubMulCase.REQ_ENCODE -> true
                 else -> false
             }
+            else -> false
+        }
+    }
+    /**
+     * Payloads of the three unlocking tests while a [ModelTrial] is armed, on top of [allows]: motion within the trial
+     * ceilings (command cutoff test, joystick), manual mowing mode and discs (blade test, with its OFF), knife control
+     * (alternative blade command). Everything else stays refused: navigation tasks, height setting, map writing.
+     */
+    fun allowsTrial(payload: ByteArray): Boolean {
+        if (allows(payload)) return true
+        val message = try { LubaMsg.parseFrom(payload) } catch (_: Exception) { return false }
+        return when (message.lubaSubMsgCase) {
+            LubaMsg.LubaSubMsgCase.DRIVER -> when (message.driver.subDrvMsgCase) {
+                MctlDriver.SubDrvMsgCase.TODEV_DEVMOTION_CTRL -> message.driver.todevDevmotionCtrl.let {
+                    abs(it.setLinearSpeed) <= ModelTrial.MAX_LINEAR && abs(it.setAngularSpeed) <= ModelTrial.MAX_ANGULAR }
+                MctlDriver.SubDrvMsgCase.MOW_CTRL_BY_HAND -> true
+                else -> false
+            }
+            LubaMsg.LubaSubMsgCase.SYS -> message.sys.subSysMsgCase == MctlSys.SubSysMsgCase.TODEV_KNIFE_CTRL
             else -> false
         }
     }

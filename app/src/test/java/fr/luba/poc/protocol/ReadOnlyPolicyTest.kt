@@ -32,6 +32,22 @@ class ReadOnlyPolicyTest {
         ).forEachIndexed { index, payload -> assertFalse("motion, blade or native command #$index", ReadOnlyPolicy.allows(payload)) }
     }
 
+    @Test fun modelTrialOpensOnlyTheUnlockingTestPayloads() {
+        // Command cutoff and joystick within the trial ceilings, blade test (mode, discs, alternative knife command).
+        listOf(
+            commands.movement(120, 0), commands.movement(-ModelTrial.MAX_LINEAR, ModelTrial.MAX_ANGULAR), commands.movement(0, -ModelTrial.MAX_ANGULAR),
+            commands.manualMow(1, 0, 50), commands.manualMow(1, 1, 50), commands.manualBlades(true, 60), commands.knifeControl(true),
+            commands.stop(), commands.reports(false), commands.cutterQuery(),
+        ).forEachIndexed { index, payload -> assertTrue("trial payload #$index", ReadOnlyPolicy.allowsTrial(payload)) }
+        // Faster than the trial, height setting, native tasks, return, map writing: still refused.
+        listOf(
+            commands.movement(ModelTrial.MAX_LINEAR + 1, 0), commands.movement(0, ModelTrial.MAX_ANGULAR + 1), commands.movement(1000, 450),
+            commands.bladeHeight(50), commands.prepareMowing(MowConfig(listOf(1))), commands.taskControl(1), commands.returnToDock(),
+            commands.leaveDock(), commands.startMapRecording(0), commands.deleteMapElement(0, 42L), commands.debugEnable(true),
+            byteArrayOf(1, 2, 3),
+        ).forEachIndexed { index, payload -> assertFalse("refused during a trial #$index", ReadOnlyPolicy.allowsTrial(payload)) }
+    }
+
     @Test fun mapWritingIsRefusedButMapReadingStaysAllowed() {
         listOf(commands.startMapRecording(0), commands.startMapRecording(1), commands.startMapRecording(2), commands.endMapRecording(0),
             commands.cancelMapRecording(), commands.deleteMapElement(0, 42L), commands.deleteMapElement(1, 42L), commands.saveMapTask())
@@ -66,10 +82,15 @@ class ReadOnlyPolicyTest {
         assertFalse(ReadOnlyPolicy.allows(byteArrayOf(0x7f, 0x01, 0x02)))
     }
 
-    @Test fun onlyTheLuba2LubaVsIsValidated() {
+    @Test fun onlyTheLuba2LubaVsAndItsXSeriesLubaVpAreValidated() {
         assertTrue(ModelSupport.motionValidated("Luba-VSDEMO01"))
         assertTrue(ModelSupport.motionValidated(" luba-vsDEMO01"))
-        listOf("Luba-VPDEMO01", "Luba-VADEMO01", "Luba-MNDEMO01", "Luba-LADEMO01", "LubaDEMO01", "Yuka-MNDEMO01",
+        // LUBA 2 AWD X series (3000X of DumbyLuba#1): same platform and firmware as the validated LUBA 2.
+        assertTrue(ModelSupport.motionValidated("Luba-VPDEMO01"))
+        assertTrue(ModelSupport.motionValidated("luba-vp3K8A2B"))
+        assertNull(ModelSupport.refusal("Luba-VPDEMO01"))
+        assertNull(ModelSupport.readOnlyNote("Luba-VPDEMO01", "LUBA 2 AWD"))
+        listOf("Luba-VADEMO01", "Luba-MNDEMO01", "Luba-LADEMO01", "LubaDEMO01", "Yuka-MNDEMO01",
             "Ezy-VTDEMO01", "Spino-S1DEMO", null, "").forEach { assertFalse("$it", ModelSupport.motionValidated(it)) }
         assertNull(ModelSupport.refusal("Luba-VSDEMO01"))
         assertTrue(ModelSupport.refusal("Yuka-MNDEMO01")!!.isNotBlank())
@@ -87,6 +108,6 @@ class ReadOnlyPolicyTest {
         listOf("Luba-VSDEMO01", "LubaDEMO01", "Luba-VADEMO01", "Yuka-DEMO01", "Yuka-MNDEMO01", "Ezy-LDDEMO01",
             "Kumar-MKDEMO01", "Maston-RDEMO01").forEach { assertTrue("$it", ModelSupport.isMower(it)) }
         listOf("Spino-S1DEMO", "RBSA1DEMO", "NBDEMO", "Phone", null).forEach { assertFalse("$it", ModelSupport.isMower(it)) }
-        assertEquals(listOf("Luba-VS"), ModelSupport.VALIDATED_PREFIXES)
+        assertEquals(listOf("Luba-VS", "Luba-VP"), ModelSupport.VALIDATED_PREFIXES)
     }
 }

@@ -15,6 +15,12 @@ import kotlin.math.sign
  * - a change of bits 3 to 8 of `sensor_status` (undocumented, next to the bumper) during motion;
  * - wheels commanded without measured progress: constant linear command, but the RTK position
  *   advances less than [ratio] times the expected distance over [windowMs] (wheels in the air or stuck).
+ *
+ * Low speeds: below ≈ 60 units the LUBA 2 hardly moves (survey of 2026-10-10, [fr.luba.poc.simulation.RangeArrival]),
+ * and up to about twice that it moves far slower than the linear calibration. On 2026-10-22, driving gently with the
+ * joystick stopped the robot with "Wheels commanded without progress" although nothing was wrong. The expected distance
+ * therefore only counts the part of the command above [deadbandUnits]: slow driving and approaches are no longer judged
+ * (≈ 185 units at least for the 20 cm threshold), a lift at a normal speed is still caught.
  */
 class LiftGuard(
     private val windowMs: Long = 2500,
@@ -23,6 +29,7 @@ class LiftGuard(
     private val ratio: Double = 0.25,
     private val metersPerUnit: Double = DeadReckoning.DEFAULT_METERS_PER_UNIT,
     private val activeMs: Long = 1500,
+    private val deadbandUnits: Int = LOW_SPEED_DEADBAND,
 ) {
     private data class Command(val at: Long, val linear: Int)
     private data class Fix(val at: Long, val position: Point)
@@ -31,7 +38,10 @@ class LiftGuard(
     private val fixes = ArrayDeque<Fix>()
     private var safetyBaseline: Int? = null
 
-    init { require(windowMs > 0 && commandDelayMs >= 0 && minExpectedM > 0 && ratio in 0.0..1.0 && metersPerUnit > 0) }
+    init { require(windowMs > 0 && commandDelayMs >= 0 && minExpectedM > 0 && ratio in 0.0..1.0 && metersPerUnit > 0 && deadbandUnits >= 0) }
+
+    /** Command part that actually moves the robot (above the low-speed dead band). */
+    private fun effective(linear: Int): Int = maxOf(0, abs(linear) - deadbandUnits)
 
     fun reset() { commands.clear(); fixes.clear(); safetyBaseline = null; progressRatio = null; slipping = false }
 
@@ -82,8 +92,8 @@ class LiftGuard(
         var expected = 0.0
         var cursor = from
         var speed = before.linear
-        for (c in during) { expected += abs(speed) * metersPerUnit * (c.at - cursor) / 1000.0; cursor = c.at; speed = c.linear }
-        expected += abs(speed) * metersPerUnit * (to - cursor) / 1000.0
+        for (c in during) { expected += effective(speed) * metersPerUnit * (c.at - cursor) / 1000.0; cursor = c.at; speed = c.linear }
+        expected += effective(speed) * metersPerUnit * (to - cursor) / 1000.0
         if (expected < minExpectedM) return null
         val observed = position.distance(reference.position)
         val progress = observed / expected
@@ -124,6 +134,8 @@ class LiftGuard(
         const val SLIP_FRACTION = 0.55
         const val SLIP_HISTORY = 40
         const val SLIP_MIN_SAMPLES = 6
+        /** Command units that barely move the LUBA 2 (≈ 60 measured, margin for grass and slopes). */
+        const val LOW_SPEED_DEADBAND = 100
         fun liftCode(code: Int): Boolean = abs(code) in LIFT_CODES
         fun liftLabel(code: Int): String = when (abs(code)) {
             1004 -> tr("tilt sensor activated", "capteur d'inclinaison activé")

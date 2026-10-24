@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "gw_blufi.h"
@@ -18,6 +19,8 @@ class Safety {
 
   void written(const Bytes &frame);   // frame successfully written to FF01
   void notified(const Bytes &frame);  // notification FF02
+  // Complete robot message (LubaMsg protobuf) reassembled from the notifications: autonomous tracking observer.
+  std::function<void(const Bytes &)> onMessage;
 
   bool bladesMayTurn() const;
   bool midMessage() const { return outgoing_.assembling(); }

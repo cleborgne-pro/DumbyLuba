@@ -6,7 +6,7 @@ BLE telemetry has no "lifted" field and no IMU data. `LiftGuard` (`diagnostics/L
 
 1. **Mammotion lift or tilt codes**: 1004, 1030, 2502, 2801, 11131, 11133 (PyMammotion table `error_codes.csv`). Stop if a movement or activity is in progress; otherwise just a `lift_reported` event.
 2. **Bits 3 to 8 of `sensor_status`** (undocumented, between bumper and blades): any change while moving stops the robot.
-3. **Wheels without progress**: linear command of constant sign, without a stop, over 2.5 s (offset by the 600 ms command delay), while the RTK position advances by less than 25 % of the expected distance (0.00095 m per unit). Minimum threshold: 20 cm expected, which ignores pivots, the slow approaches of the obstacle test and start-ups.
+3. **Wheels without progress**: linear command of constant sign, without a stop, over 2.5 s (offset by the 600 ms command delay), while the RTK position advances by less than 25 % of the expected distance (0.00095 m per unit, counted above a 100-unit low-speed dead band: below ≈ 60 units the LUBA 2 hardly moves, and up to about twice that it is much slower than the calibration). Minimum threshold: 20 cm expected, i.e. at least ≈ 185 units held 2.5 s, which ignores gentle joystick driving (2026-10-22: false "Wheels commanded without progress"), pivots, the slow approaches of the obstacle test and start-ups.
 
 When triggered: `lift_detected` event (source, `sensor_status`, position, state), critical alert "Robot lifted", then STOP at zero speed and end of the activity.
 

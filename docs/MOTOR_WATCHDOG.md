@@ -8,7 +8,7 @@ The app computes the route and sends every speed command itself (`DrvMotionCtrl`
 
 ## Procedure
 
-1. Preconditions (explicit refusal otherwise): LUBA 2 (`Luba-VS…`) ready (state 11), state younger than 2 s, battery > 30 %, no protection, bumper without alert, blades confirmed OFF, no other mission or test, fresh RTK FIX position, robot map read, **2.5 m clear in front of the robot**: in the same zone, more than half a width + 10 cm from the edge, outside no-go zones and local obstacles.
+1. Preconditions (explicit refusal otherwise): LUBA 2 (`Luba-VS…` or X series `Luba-VP…`) ready (state 11), state younger than 2 s, battery > 30 %, no protection, bumper without alert, blades confirmed OFF, no other mission or test, fresh RTK FIX position, robot map read, **2.5 m clear in front of the robot**: in the same zone, more than half a width + 10 cm from the edge, outside no-go zones and local obstacles.
 2. Tick **I am supervising on site, 2.5 m clear in front of the robot**, then hold **Hold for the test (≈ 10 s)**. **Forward**: **Forward speed** slider, raw speed 10–120 units in steps of 10, 30 by default, straight line, blades OFF, at least 3 s and ≥ 10 cm observed (otherwise failure after 6 s).
 3. **Silence**: no more motion commands at all (neither speed nor STOP). Synchronization and the report subscription continue; positions are requested every 200 ms (published at 1 Hz by the LUBA 2).
 4. **Verdict**:

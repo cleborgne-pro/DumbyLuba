@@ -20,6 +20,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import fr.luba.poc.map.RobotMap
+import fr.luba.poc.planning.FinishingOffer
+import fr.luba.poc.planning.FinishingPass
 import androidx.compose.ui.Modifier
 import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
@@ -28,6 +30,7 @@ import fr.luba.poc.ui.components.KeyValueRow
 import fr.luba.poc.ui.components.LubaDialog
 import fr.luba.poc.ui.components.NavRow
 import fr.luba.poc.ui.components.NoteTone
+import fr.luba.poc.ui.components.PrimaryPillButton
 import fr.luba.poc.ui.components.PushedPage
 import fr.luba.poc.ui.components.SecondaryPillButton
 import fr.luba.poc.ui.components.SettingsGroup
@@ -69,10 +72,12 @@ object MowingText {
 /** End-of-mowing report: actual figures compared with the estimate, battery measurements and effect on the next estimates. */
 @Composable
 fun MowingReportDialog(record: MowingRecord, history: List<MowingRecord>, onExcluded: (Boolean) -> Unit, onDismiss: () -> Unit,
-                       loadTrack: (suspend (String) -> TaskTrack?)? = null, fallbackMap: RobotMap? = null) {
+                       loadTrack: (suspend (String) -> TaskTrack?)? = null, fallbackMap: RobotMap? = null,
+                       onFinishing: ((FinishingOffer) -> Unit)? = null) {
     val comparison = remember(record) { MowingComparison.of(record) }
     val calibration = remember(history, record.robotId) { MowingCalibration.from(history, record.robotId) }
-    val score = loadTrack?.let { rememberMowingScore(record, it, fallbackMap) }
+    val analysis = loadTrack?.let { rememberMowingAnalysis(record, it, fallbackMap) }
+    val score = analysis?.score
     LubaDialog(onDismissRequest = onDismiss, title = tr("Mowing report", "Rapport de tonte"), content = {
         val extra = record.reason?.let { if (finishedReason(it, withRoute = false)) "" else " · ${reasonText(it)}" } ?: ""
         val cause = record.reason?.let(::reasonText) ?: tr("unknown cause", "cause inconnue")
@@ -82,6 +87,7 @@ fun MowingReportDialog(record: MowingRecord, history: List<MowingRecord>, onExcl
                 "Tonte interrompue à ${MowingText.percent(record.progress * 100)} : $cause")
             MowingOutcome.RUNNING -> tr("Mowing in progress", "Tonte en cours")
         }, when (record.outcome) { MowingOutcome.COMPLETE -> NoteTone.SUCCESS; MowingOutcome.INTERRUPTED -> NoteTone.WARNING; else -> NoteTone.INFO })
+        analysis?.finishing?.let { FinishingOfferGroup(it, onFinishing) }
         MowingReportContent(record, comparison, calibration, score)
         SettingsGroup {
             ToggleRow(tr("Use for estimates", "Utiliser pour les estimations"), !record.excluded, { onExcluded(!it) },
@@ -169,20 +175,46 @@ object ScoreText {
             if (score.realCoverage) "" else " Couverture réelle non mesurée : couverture estimée sur le trajet parcouru, chevauchements non comptés.")
 }
 
-/** Track, real coverage and score of a mowing, computed in the background (null while loading or for a survey). */
+/** Score of a mowing and finishing offered on its gaps ([FinishingPass.offer]), from the same real coverage. */
+internal data class MowingAnalysis(val score: MowingScore, val finishing: FinishingOffer?)
+
+/** Track, real coverage, score and finishing offer of a mowing, computed in the background (null while loading or for a survey). */
 @Composable
-internal fun rememberMowingScore(record: MowingRecord, loadTrack: suspend (String) -> TaskTrack?, fallbackMap: RobotMap?): MowingScore? {
-    var score by remember(record.id) { mutableStateOf<MowingScore?>(null) }
+internal fun rememberMowingAnalysis(record: MowingRecord, loadTrack: suspend (String) -> TaskTrack?, fallbackMap: RobotMap?): MowingAnalysis? {
+    var analysis by remember(record.id) { mutableStateOf<MowingAnalysis?>(null) }
     LaunchedEffect(record.id, record.outcome, record.endedAt) {
         if (record.kind != TaskKind.MOW) return@LaunchedEffect
         // Loaded from the calling thread (the positions not yet written live on the main thread), computed aside.
         val track = runCatching { loadTrack(record.id) }.getOrNull()
-        score = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        analysis = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val coverage = track?.let { runCatching { CoverageMap.of(it, fallbackMap) }.getOrNull() }
-            MowingScore.of(record, track, coverage)
+            val finishing = coverage?.let { c -> runCatching { FinishingPass.offer(record.id, c, record.outcome == MowingOutcome.COMPLETE) }.getOrNull() }
+            MowingAnalysis(MowingScore.of(record, track, coverage), finishing)
         }
     }
-    return score
+    return analysis
+}
+
+/** Track, real coverage and score of a mowing, computed in the background (null while loading or for a survey). */
+@Composable
+internal fun rememberMowingScore(record: MowingRecord, loadTrack: suspend (String) -> TaskTrack?, fallbackMap: RobotMap?): MowingScore? =
+    rememberMowingAnalysis(record, loadTrack, fallbackMap)?.score
+
+/**
+ * Finishing offered at the end of a mowing whose real coverage left gaps worth a short dedicated route
+ * ([FinishingPass]); [onFinishing] null: shown without the button (other robot, map not loaded).
+ */
+@Composable
+internal fun FinishingOfferGroup(offer: FinishingOffer, onFinishing: ((FinishingOffer) -> Unit)?) {
+    SettingsGroup(tr("Finishing", "Finition")) {
+        KeyValueRow(tr("Left unmowed", "Reste à tondre"), tr("${CoverageText.area(offer.areaM2)} in ${offer.count} gap${if (offer.count > 1) "s" else ""}",
+            "${CoverageText.area(offer.areaM2)} en ${offer.count} manque${if (offer.count > 1) "s" else ""}"))
+        InfoNote(tr("A short route mows only these gaps, with a lap on their edges, instead of mowing the zones again. Prepared and started from Service → Trial mowing, with the same checks as a mowing.",
+            "Un trajet court ne tond que ces manques, avec un tour sur leurs bords, au lieu de retondre les zones. Préparé et lancé depuis Service → Tonte d'essai, avec les mêmes contrôles qu'une tonte."))
+        if (onFinishing != null) PrimaryPillButton(tr("Prepare the finishing", "Préparer la finition"), { onFinishing(offer) }, Modifier.fillMaxWidth())
+        else InfoNote(tr("Connect the robot of this mowing with its complete map to prepare the finishing.",
+            "Connectez le robot de cette tonte avec sa carte complète pour préparer la finition."))
+    }
 }
 
 /** Two mowings side by side: settings, duration, recharges, coverage and score, factor by factor. */

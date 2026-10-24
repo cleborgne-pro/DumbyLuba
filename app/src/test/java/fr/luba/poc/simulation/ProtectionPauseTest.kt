@@ -49,4 +49,16 @@ class ProtectionPauseTest {
         val forbidden = runCatching { ProtectionPause.Wait(0).update(1_000, 11, 23) }.exceptionOrNull()
         assertTrue("$forbidden", forbidden is IllegalStateException && forbidden.message!!.contains("app Mammotion"))
     }
+
+    /** Weak satellite signal (41) and the other positioning conditions: waited up to 5 min, not 30 s. */
+    @Test fun positioningConditionIsWaitedLonger() {
+        assertEquals(ProtectionPause.POSITIONING_WAIT_MS, ProtectionPause.waitMs(41))
+        assertEquals(ProtectionPause.WAIT_MS, ProtectionPause.waitMs(25))
+        val wait = ProtectionPause.Wait(startedAt = 0)
+        assertFalse(wait.update(4 * 60_000, 20, 41))
+        assertFalse(wait.update(4 * 60_000 + 500, 11, 10))
+        assertTrue(wait.update(4 * 60_000 + 3_500, 11, 10))
+        val lost = runCatching { ProtectionPause.Wait(0).update(ProtectionPause.POSITIONING_WAIT_MS, 11, 41) }.exceptionOrNull()
+        assertTrue("$lost", lost is IllegalStateException && lost.message!!.contains("300 s"))
+    }
 }

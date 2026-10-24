@@ -144,7 +144,7 @@ fun RobotPanel(
         if (uri != null) robot.export(uri, archive = true, anonymize = false)
     }
 
-    if (page == ServicePage.HUB) { ServiceHub(state, modifier, onTabChange); return }
+    if (page == ServicePage.HUB) { ServiceHub(robot, state, modifier, onTabChange); return }
 
     // Guards shared by the tests: connection and no robot mission running.
     val busy = state.robotRoute.running || state.manualActive || state.mowing.active || state.navTest.running ||
@@ -266,7 +266,7 @@ private fun TelemetryPage(state: RobotUi, back: () -> Unit, modifier: Modifier) 
         }
         SettingsGroup(tr("Status", "État")) {
             KeyValueRow(tr("Robot state (code)", "État robot (code)"), t.robotState?.toString() ?: "—")
-            KeyValueRow(tr("Self-check", "Autotest"), t.selfCheck?.toString() ?: "—")
+            KeyValueRow(tr("Self-check", "Autotest"), t.selfCheck?.let { v -> fr.luba.poc.protocol.SelfCheck.name(v)?.let { "$v · $it" } ?: v.toString() } ?: "—")
             KeyValueRow(tr("Sensors (code)", "Capteurs (code)"), t.sensorStatus?.toString() ?: "—")
             KeyValueRow(tr("Blades", "Lames"), t.sensorStatus?.let { if ((it shr 9) and 7 == 0) tr("stopped", "arrêtées") else tr("non-zero state", "état non nul") } ?: tr("unknown", "inconnu"))
         }
@@ -313,7 +313,7 @@ private fun AdvancedPage(robot: RobotBle, state: RobotUi, back: () -> Unit, modi
 
 /** Summary: robot card (opens the connection), then five groups by intent, from everyday use to diagnostics. */
 @Composable
-private fun ServiceHub(state: RobotUi, modifier: Modifier, open: (String) -> Unit) {
+private fun ServiceHub(robot: RobotBle, state: RobotUi, modifier: Modifier, open: (String) -> Unit) {
     val colors = MammotionColors
     val context = androidx.compose.ui.platform.LocalContext.current
     val gateway by fr.luba.poc.gateway.GatewayService.status.collectAsStateWithLifecycle()
@@ -363,6 +363,8 @@ private fun ServiceHub(state: RobotUi, modifier: Modifier, open: (String) -> Uni
         }
         // Read-only mode of a model that is not validated (docs/features/supported-models.md).
         fr.luba.poc.protocol.ModelSupport.readOnlyNote(robotName, model.label)?.let { StatusNote(it, NoteTone.WARNING) }
+        // Owner of such a model: the three supervised tests that can validate it.
+        ModelTrialGroup(robot, state, model.label, open)
         // Groups by intent; one-line subtitles, status on the right only when useful.
         SettingsGroup(tr("Connection", "Connexion")) {
             Entry(ServicePage.CONNECTION, Icons.Rounded.Bluetooth, tr("Search, connect, disconnect", "Rechercher, connecter, déconnecter"))

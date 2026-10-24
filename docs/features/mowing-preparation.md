@@ -143,7 +143,7 @@ Jardin d'Eden, Aire de jeux and Piscine; test `ZigzagBehindLoopTest`).
 - Preview map (drag, pinch to zoom, rotate with two fingers; **Zoom out** / **Zoom in** with the zoom factor and
   **Recenter the map** at the top right): white = mowing route and border loops (the latter on a lighter edging that
   shows the margin along boundaries and around no-go zones), numbers = zone order, purple **Start** marker = first
-  cutting point, blue dot = requested start point (chosen or saved). The route is traced progressively in mowing
+  cutting point, with an arrow giving the direction the robot sets off in along its first pass, blue dot = requested start point (chosen or saved). The route is traced progressively in mowing
   order once computed (instant when Android animations are off). "N border fragment(s) too narrow to maneuver: not
   driven." flags skipped border loops.
 - **Start point** group: *Start* shows "Nearest to the robot", "Saved for <zone>" or "Chosen on the map · <zone>".

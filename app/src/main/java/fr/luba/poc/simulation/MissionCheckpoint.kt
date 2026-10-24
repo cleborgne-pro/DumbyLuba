@@ -49,12 +49,25 @@ data class MissionCheckpoint(
     val bladeZones: List<List<Point>>? = null,
     /** Base used to prepare the start plan; null: older save. */
     val base: MapBase? = null,
+    /**
+     * Smart resume ([SmartResume]): end of the portion in progress (null: end of the plan), portions still to mow
+     * afterwards in that order, and blocked pose if the portion in progress is a retry deferred by a blockage.
+     * Without them, the progress is linear (everything after [edge]/[point]).
+     */
+    val activeEnd: PlanPos? = null,
+    val deferred: List<MissionSpan> = emptyList(),
+    val activeBlocked: Point? = null,
 ) {
     init {
         require(edge in 0..edgeCount && heightMm in fr.luba.poc.protocol.CutHeightRange.ANY && totalMeters >= 0 && doneMeters >= 0 && skippedMeters >= 0)
         require(point == null || (point.x.isFinite() && point.y.isFinite()))
         require(bladeZones == null || bladeZones.all { zone -> zone.all { it.x.isFinite() && it.y.isFinite() } })
+        require(activeEnd == null || activeEnd.edge <= edgeCount)
+        require(deferred.all { it.from.edge <= edgeCount && it.to.edge <= edgeCount })
+        require(activeBlocked == null || (activeBlocked.x.isFinite() && activeBlocked.y.isFinite()))
     }
+    /** Progress without reordering: everything after [edge]/[point] remains, in the prepared order. */
+    val linear: Boolean get() = activeEnd == null && deferred.isEmpty()
     val progress: Double get() = if (totalMeters <= 0) 0.0 else (doneMeters / totalMeters).coerceIn(0.0, 1.0)
     /**
      * Re-preparation base: the start one if [current] is the same station, moved by at most
@@ -351,6 +364,10 @@ class MissionCheckpointStore(private val directory: File) {
             .put("base", value.base?.let { b -> JSONObject().put("x", b.point.x).put("y", b.point.y).put("origin", b.origin)
                 .put("influenceRadiusM", b.influenceRadiusM ?: JSONObject.NULL).put("entryHeadingDegrees", b.entryHeadingDegrees ?: JSONObject.NULL)
                 .put("approachDistanceM", b.approachDistanceM) } ?: JSONObject.NULL)
+            .put("activeEnd", value.activeEnd?.let(::encodePos) ?: JSONObject.NULL)
+            .put("deferred", JSONArray().also { a -> value.deferred.forEach { s -> a.put(JSONObject().put("from", encodePos(s.from))
+                .put("to", encodePos(s.to)).put("blockedAt", s.blockedAt?.let(::encodePoint) ?: JSONObject.NULL)) } })
+            .put("activeBlocked", value.activeBlocked?.let(::encodePoint) ?: JSONObject.NULL)
         val target = file(value.robotId)
         val tmp = File(target.path + ".tmp")
         tmp.outputStream().use { it.write(json.toString().toByteArray()); it.fd.sync() }
@@ -372,8 +389,18 @@ class MissionCheckpointStore(private val directory: File) {
             j.optJSONArray("bladeZones")?.let(PreviewJson::readPaths),
             j.optJSONObject("base")?.let { b -> runCatching { MapBase(Point(b.getDouble("x"), b.getDouble("y")), b.getString("origin"),
                 if (b.isNull("influenceRadiusM")) null else b.getDouble("influenceRadiusM"),
-                if (b.isNull("entryHeadingDegrees")) null else b.getDouble("entryHeadingDegrees"), b.getDouble("approachDistanceM")) }.getOrNull() })
+                if (b.isNull("entryHeadingDegrees")) null else b.getDouble("entryHeadingDegrees"), b.getDouble("approachDistanceM")) }.getOrNull() },
+            // Reordered progress (smart resume); absent from older saves: linear progress.
+            j.optJSONObject("activeEnd")?.let(::decodePos),
+            j.optJSONArray("deferred")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { s ->
+                MissionSpan(decodePos(s.getJSONObject("from")), decodePos(s.getJSONObject("to")), s.optJSONObject("blockedAt")?.let(::decodePoint)) } } }.orEmpty(),
+            j.optJSONObject("activeBlocked")?.let(::decodePoint))
     }.getOrNull()
+
+    private fun encodePoint(p: Point) = JSONObject().put("x", p.x).put("y", p.y)
+    private fun decodePoint(j: JSONObject) = Point(j.getDouble("x"), j.getDouble("y"))
+    private fun encodePos(p: PlanPos) = JSONObject().put("edge", p.edge).put("point", p.point?.let(::encodePoint) ?: JSONObject.NULL)
+    private fun decodePos(j: JSONObject) = PlanPos(j.getInt("edge"), j.optJSONObject("point")?.let(::decodePoint))
 
     @Synchronized fun delete(id: String) { file(id).delete() }
 }
@@ -382,10 +409,27 @@ class MissionCheckpointStore(private val directory: File) {
  * Resume requested for a route: start point in the prepared mowing edges. [overlap]: start again
  * [MissionProgress.OVERLAP_M] before the point (resume at the stop point); without overlap for "Resume further on".
  */
-data class MissionResume(val edge: Int, val point: Point?, val overlap: Boolean = true)
+data class MissionResume(val edge: Int, val point: Point?, val overlap: Boolean = true,
+                         /** Reordered remainder ([SmartResume]): end of the first portion (null: end of the plan) and the following portions. */
+                         val activeEnd: PlanPos? = null, val deferred: List<MissionSpan> = emptyList(), val activeBlocked: Point? = null) {
+    val linear: Boolean get() = activeEnd == null && deferred.isEmpty()
+    /** Portions in route order (the first one from [edge]/[point]). */
+    fun spans(edgeCount: Int): List<MissionSpan> =
+        listOf(MissionSpan(PlanPos(edge, point), activeEnd ?: PlanPos(edgeCount), activeBlocked)) + deferred
 
-/** Mapping between the edges sent to the robot and the prepared mowing edges. */
-data class MissionEdges(val edges: List<SimEdge>, val mowingFrom: Int, val mowingTo: Int, val engineFrom: Int) {
-    /** Prepared edge followed at route index [index], or null outside mowing (departure link, return). */
-    fun engineEdge(index: Int): Int? = if (index in mowingFrom until mowingTo) engineFrom + (index - mowingFrom) else null
+    companion object {
+        /** Resume of [checkpoint] at its saved progress (reordered portions included). */
+        fun of(checkpoint: MissionCheckpoint, overlap: Boolean = true) =
+            MissionResume(checkpoint.edge, checkpoint.point, overlap, checkpoint.activeEnd, checkpoint.deferred, checkpoint.activeBlocked)
+    }
+}
+
+/**
+ * Mapping between the edges sent to the robot and the prepared mowing edges. [engineIndex]: prepared edge of each
+ * route edge from [mowingFrom] (-1: link between reordered portions); null: contiguous from [engineFrom].
+ */
+data class MissionEdges(val edges: List<SimEdge>, val mowingFrom: Int, val mowingTo: Int, val engineFrom: Int, val engineIndex: List<Int>? = null) {
+    /** Prepared edge followed at route index [index], or null outside mowing (departure link, return, links between portions). */
+    fun engineEdge(index: Int): Int? = if (index !in mowingFrom until mowingTo) null
+        else engineIndex?.let { it.getOrNull(index - mowingFrom)?.takeIf { e -> e >= 0 } } ?: if (engineIndex == null) engineFrom + (index - mowingFrom) else null
 }

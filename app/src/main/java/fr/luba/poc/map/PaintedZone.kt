@@ -120,8 +120,9 @@ object PaintedZone {
         listOf(p.exteriorRing) + (0 until p.numInteriorRing).map { p.getInteriorRingN(it) }
     }.map { ring -> ring.coordinates.dropLast(1).map { Point(it.x, it.y) } }.filter { it.size >= 3 }
 
-    /** Temporary zones ordered from the start to the farthest (nearest neighbour). */
-    fun zones(map: RobotMap, pieces: List<List<Point>>, start: Point): List<MapShape> {
+    /** Temporary zones ordered from the start to the farthest (nearest neighbour), named by [label] (1-based). */
+    fun zones(map: RobotMap, pieces: List<List<Point>>, start: Point,
+              label: (Int) -> String = { tr("Test zone $it", "Zone test $it") }): List<MapShape> {
         val used = map.shapes.map { it.id }.toSet()
         val ids = generateSequence(FIRST_ID) { it - 1 }.filter { it !in used }.iterator()
         val remaining = pieces.toMutableList()
@@ -133,7 +134,7 @@ object PaintedZone {
             val center = polygon(next).interiorPoint
             from = Point(center.x, center.y)
         }
-        return ordered.mapIndexed { index, points -> MapShape(ids.next(), 0, points, tr("Test zone ${index + 1}", "Zone test ${index + 1}")) }
+        return ordered.mapIndexed { index, points -> MapShape(ids.next(), 0, points, label(index + 1)) }
     }
 
     /**
@@ -147,17 +148,19 @@ object PaintedZone {
 
     /**
      * Same preparation for a target [area] in map metres, e.g. the gaps of a real coverage
-     * ([fr.luba.poc.history.CoverageMap.gapArea]): only its part inside the zones is mowed.
+     * ([fr.luba.poc.history.CoverageMap.gapArea], see [fr.luba.poc.planning.FinishingPass]): only its part inside the
+     * zones is mowed; [label] names the temporary zones.
      */
     fun prepare(map: RobotMap, area: JtsGeometry, start: Point, base: MapBase, accesses: List<List<Point>>,
                 obstacles: List<LocalObstacle>, spacingM: Double, borders: Boolean, speedMps: Double,
-                checkpoint: () -> Unit = {}, progress: (String) -> Unit = {}): PaintedMission {
+                checkpoint: () -> Unit = {}, progress: (String) -> Unit = {},
+                label: (Int) -> String = { tr("Test zone $it", "Zone test $it") }): PaintedMission {
         require(map.complete && !map.source.contains("DÉMONSTRATION", true)) { tr("A complete real map is required", "Carte réelle complète obligatoire") }
         requireNotNull(base.entryHeadingDegrees) { tr("Base axis unknown: observe the robot while charging", "Axe de la base inconnu : observer le robot en charge") }
         // Start nearest to the robot (nearest free point if it stopped inside a reserve).
         val routes = RoutePlanning.mission(map, obstacles, accesses, base)
         val from = RoutePlanning.missionStart(routes, start, docked = false, base = base.point) ?: base.point
-        val zones = zones(map, pieces(map, area), from)
+        val zones = zones(map, pieces(map, area), from, label)
         require(zones.isNotEmpty()) { tr("No painted area inside the zones (minimum ${MIN_PIECE_M2} m²)", "Aucune surface peinte à l'intérieur des zones (minimum ${MIN_PIECE_M2} m²)") }
         val planningMap = map.copy(shapes = map.shapes + zones)
         val config = PlanningConfig(spacingM = spacingM, marginM = 0.6, cutWidthM = Geometry.CUT_WIDTH_M, minimumCoverage = MIN_COVERAGE,

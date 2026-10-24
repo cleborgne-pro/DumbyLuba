@@ -8,7 +8,7 @@ observed deviations correct the following estimates.
 | | |
 |---|---|
 | **Access** | Map → **History** (latest tasks); Service → Garden and history → **Task history**; report shown at the end of mowing |
-| **Status** | Implemented and covered by JVM tests (`MowingHistoryTest`, `TaskTrackTest`, `TaskJournalTest`, `BlackBoxTest`, `MowingScoreTest`, `TaskHistoryTextTest`, `RouteDeviationTest`, `CoverageMapTest`, `HistoryComposeTest`, `MowingEstimateTest`, `FinishPolicyTest`; screenshots `UiShotsHistoriqueTest`); replay to be validated on long real mowings |
+| **Status** | Implemented and covered by JVM tests (`MowingHistoryTest`, `TaskTrackTest`, `TaskJournalTest`, `BlackBoxTest`, `MowingScoreTest`, `TaskHistoryTextTest`, `RouteDeviationTest`, `CoverageMapTest`, `HistoryComposeTest`, `MowingEstimateTest`, `FinishPolicyTest`, `FinishingPassTest`; screenshots `UiShotsHistoriqueTest`); replay to be validated on long real mowings |
 | **Code** | `history/MowingHistory.kt` (measurement, comparison, calibration, storage), `history/TaskTrack.kt` (timestamped track, sorting, storage), `history/TaskEvent.kt` (typed task journal), `history/BlackBox.kt` (incident black boxes), `history/TaskExport.kt` (export), `history/TaskHistoryUi.kt` (latest tasks sheet, detail, replay), `history/CoverageMap.kt` and `history/RealCoverage.kt` (real coverage), `history/MowingScore.kt` (Mowing Score), `history/MowingHistoryUi.kt` (report, score, comparison, Task history page), `ble/RobotBle.kt` (`historyBegin`, `trackBegin`, `historyEnd`) |
 
 ## What is recorded
@@ -280,6 +280,27 @@ after it, and the mowing bar shows "Covered x %" ([real mowing](real-mowing.md))
 metres that the planner accepts as a target, like a painted area (`CoverageMap.gapArea` →
 `PaintedZone.prepare`): technical details in [REAL_COVERAGE.md](../REAL_COVERAGE.md). A track recorded before this
 version has no task zones: all the zones of its map are measured.
+
+## Finishing of the gaps
+
+When a finished mowing leaves at least **1 m²** unmowed (and no more than 30 % of its zones: beyond, resume or mow
+again), the end-of-mowing report and the task sheet show a **Finishing** group: **Left unmowed** "3.2 m² in 4 gaps" and
+**Prepare the finishing**. The button is offered for the connected robot of that mowing with its complete map;
+otherwise a note asks to connect it.
+
+**Prepare the finishing** closes the report and opens Service → **Trial mowing** targeting those gaps (orange outlines)
+instead of a painted zone; **Paint a zone instead** goes back to painting. **Compute** plans a short route: each gap is
+widened 20 cm over the mowed grass so that a lap runs on its edge and the passes cover it, even about 1 m wide; along a
+zone boundary the lap is the usual border lap. The **Finishing of the gaps** group then shows:
+
+| Row | Meaning |
+|---|---|
+| **Route** | length of the whole route and its share of a new mowing of the zones ("79 m · 12 % of a new mowing (636 m)") |
+| **Robot envelope** | every cutting pass checked with the LUBA 2 footprint inside the safe surface of the robot map |
+
+The route is refused when a pass leaves the safe surface or when it exceeds half a new mowing ("Finishing refused: …;
+mow the zones again"). It then runs like any trial mowing: supervision box, blades, protections, return to base and
+resume from the map. Details in [REAL_COVERAGE.md](../REAL_COVERAGE.md#finishing).
 
 ## Limitations
 

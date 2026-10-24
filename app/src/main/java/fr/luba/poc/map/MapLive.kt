@@ -60,6 +60,8 @@ fun MapLive(
     trail: List<Point> = emptyList(),
     start: Point? = null,
     routeStart: Point? = null,
+    /** Point along the initial direction of the route ([routeStartAhead]): arrow at [routeStart]. */
+    routeStartAhead: Point? = null,
     planned: List<Point> = emptyList(),
     plannedBands: List<List<Point>> = emptyList(),
     plannedBorders: List<List<Point>> = emptyList(),
@@ -227,7 +229,7 @@ fun MapLive(
                 style = Stroke(3.dp.toPx() / lineScale, cap = StrokeCap.Round, join = StrokeJoin.Round),
             )
         }
-        routeStart?.let { drawRouteStart(screen(it), lineScale, camera.rotation.toFloat()) }
+        routeStart?.let { drawRouteStart(screen(it), lineScale, camera.rotation.toFloat(), toward = routeStartAhead?.let(::screen)) }
         start?.let { drawCircle(colors.RobotMarker.copy(alpha = 0.6f), 4.dp.toPx() / lineScale, screen(it)) }
         signalCells.forEach { cell ->
             drawRect(signalColor(cell),screen(Point(cell.point.x-0.5,cell.point.y+0.5)),
@@ -323,21 +325,36 @@ internal class LiveGeometry {
     private fun combine(map: RobotMap, zones: Set<Long>?): Path {
         var area = Path()
         map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 && (zones.isNullOrEmpty() || it.id in zones) }
-            .forEach { area = Path.combine(PathOperation.Union, area, build(it.points, true)) }
+            .forEach { area = combineOrKeep(PathOperation.Union, area, build(it.points, true)) }
         map.shapes.filter { it.kind == ShapeKind.NO_GO && it.points.size >= 3 }
-            .forEach { area = Path.combine(PathOperation.Difference, area, build(it.points, true)) }
+            .forEach { area = combineOrKeep(PathOperation.Difference, area, build(it.points, true)) }
         if (surfaces.size > 8) surfaces.clear()
         return area
     }
 
+    /**
+     * Skia refuses some boolean operations (non-finite point, nearly coincident edges at a given framing) and Compose
+     * then throws from the draw pass, which killed the app in the middle of a route (Fold, 2026-10-22). The clip is
+     * only cosmetic: the failing shape is left out (union) or not subtracted (no-go), never a crash.
+     */
+    private fun combineOrKeep(operation: PathOperation, area: Path, shape: Path): Path {
+        if (shape.isEmpty) return area
+        val out = Path()
+        return if (out.op(area, shape, operation)) out else if (operation == PathOperation.Union && area.isEmpty) shape else area
+    }
+
+    /** Projected path; a non-finite point (NaN/infinite) is skipped instead of reaching Skia. */
     private fun build(points: List<Point>, close: Boolean): Path {
         val projection = fit ?: return Path()
         val out = Path()
-        points.forEachIndexed { i, p ->
+        var first = true
+        points.forEach { p ->
             val o = projection.screen(p)
-            if (i == 0) out.moveTo(o.x, o.y) else out.lineTo(o.x, o.y)
+            if (!o.x.isFinite() || !o.y.isFinite()) return@forEach
+            if (first) out.moveTo(o.x, o.y) else out.lineTo(o.x, o.y)
+            first = false
         }
-        if (close) out.close()
+        if (close && !first) out.close()
         return out
     }
 }

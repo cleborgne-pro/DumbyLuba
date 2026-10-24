@@ -12,8 +12,6 @@ constexpr int DRV_KNIFE_HEIGHT_SET = 2, DRV_KNIFE_HEIGHT_REPORT = 4, DRV_MOW_BY_
 constexpr int SYS_KNIFE_CTRL = 22, SYS_REPORT_DATA = 39;
 constexpr int REPORT_DEV = 2, REPORT_WORK = 5;
 constexpr int DEV_SENSOR_STATUS = 4, WORK_KNIFE_HEIGHT = 20;
-
-bool validHeight(int mm) { return mm >= 25 && mm <= 70; }
 }  // namespace
 
 void Safety::written(const Bytes &frame) {
@@ -36,11 +34,11 @@ void Safety::readCommand(const Bytes &payload) {
     if (pb::findMessage(sub, n, DRV_MOW_BY_HAND, m, mn)) {
       commandedBlades_ = pb::intField(m, mn, 2) == 1;  // cut_knife_ctrl
       const int h = pb::intField(m, mn, 3);           // cut_knife_height
-      if (validHeight(h)) commandedHeightMm_ = h;
+      if (validCutHeight(h)) commandedHeightMm_ = h;
     }
     if (pb::findMessage(sub, n, DRV_KNIFE_HEIGHT_SET, m, mn)) {
       const int h = pb::intField(m, mn, 1);
-      if (validHeight(h)) commandedHeightMm_ = h;
+      if (validCutHeight(h)) commandedHeightMm_ = h;
     }
   }
   if (pb::findMessage(payload.data(), payload.size(), LUBA_SYS, sub, n)) {
@@ -55,6 +53,7 @@ void Safety::notified(const Bytes &frame) {
   if (incoming_.receive(frame.data(), frame.size(), payload) != Blufi::COMPLETE) return;
   if (!payload.empty() && payload[0] == '{') return;  // legacy JSON
   readTelemetry(payload);
+  if (onMessage) onMessage(payload);
 }
 
 void Safety::readTelemetry(const Bytes &payload) {
@@ -65,11 +64,11 @@ void Safety::readTelemetry(const Bytes &payload) {
     size_t mn;
     if (pb::findMessage(sub, n, DRV_KNIFE_HEIGHT_REPORT, m, mn)) {
       const int h = pb::intField(m, mn, 1);
-      if (validHeight(h)) telemetryHeightMm_ = h;
+      if (validCutHeight(h)) telemetryHeightMm_ = h;
     }
     if (pb::findMessage(sub, n, DRV_KNIFE_CHANGE, m, mn)) {
       const int h = pb::intField(m, mn, 4);  // cur_height
-      if (validHeight(h)) telemetryHeightMm_ = h;
+      if (validCutHeight(h)) telemetryHeightMm_ = h;
     }
   }
   if (pb::findMessage(payload.data(), payload.size(), LUBA_SYS, sub, n)) {
@@ -80,7 +79,7 @@ void Safety::readTelemetry(const Bytes &payload) {
       size_t mn;
       if (pb::findMessage(report, rn, REPORT_WORK, m, mn)) {
         const int h = pb::intField(m, mn, WORK_KNIFE_HEIGHT);
-        if (validHeight(h)) telemetryHeightMm_ = h;
+        if (validCutHeight(h)) telemetryHeightMm_ = h;
       }
       if (pb::findMessage(report, rn, REPORT_DEV, m, mn)) sensorStatus_ = pb::intField(m, mn, DEV_SENSOR_STATUS);
     }

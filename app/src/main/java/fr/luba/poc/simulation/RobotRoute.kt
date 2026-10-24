@@ -137,10 +137,12 @@ object RobotRoute {
             .map { (a,b) -> SimEdge(a,b,false) }
         fun headingOf(edge: SimEdge) = Math.toDegrees(kotlin.math.atan2(edge.b.y-edge.a.y,edge.b.x-edge.a.x))
         val dockHeading=(engine.dockEntryHeading+180)%360
-        val mowing = if (resume == null) engine.edges else MissionProgress.remaining(engine.edges,resume.edge,resume.point,resume.overlap)
+        // Reordered remainder ([SmartResume]): portions in their order, joined by blades-OFF links on the navigation.
+        val reordered = resume?.takeUnless { it.linear }?.let { r -> spanRoute(engine, r) }
+        val mowing = reordered?.first ?: if (resume == null) engine.edges else MissionProgress.remaining(engine.edges,resume.edge,resume.point,resume.overlap)
         require(mowing.any { it.cutting } || resume == null) { tr("No mowing left: use return to base", "Aucune tonte restante : utiliser le retour à la base") }
         require(mowing.isNotEmpty()) { tr("Empty route", "Trajet vide") }
-        val engineFrom = if (resume == null) 0 else engine.edges.size - mowing.size
+        val engineFrom = if (resume == null) 0 else reordered?.second?.firstOrNull { it >= 0 } ?: (engine.edges.size - mowing.size)
         val leaving = departure(engine.routes,physical,start,heading,mowing.first().a,headingOf(mowing.first()))
         val back = transit(engine.routes.between(mowing.last().b,engine.baseApproach,headingOf(mowing.last()),dockHeading))
         val rest = mowing + back
@@ -150,7 +152,27 @@ object RobotRoute {
         val fromHeading = leaving.lastOrNull { it.escape }?.let(::headingOf) ?: heading
         engine.routes.requirePath(listOf(from)+(joined+rest).map { it.b },fromHeading,dockHeading)
         requireOutsideBaseZone(engine.routes, leaving + rest)
-        return MissionEdges(leaving + rest, leaving.size, leaving.size + mowing.size, engineFrom)
+        return MissionEdges(leaving + rest, leaving.size, leaving.size + mowing.size, engineFrom, reordered?.second)
+    }
+
+    /**
+     * Edges of a reordered remainder ([MissionResume.spans]) and, for each one, its prepared edge (-1: link between two
+     * portions, blades OFF, computed on the mission navigation like the departure and return links).
+     */
+    fun spanRoute(engine: MowingSimulation, resume: MissionResume): Pair<List<SimEdge>, List<Int>> {
+        fun headingOf(edge: SimEdge) = Math.toDegrees(kotlin.math.atan2(edge.b.y-edge.a.y,edge.b.x-edge.a.x))
+        val edges = mutableListOf<SimEdge>(); val index = mutableListOf<Int>()
+        resume.spans(engine.edges.size).forEachIndexed { k, span ->
+            val piece = SmartResume.spanEdges(engine.edges, span, overlap = resume.overlap || k > 0)
+            if (piece.isEmpty()) return@forEachIndexed
+            edges.lastOrNull()?.let { last ->
+                val first = piece.first().second
+                engine.routes.between(last.b, first.a, headingOf(last), headingOf(first)).zipWithNext()
+                    .filter { (a,b) -> a.distance(b)>1e-8 }.forEach { (a,b) -> edges += SimEdge(a,b,false); index += -1 }
+            }
+            piece.forEach { (i, e) -> edges += e; index += i }
+        }
+        return edges to index
     }
 }
 

@@ -250,7 +250,11 @@ and the gateway stays "Waiting for the pilot phone" (previously it wrongly showe
 
 A **LILYGO TTGO T-Call V1.3** board replaces the phone with the **same protocol**: the pilot stays in "Control via the
 gateway". Differences: no autonomous tracking (frame-by-frame control), no accelerometer and therefore no terrain,
-reduced health (battery level and power supply).
+reduced health (battery level and power supply), no QR code (no screen: the serial console command `pair` prints the
+same pairing link, to open on the pilot phone). Like the Android gateway, it lists every Mammotion mower, keeps the
+cutting height of every model (20 to 100 mm, H versions included) in the blades OFF of its safety stop, reports a
+Bluetooth search it cannot run ("Bluetooth scanner unavailable") instead of an empty list, and sends its refusals and
+stop reports with the same protocol texts, shown in the pilot's language.
 
 **Over-the-air update** (firmware 0.2.0): `pio run -e ota -t upload` from the computer. Pilot-side setting, Service →
 Wi-Fi gateway → *ESP32 gateway updates* → **Updates during mowing** (off by default), sent to the gateway on every
@@ -267,8 +271,7 @@ own. Installation: see the [firmware README](../../firmware/esp32-gateway/README
 
 ## Limitations
 
-- Read-only mode: the gateway lists every Mammotion mower (Android gateway; the ESP32 still lists only `Luba…`
-  names), but autonomous tracking is only offered for the validated LUBA 2 AWD and the Android gateway refuses a leg for
+- Read-only mode: the gateway lists every Mammotion mower (Android and ESP32 gateways), but autonomous tracking is only offered for the validated LUBA 2 AWD and the Android gateway refuses a leg for
   a known robot name that is not validated ([supported models](supported-models.md)).
 - Latency mostly comes from the **gateway phone's Wi-Fi** (screen off, Wi-Fi/Bluetooth coexistence, weak signal in the
   garden): moving the access point closer or adding a repeater remains the best remedy.

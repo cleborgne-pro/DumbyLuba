@@ -12,8 +12,8 @@ import kotlin.math.roundToLong
 
 /*
  * Border types: each portion of a zone or no-go boundary can be marked OPEN, CURB, WALL or DANGER. This is the base of
- * the border, speed and precision strategies; for now the types are annotated, saved and drawn (no effect on the route
- * computation yet).
+ * the border, speed and precision strategies: the border lap and the pass ends follow [BorderStrategy], the transits
+ * keep away from DANGER portions ([fr.luba.poc.simulation.TrajectoryPlanner.dangerClearance]).
  *
  * An annotation keeps the **geometry** of its portion (polyline along the boundary, in map meters), not point indices:
  * when the boundary changes (map read again, zone recorded again, local correction), the portion is reprojected onto the
@@ -246,6 +246,10 @@ object BorderTypes {
         return contours(map).flatMap { portionsOf(it, resolved) }
     }
 
+    /** Polylines of the DANGER portions of [map] (kept away from the transits). */
+    fun dangerLines(map: RobotMap, annotations: List<BorderAnnotation>): List<List<Point>> =
+        portions(map, annotations).filter { it.type == BorderType.DANGER && it.points.size >= 2 }.map { it.points }
+
     /** Type of the boundary [shapeId] at the point [p] (projected onto it), or null if this part is not typed. */
     fun typeAt(map: RobotMap, annotations: List<BorderAnnotation>, shapeId: Long, p: Point): BorderType? {
         val shape = contours(map).firstOrNull { it.id == shapeId } ?: return null
@@ -374,6 +378,10 @@ object BorderTypeRepository {
         memo = Triple(map, list, p)
         return p
     }
+
+    /** DANGER portions of [map] ([BorderTypes.dangerLines]), empty without annotation. */
+    fun dangerLines(map: RobotMap): List<List<Point>> =
+        portions(map).filter { it.type == BorderType.DANGER && it.points.size >= 2 }.map { it.points }
 
     /** Reset for tests: memory only ([d] null) or a temporary directory. */
     internal fun resetForTest(list: List<BorderAnnotation> = emptyList(), d: File? = null) {

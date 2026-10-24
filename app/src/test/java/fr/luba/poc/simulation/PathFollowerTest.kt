@@ -22,6 +22,24 @@ class PathFollowerTest {
         assertTrue(start.distance(command.target) > 0.3)
     }
 
+    @Test fun `aligned first, a still robot faces a line it would otherwise join in an arc`() {
+        // Map sync join of 2026-10-24: 23° to turn, under the 25° pivot threshold; the arc swung the chassis towards
+        // the no-go zone the line ends next to.
+        val heading = Math.toDegrees(atan2(0.28, 0.65))
+        val edges = listOf(SimEdge(Point(0.0, 0.0), Point(0.65, 0.28), false))
+        val arc = PathFollower(edges, 0, 1, 0.05).command(Point(0.0, 0.0), 0.0, 150, 263)
+        assertTrue("arc expected without the alignment: $arc", arc.linear > 0 && arc.angular > 0)
+        val aligned = PathFollower(edges, 0, 1, 0.05).apply { alignFirst() }
+        val pivot = aligned.command(Point(0.0, 0.0), 0.0, 150, 263)
+        assertEquals(0, pivot.linear); assertTrue(pivot.angular > 0); assertTrue(aligned.pivoting)
+        // Faced within the exit threshold: straight on, no further pivot.
+        val forward = aligned.command(Point(0.0, 0.0), heading - 2.0, 150, 263)
+        assertTrue("$forward", forward.linear > 0); assertFalse(aligned.pivoting)
+        // Already facing it: alignFirst costs nothing.
+        val facing = PathFollower(edges, 0, 1, 0.05).apply { alignFirst() }.command(Point(0.0, 0.0), heading, 150, 263)
+        assertTrue("$facing", facing.linear > 0)
+    }
+
     @Test fun `pivots at the vertex of a sharp corner and not before`() {
         val edges = listOf(SimEdge(Point(0.0, 0.0), Point(2.0, 0.0), false), SimEdge(Point(2.0, 0.0), Point(2.0, 2.0), false))
         val follower = PathFollower(edges, 0, 2, 0.15)

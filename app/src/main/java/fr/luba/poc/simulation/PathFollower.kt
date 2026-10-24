@@ -148,6 +148,13 @@ class PathFollower(private val edges: List<SimEdge>, private val start: Int, pri
     /** In-place pivot commanded by the last command ([PivotSlide]: slide tolerated during and after). */
     val pivoting: Boolean get() = turning
 
+    /**
+     * Robot standing still: faces the first edge in place (within [PIVOT_EXIT_DEGREES]) before moving forward, instead of
+     * an arc whenever the misalignment stays under [PIVOT_ENTER_DEGREES]. For a straight line that ends on a safety limit
+     * (join onto an outline of the map sync), where the arc swings the chassis off the line towards that limit.
+     */
+    fun alignFirst() { turning = true }
+
     /** Expected slide during a pivot at a point (m/s, [SlideField.velocity]); null: none. */
     var slide: ((Point) -> Point?)? = null
 

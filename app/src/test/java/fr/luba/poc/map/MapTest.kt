@@ -66,7 +66,9 @@ class MapTest {
         val map=t.snapshot()
         assertTrue(map.complete)
         assertFalse(map.source.contains("unsupported"))
-        assertEquals(listOf(ShapeKind.ZONE,ShapeKind.VISION_ZONE,ShapeKind.VISION_ZONE),map.shapes.sortedBy { it.id }.map { it.kind })
+        // Type 25 = No-Stop zone (Mammotion app, DumbyLuba#1); type 26 = vision obstacle zone, never observed.
+        assertEquals(listOf(ShapeKind.ZONE,ShapeKind.NO_STOP_ZONE,ShapeKind.VISION_ZONE),map.shapes.sortedBy { it.id }.map { it.kind })
         assertFalse(ShapeKind.VISION_ZONE.isContour)
+        assertFalse(ShapeKind.NO_STOP_ZONE.isContour)
     }
 }

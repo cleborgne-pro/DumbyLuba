@@ -19,7 +19,7 @@ class MapCache(private val context:Context) {
         val f=file(id);if(!f.exists() || f.length()>16*1024*1024)null else {
             val json=JSONObject(f.readText());val shapes=json.getJSONArray("shapes");require(shapes.length()<=1024)
             val items=(0 until shapes.length()).map {val s=shapes.getJSONObject(it);val pts=s.getJSONArray("points");require(pts.length()<=100000);MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until pts.length()).map{ i ->val p=pts.getJSONArray(i);Point(p.getDouble(0),p.getDouble(1))},s.optString("name"))}
-            require(items.all { it.type in 0..2 && it.points.all{p->p.x.isFinite()&&p.y.isFinite()} })
+            require(items.all { it.type in ShapeKind.SUPPORTED_TYPES && it.points.all{p->p.x.isFinite()&&p.y.isFinite()} })
             val station=json.optJSONObject("station")?.let { s ->
                 val x=s.getDouble("x"); val y=s.getDouble("y")
                 val heading=if(s.isNull("heading")) null else s.getDouble("heading")

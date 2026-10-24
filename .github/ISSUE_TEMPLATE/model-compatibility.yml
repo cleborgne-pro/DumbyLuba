@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping support more Mammotion mowers. Models other than the LUBA 2 AWD (`Luba-VS…`) are in
+        Thank you for helping support more Mammotion mowers. Models other than the LUBA 2 AWD (`Luba-VS…`, X series `Luba-VP…`) are in
         **read-only mode**: the app never sends motion or blade commands to them. Please do not try to bypass it.
         Steps: [supported models](https://github.com/cleborgne-pro/DumbyLuba/blob/main/docs/features/supported-models.md).
 

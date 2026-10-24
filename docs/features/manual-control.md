@@ -54,7 +54,7 @@ direction it drives is visible at a glance:
 | Haptic notches | each third of the travel beyond the dead zone, stronger at the end stop |
 | 100 % | 1000 units forward, 450 in rotation (≈ 1 m/s, ≈ 45°/s; speeds above 0.5 m/s estimated, not measured) |
 | Axes | independent: turning does not reduce the forward speed |
-| Blades | always stopped |
+| Blades | always stopped; the robot is driven in manual mowing mode with blades OFF (state 20, renewed every 500 ms, left on release), the only mode where the LUBA 2 reports a bumper contact |
 
 ## Remote control with the camera
 
@@ -69,7 +69,7 @@ arrives with a slight delay: keep the speed moderate.
 
 ## Guards
 
-- LUBA 2 (`Luba-VS…`) ready (state 11) to start; state 11 or 20 accepted while driving. Fresh state (≤ 2 s),
+- LUBA 2 (`Luba-VS…` or X series `Luba-VP…`) ready (state 11) to start; state 11 or 20 accepted while driving. Fresh state (≤ 2 s),
   battery > 30 %, blades stopped, no protection (self-check 0 or 10; 25 accepted beyond the mapped zones, see
   [safety](safety.md#self-check-25-beyond-the-mapped-zones-version-1110)), no bumper or lift alert, no mission, test, map
   reading, height adjustment or Mammotion task cancellation in progress. A refusal reads "Control refused: …".

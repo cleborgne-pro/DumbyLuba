@@ -41,12 +41,16 @@ class RobotBleManuelTest {
         val moves = bench.labelsSince(since).filter { it.startsWith("move") }
         assertTrue(moves.toString(), moves.all { it == "move 300 0" })
         assertTrue("Setpoints at about 5 Hz: ${moves.size}", moves.size in 12..17)
-        assertTrue(bench.sim.trace.none { it.second == "blades-on" || it.second == "manual" })
+        // Manual mowing mode with blades OFF (the only mode where the LUBA 2 publishes the bumper), never the blades.
+        assertTrue(bench.sim.trace.any { it.second == "manual" })
+        assertTrue(bench.sim.trace.none { it.second == "blades-on" })
         val released = bench.mark()
         bench.ble.stopManual()
         assertFalse(bench.state.manualActive)
         bench.advance(2000)
-        assertEquals(listOf("stop"), bench.labelsAfter(released))
+        // Release: stop, then manual mode left.
+        assertEquals(listOf("stop", "blades-off"), bench.labelsAfter(released))
+        assertEquals(11, bench.sim.robotState)
         assertEquals(0.0, bench.sim.speed, 0.005)
         // New gesture required after release.
         assertFalse(bench.ble.manualInput(300, 0))
@@ -112,6 +116,49 @@ class RobotBleManuelTest {
         assertEquals(0.0, bench.sim.speed, 0.005)
     }
 
+    /** 2026-10-22: a bumper contact while driving opens the obstacle sheet (contact logged, object in front of the bumper). */
+    @Test fun `bumper contact while driving, obstacle sheet opened then kept`() {
+        bench.connect()
+        bench.sim.obstacle = Point(4.8, 3.0) to 0.15
+        bench.ble.beginManualGesture()
+        hold(250, 0, 4000)
+        assertEquals(1, bench.sim.contacts)
+        bench.until(5000, "contact sheet") { bench.state.manualContactId != null }
+        assertFalse(bench.state.manualActive)
+        val contact = bench.state.difficulties.events.single { it.id == bench.state.manualContactId }
+        assertEquals("pilotage", contact.source)
+        assertEquals(fr.luba.poc.difficulty.DifficultyKind.CONTACT, contact.kind)
+        // Object estimated in front of the bumper, near the real one.
+        assertTrue("estimated ${contact.point}", contact.point.distance(Point(4.8, 3.0)) < 0.25)
+        bench.advance(2000)
+        assertEquals(0.0, bench.sim.speed, 0.005)
+        // Kept with its size from the sheet, then closed.
+        val saved = fr.luba.poc.map.ObstacleSelection.fromEncounter(contact, emptyList(), fr.luba.poc.obstacles.ObstacleKind.POLE,
+            0.15, 0.5, "kept", 0L, "")
+        bench.ble.saveObstacle(saved)
+        bench.ble.closeManualContact()
+        assertEquals(null, bench.state.manualContactId)
+        assertEquals(0.15, bench.state.obstacles.single().radiusM, 1e-9)
+    }
+
+    @Test fun `collision lock while driving opens the sheet, the late 1014 refines the same contact`() {
+        bench.connect()
+        bench.ble.beginManualGesture()
+        assertTrue(hold(-250, 0, 1000))
+        bench.sim.selfCheck = 25
+        hold(-250, 0, 1500)
+        assertFalse(bench.state.manualActive)
+        val id = requireNotNull(bench.state.manualContactId) { bench.dump() }
+        val first = bench.state.difficulties.events.single { it.id == id }
+        assertEquals(null, first.code)
+        // Reversing: object behind the chassis.
+        assertTrue("estimated ${first.point} for robot ${bench.sim.position}", first.point.x < bench.sim.position.x - 0.3)
+        bench.sim.injectError(1014)
+        bench.until(2500, "refined contact") { bench.state.difficulties.events.single { it.id == id }.code == 1014 }
+        assertEquals(id, bench.state.manualContactId)
+        assertEquals(1, bench.state.difficulties.events.count { it.kind == fr.luba.poc.difficulty.DifficultyKind.CONTACT })
+    }
+
     /** 2026-10-20: beyond the mapped zones, self-check 25 does not prevent driving freely (blades OFF). */
     @Test fun `self-check 25 beyond the mapped zones, joystick still allowed`() {
         bench.installMap()
@@ -160,7 +207,8 @@ class RobotBleManuelTest {
         bench.ble.stop()
         bench.until(3000, "closing") { bench.state.connection == ConnectionState.Disconnected }
         assertFalse(bench.state.manualActive)
-        assertEquals(listOf("stop"), bench.labelsSince(since))
+        // Robot in manual mode (bumper detection): the STOP also leaves it, blades OFF.
+        assertEquals(listOf("blades-off", "stop"), bench.labelsSince(since))
         bench.advance(2000)
         assertEquals(0.0, bench.sim.speed, 0.005)
     }
@@ -279,5 +327,60 @@ class RobotBleManuelTest {
         // Invalid sequence refused.
         bench.ble.startHeightSequence(listOf(10))
         assertTrue(bench.state.heightSequence.status, bench.state.heightSequence.status.startsWith("Séquence refusée"))
+    }
+
+    /** 2026-10-22: robot stuck under self-check 41 (weak satellite signal): the joystick brings it under open sky, blades OFF. */
+    @Test fun `self-check 41 weak satellite signal, joystick still allowed, bumper still stops`() {
+        bench.connect()
+        bench.sim.selfCheck = 41
+        bench.advance(1500)
+        val start = bench.sim.position
+        bench.ble.beginManualGesture()
+        assertTrue(bench.state.manualStatus, hold(250, 0, 1500))
+        assertTrue(bench.state.manualActive)
+        assertTrue("robot moved: ${bench.sim.position}", bench.sim.position.distance(start) > 0.1)
+        assertFalse(bench.sim.bladesOn)
+        bench.sim.sensorLow = 1
+        hold(250, 0, 1500)
+        assertFalse(bench.state.manualActive)
+    }
+
+    /** Lock after STOP (11): the joystick stays refused. */
+    @Test fun `self-check 11, joystick refused`() {
+        bench.connect()
+        bench.sim.selfCheck = 11
+        bench.advance(1500)
+        bench.ble.beginManualGesture()
+        assertFalse(hold(250, 0, 1000))
+        assertFalse(bench.state.manualActive)
+    }
+
+    /** 2026-10-22: gentle driving stopped with "Wheels commanded without progress" (robot slower than nominal at low speed). */
+    @Test fun `gentle joystick on a robot slow at low speed, no false stop`() {
+        bench.connect()
+        bench.sim.friction = 120
+        bench.advance(1500)
+        val start = bench.sim.position
+        bench.ble.beginManualGesture()
+        assertTrue(bench.state.manualStatus, hold(150, 0, 12_000))
+        assertTrue(bench.state.manualActive)
+        assertTrue(bench.state.events.none { it.contains("sans progression") })
+        assertTrue("robot moved: ${bench.sim.position}", bench.sim.position.distance(start) > 0.3)
+    }
+
+    /** 2026-10-22: contact while driving not detected: the 1014 is only given on a read of the error history. */
+    @Test fun `contact while driving detected through the error history`() {
+        bench.connect()
+        bench.sim.errorsOnQuery = true
+        bench.sim.obstacle = Point(4.0, 3.0).let { Point(it.x + 0.9, it.y) } to 0.15
+        bench.advance(1500)
+        bench.ble.beginManualGesture()
+        hold(250, 0, 8_000)
+        assertTrue(bench.sim.contacts > 0)
+        // 2026-10-22 16:48 (Fold log): driven in state 11, the LUBA 2 never published the contact; manual mode now.
+        assertTrue(bench.sim.trace.any { it.second == "manual" })
+        bench.until(5_000, "contact recorded") { bench.state.manualContactId != null }
+        assertFalse(bench.state.manualActive)
+        assertTrue(bench.state.difficulties.events.any { it.kind == fr.luba.poc.difficulty.DifficultyKind.CONTACT })
     }
 }

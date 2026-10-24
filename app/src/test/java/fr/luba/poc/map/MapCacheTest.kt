@@ -37,6 +37,15 @@ class MapCacheTest {
         assertNull(cache.read("robot-B"))
     }
 
+    @Test fun `map of a Luba 2 AWD X with vision module zones is read back from the cache`() {
+        // Types 25 (No-Stop) and 26 (vision obstacle): written but refused on reading up to 1.14.0, so read again at every connection.
+        val noStop = MapShape(14, 25, listOf(Point(4.0, 1.0), Point(5.0, 1.0), Point(5.0, 2.0), Point(4.0, 2.0)))
+        val visionObstacle = MapShape(15, 26, listOf(Point(6.0, 4.0), Point(7.0, 4.0), Point(7.0, 5.0), Point(6.0, 5.0)))
+        val vp = map.copy(shapes = map.shapes + noStop + visionObstacle)
+        MapCache(context).save("robot-VP", vp)
+        assertEquals(vp.shapes, MapCache(context).read("robot-VP")?.shapes)
+    }
+
     @Test fun `incomplete map never cached`() {
         MapCache(context).save("robot-A", map.copy(complete = false))
         assertNull(MapCache(context).read("robot-A"))

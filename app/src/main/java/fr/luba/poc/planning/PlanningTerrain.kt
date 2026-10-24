@@ -47,7 +47,7 @@ internal class PlanningTerrain(val request: PlanningRequest) {
     init {
         require(zones.isNotEmpty() && request.zoneIds.distinct().size == zones.size) { tr("Empty or repeated selection", "Sélection vide ou répétée") }
         require(request.map.shapes.none { it.kind == ShapeKind.OBSTACLE }) { tr("Map obstacle type not interpreted", "Type d’obstacle cartographique non interprété") }
-        require(request.map.shapes.none { it.kind == ShapeKind.VISION_ZONE }) { tr("Map with vision zones (Luba 2 AWD X): meaning not confirmed, planning disabled", "Carte avec zones vision (Luba 2 AWD X) : sens non confirmé, calcul désactivé") }
+        require(request.map.shapes.none { it.kind == ShapeKind.VISION_ZONE }) { tr("Map with vision obstacle zones (type 26, Luba 2 AWD X): meaning not confirmed, planning disabled", "Carte avec zones d'obstacle vision (type 26, Luba 2 AWD X) : sens non confirmé, calcul désactivé") }
         require(request.map.shapes.map { it.id }.distinct().size == request.map.shapes.size) { tr("Ambiguous identifiers", "Identifiants ambigus") }
         require(request.start.x.isFinite() && request.start.y.isFinite() && (request.startHeading == null || request.startHeading.isFinite()))
         require(config.boundary != BoundaryMeaning.UNKNOWN) { tr("Unknown boundary semantics", "Sémantique des frontières inconnue") }
@@ -135,8 +135,11 @@ internal class PlanningTerrain(val request: PlanningRequest) {
         val extraHoles = (request.obstacles.map { disc(it.center,it.radiusM/cos(Math.PI/64)) }+steep).map { g ->
             g.coordinates.dropLast(1).map { Point(it.x,it.y) }
         }
-        routes = RoutePlanning.navigation(request.map,request.robot.halfWidthM+0.05,holes+extraHoles,
+        // Transits on the recorded outlines, even when the passes use the outlines moved by the border strategy.
+        val navigationMap = request.navigationMap ?: request.map
+        val navigationHoles = if (navigationMap === request.map) holes else navigationMap.shapes.filter { it.kind == ShapeKind.NO_GO }.map { it.points }
+        routes = RoutePlanning.navigation(navigationMap,request.robot.halfWidthM+0.05,navigationHoles+extraHoles,
             accesses=navigation?.accesses.orEmpty(),base=navigation?.base,
-            robot=request.robot,recordedBoundary=recorded)
+            robot=request.robot,recordedBoundary=recorded,dangerLines=request.dangerLines.orEmpty())
     }
 }

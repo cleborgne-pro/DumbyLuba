@@ -41,8 +41,8 @@ fun MapThumbnail(map: RobotMap, modifier: Modifier = Modifier, empty: Color = Ma
         for (shape in map.shapes.sortedBy { it.type }) {
             if (shape.points.size < 2) continue
             val fill = when (shape.kind) { ShapeKind.ZONE -> colors.ZoneFillSelected; ShapeKind.NO_GO -> colors.NoGoFill; ShapeKind.PASSAGE -> colors.Ink
-                        ShapeKind.OBSTACLE, ShapeKind.VISION_ZONE -> colors.ObstacleFill }
-            val stroke = when (shape.kind) { ShapeKind.NO_GO -> colors.NoGoStroke; ShapeKind.PASSAGE -> colors.Ink; else -> colors.ZoneStroke }
+                        ShapeKind.OBSTACLE, ShapeKind.VISION_ZONE -> colors.ObstacleFill; ShapeKind.NO_STOP_ZONE -> colors.Info }
+            val stroke = when (shape.kind) { ShapeKind.NO_GO -> colors.NoGoStroke; ShapeKind.PASSAGE -> colors.Ink; ShapeKind.NO_STOP_ZONE -> colors.Info; else -> colors.ZoneStroke }
             if (shape.kind.isContour) drawPath(path(shape.points, true), fill)
             drawPath(path(shape.points, shape.kind.isContour), stroke, style = Stroke(1.5.dp.toPx(), join = StrokeJoin.Round))
         }

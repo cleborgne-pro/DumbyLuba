@@ -71,7 +71,7 @@ The app UI is available in English and French: it follows the phone language, or
 > - That the robot's firmware stops it when the app goes silent **has not been demonstrated**: check it on your own
 >   robot (Service → Command cutoff) before any mowing.
 > - Using it may breach Mammotion's terms of use and affect the robot's warranty.
-> - Only the LUBA 2 AWD (`Luba-VS…`) receives motion and blade commands. Any other model stays in read-only mode: do
+> - Only the LUBA 2 AWD (`Luba-VS…`, X series `Luba-VP…`) receives motion and blade commands. Any other model stays in read-only mode: do
 >   not try to bypass it, report your model instead ([supported models](docs/features/supported-models.md)).
 > - "Mammotion", "LUBA" and "Yuka" are trademarks of Mammotion, named only to indicate compatibility; the name
 >   DumbyLuba does not imply any endorsement.
@@ -361,7 +361,7 @@ schemas are included: see [docs/MAMMOTION_PROTOCOL.md](docs/MAMMOTION_PROTOCOL.m
 
 | Item | Required | Tested |
 |---|---|---|
-| Robot | **Mammotion mower**: full control on the LUBA 2 AWD (`Luba-VS…`), read-only on the other models | a single LUBA 2 AWD |
+| Robot | **Mammotion mower**: full control on the LUBA 2 AWD (`Luba-VS…`, X series `Luba-VP…`), read-only on the other models | a single LUBA 2 AWD |
 | Pilot phone | Android **8.0+** (API 26) with Bluetooth LE | Samsung Galaxy Z Fold |
 | **Gateway placed on the robot** (required) | Android 8.0+ phone or LILYGO TTGO T-Call V1.3 board (ESP32), on the same Wi-Fi as the pilot phone | Redmi A1, T-Call V1.3 |
 | Mammotion account (optional) | for camera video, remote map, native return and firmware | |
@@ -372,7 +372,7 @@ schemas are included: see [docs/MAMMOTION_PROTOCOL.md](docs/MAMMOTION_PROTOCOL.m
 | Model | Bluetooth name | Status | What works |
 |---|---|---|---|
 | **LUBA 2 AWD** | `Luba-VS…` | ✅ validated (a single robot) | everything: control, mowing, gateway, surveys |
-| LUBA 2 AWD X series | `Luba-VP…` | 🔒 read-only, tester wanted | connection, telemetry, map, camera, diagnostics |
+| LUBA 2 AWD X series | `Luba-VP…` | ✅ unlocked (same platform and firmware as the LUBA 2 AWD; connection, map, camera and STOP checked on a 3000X) | everything, as the LUBA 2 AWD; vision obstacle zones (type 26) still avoided |
 | LUBA AWD (LUBA 1) | `Luba…` | 🔒 read-only, tester wanted | same |
 | LUBA 3 AWD | `Luba-VA…` | 🔒 read-only, tester wanted | same |
 | LUBA mini AWD | `Luba-MN…`, `Luba-LD…` | 🔒 read-only, tester wanted | same |
@@ -433,6 +433,10 @@ tools/deploy.sh             # build + tests + lint, install on every ADB device,
 tools/deploy.sh --no-tests  # build only
 DEPLOY_SERIALS=SERIAL tools/deploy.sh   # restrict to one device
 ```
+
+Each run starts a **new ADB session**: the old server is stopped (`adb kill-server`) and a new one waits up to 20 s for
+the devices, wireless ones included (a server left running for hours stopped seeing them). `ADB_KEEP_SERVER=1` keeps
+the running server.
 
 `deploy.sh` builds the `fold` variant (not debuggable, hence faster at computing routes, signed with the debug key so
 it can update an existing install) and checks that the app starts without crashing.
@@ -616,9 +620,9 @@ than 2 s (except during autonomous tracking).
 <details>
 <summary><b>Does it work with other Mammotion robots?</b></summary>
 
-Not fully yet. Every Mammotion mower (LUBA 1, LUBA 2 X, LUBA 3, LUBA mini, Yuka…) is recognized and connects in
+Not fully yet. Every Mammotion mower (LUBA 1, LUBA 3, LUBA mini, Yuka…) is recognized and connects in
 read-only mode: telemetry, map, camera and diagnostics export, without motion or blades. Only the LUBA 2 AWD
-(`Luba-VS…`) is validated for control. Each other model will be adapted with the help of its owners: see
+(`Luba-VS…`) and its X series (`Luba-VP…`) are validated for control. Each other model will be adapted with the help of its owners: see
 [supported models](docs/features/supported-models.md) to send a compatibility report.
 </details>
 

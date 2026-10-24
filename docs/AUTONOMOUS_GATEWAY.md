@@ -52,7 +52,7 @@ LUBA 2
   is the same code on both sides.
 - Robot link keepalive (sync every 5 s, report subscription every 8 s): handled by the Redmi
   during tracking; the Fold writes nothing more to the robot (`RobotBle.send` is held back as long as tracking is handed to the gateway).
-- Protocol: version 2 unchanged. The gateway announces `caps=autonomy` in WELCOME; without this announcement (ESP32) the Fold
+- Protocol: version 2 unchanged. The gateway announces `caps=autonomy` in WELCOME (ESP32 too since its firmware 0.3.0); without this announcement the Fold
   drives frame by frame as before. The pilot answers with `LEG_HELLO` before opening the robot link: an old pilot, which
   does not do this, receives no tracking frame (it would take them for a fault). Frames 0x80–0x97 (`autonomy/LegFrames.kt`): blob upload (route, surface, with CRC),
   `LEG_START`, `LEG_ABORT`, `LEG_OBSTACLES`, `LEG_SYNC`, `LEG_ACK`; return frames `LEG_PROGRESS`, `LEG_SAMPLE`, `LEG_RESULT`,
@@ -131,7 +131,7 @@ signal to the robot (`autonomy/GatewayDetachment.kt`, wired in `GatewayRobot`):
   text is not a link loss for `DockResume`); the task history labels the interruption "Gateway fell off the robot".
   Tracking events are not replayed after a Wi-Fi outage: if the event is lost, the outcome text still carries the
   position (in the unexpected-stop alert and the history), without the map marker.
-- Not covered: tracking driven frame by frame from the pilot (switch off, ESP32 gateway), and moves made by the pilot
+- Not covered: tracking driven frame by frame from the pilot (switch off, ESP32 gateway before 0.3.0), and moves made by the pilot
   between trackings (bypass, back-off, recharge); the detection resumes at the next tracking.
 
 Checks: `GatewayDetachmentTest` (9: fall detected within one reading of the drop point a few seconds later, noisy
@@ -156,7 +156,7 @@ of the drop point; steady −26 ± 3 dBm over 7 m → `DONE`, no event). Not yet
   It stays still, blades OFF, with no automatic return to base; the back-off and the bypass (including the direct link of
   transits since 0.37.0) are computed by the Fold when it returns. See
   [bypass, who computes what](OBSTACLE_BYPASS.md#who-computes-what-in-real-mowing-fold-or-gateway).
-- ESP32: not yet; the ESP32 gateway remains a frame-by-frame relay (see `firmware/esp32-gateway/README.md`).
+- ESP32: ported in firmware 0.3.0, with its own limits ([below](#esp32-gateway-2026-10-23)).
 
 ### Checks done (none on the robot)
 
@@ -215,6 +215,53 @@ outage in **Position holes over 15 s**. Reference in simulation (`RobotBleTonteT
 3. STOP on the Fold during and after a drop; bumper contact during tracking; low battery (return to base); lift.
 4. Redmi: phone battery life during tracking (screen off by default since 0.27.9), heating.
 
+
+## ESP32 gateway (2026-10-23)
+
+The ESP32 gateway (firmware 0.3.0, `firmware/esp32-gateway`) runs the same autonomous tracking as the Redmi. The
+Kotlin code is ported to C++ in `lib/gwcore` and the pilot needs nothing new: the gateway announces
+`caps=autonomy,dock-exit,ota` in WELCOME.
+
+| Kotlin | C++ (`lib/gwcore/src`) |
+|---|---|
+| `LegFrames`, `LegSpec`, `LegResult`, `LegProgress`, `LegBlobs` | `gw_leg_frames` (byte compatible with `DataOutputStream`, modified UTF-8, CRC32) |
+| `LegRunner`, `LegEnv` | `gw_leg_runner`, `gw_leg_env` |
+| `GatewayAutonomy`, `OrphanDock` | `gw_autonomy` |
+| `GatewayDetachment` | `gw_detachment` |
+| `RobotObserver`, `TelemetryReducer`, `RobotErrorMonitor`/`Catalog`, `LiftGuard` | `gw_observer`, `gw_telemetry`, `gw_robot_errors` |
+| `NavSafety`, `SelfCheck`, `CollisionLatch`, `ProtectionPause`, `OffMapLatch`, `HeightSequence`, `MotionSetpoints`, `ModelSupport` | `gw_nav_safety` |
+| `PathFollower`, `RangeArrival`, `RouteBladeGate`, `MotionProgressGuard` | `gw_follow` |
+| `DeadReckoning` | `gw_reckoning` |
+| `ReturnDrift`, `PivotSlide`, `RouteRecharge`, `SlideField`, `PivotSlideMeter`, `DockExit`, `SignalCoverage` | `gw_drift` |
+| `TrajectoryEnvelope`, `AreaIndex`, WKB, `FollowObstacleGuard` | `gw_envelope`, `gw_geometry`, `gw_obstacle_guard` |
+| `GatewayRobot` (host: own writes, coalesced setpoints, urgent stop, own RSSI, docking without pilot) | `src/robot.cpp` |
+| `GatewaySession` (`LEG_HELLO`, frames only to a pilot that announced them) | `src/session.cpp` |
+
+Differences from the Redmi:
+- **Memory**: blobs of 1.5 MB at most (8 MB on Android), 2 routes and 2 surfaces kept (4 on Android), an upload refused
+  when the free memory is short after forgetting the older blobs ("Mémoire insuffisante sur la passerelle ESP32…"; the
+  buffer and the decoded form must fit in the largest free block), 30,000 survey samples per tracking
+  at most (8 h at one per second). Large blocks go to the 4 MB PSRAM.
+- **No phone sensors**: no tilt in the survey samples (no Slope/Terrain layer), no thermal stop. Blades are forbidden
+  when the board battery reads 0 % (IP5306 level, below 25 %) without power, with the Android text.
+- **Clock**: the 20 min without a pilot are measured on the monotonic clock (not shifted by the NTP synchronisation).
+- **Envelope**: `leavesStraight` computes the new ground swept outside the surface exactly (Green's formula on the
+  nearby edges) instead of the JTS boolean operations (difference below 1e-13 m² on 437 reference cases); the surface
+  validity check covers closed rings, crossing or overlapping edges and holes inside their shell, not single touching
+  points. The C++ envelope gives the same answers as JTS on the reference map (1000 poses, 800 translations, 1000 escapes).
+- **Gateway page**: **Stop the autonomous tracking** (robot stopped, blades OFF); updates over Wi-Fi and **Release the
+  robot** are refused while a tracking runs.
+- Tracking stop texts are the French ones (as a French Redmi), translated by the pilot like the other wire texts.
+
+Checks (computer, `pio test -e native`): `test_autonomy` 43 (frame codecs; the `LegRunnerTest` scenarios on the
+port of `SimulatedRobotEnv`; gateway end to end: upload, refusals, Wi-Fi drop with sample replay, abort, deliberate
+departure, stop right after the start over 40 rounds, pilot absent too long, docking without pilot, unconfirmed stop;
+gateway fallen off; memory short), `test_telemetry` 32, `test_geom` 20, `test_follow` 59, `test_core` 27. On the board
+(no robot): capabilities announced, a 990 KB route (30,000 edges) accepted 8 to 11 s after the start of its upload (about
+2 s of decoding) three times in a row, a 2,000-vertex surface indexed in 0.7 to 1.2 s, the start refused with "Robot
+non connecté en Bluetooth sur la passerelle"; internal heap low point 48 KB. Not tried on the robot, nor measured
+on the board: the time of a tick (doubles emulated on the ESP32) and the robot's MTU (with MTU 23, a movement command
+takes two frames and the 4-frame queue limit may be reached) are to be checked at the first real tracking.
 
 ## Leaving the station through the gateway (2026-10-13)
 
