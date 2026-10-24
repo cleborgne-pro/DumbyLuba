@@ -75,7 +75,7 @@ object RoutePlanning {
             it.id==id && it.kind==ShapeKind.ZONE
         }) { tr("Missing zone: $id", "Zone absente : $id") } }
         val preview=MultiZonePlanner.plan(zones,
-            snapshot.map.shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points },
+            snapshot.map.shapes.filter { it.excludes }.map { it.points },
             config.spacingM,config.marginM,mode,config.borders,config.borderPasses,config.noGoPasses,
             obstacles=snapshot.obstacles.map { fr.luba.poc.obstacles.ObstacleDisc(it.center.x,it.center.y,
                 it.radiusM+snapshot.robot.turnClearanceM) },robot=snapshot.robot,
@@ -158,7 +158,7 @@ object RoutePlanning {
             }
         }
         return navigation(map,RobotEnvelope.LUBA2.halfWidthM+0.05,
-            map.shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points }+obstacleHoles,
+            map.shapes.filter { it.excludes }.map { it.points }+obstacleHoles,
             accesses,base=base,recordedBoundary=recordedBoundary,avoidAreas=avoidAreas,dangerLines=dangerLines)
     }
 
@@ -185,7 +185,7 @@ object RoutePlanning {
 
     fun physical(map: RobotMap,obstacles: List<LocalObstacle>,recordedBoundary: Boolean = true): TrajectoryPlanner =
         navigation(map,RobotEnvelope.LUBA2.halfWidthM+0.05,
-            map.shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points } +
+            map.shapes.filter { it.excludes }.map { it.points } +
                 obstacles.map { fr.luba.poc.simulation.ObstacleBypass.circle(Point(it.x,it.y),it.radiusM) },
             recordedBoundary=recordedBoundary)
 

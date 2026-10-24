@@ -46,6 +46,7 @@ object PointPlanner {
     fun plan(map: RobotMap, robot: Point, target: Point, obstacles: List<LocalObstacle>, offMap: Boolean = false,
              base: MapBase? = null, charging: Boolean = false, accesses: List<List<Point>> = emptyList()): MapNavPlan {
         require(map.complete && !map.source.contains("DÉMONSTRATION", true)) { tr("A complete real map is required", "Carte réelle complète obligatoire") }
+        requireInterpretedLines(map)
         require(listOf(robot.x, robot.y, target.x, target.y).all { it.isFinite() }) { tr("Invalid position", "Position invalide") }
         require(robot.distance(target) > fr.luba.poc.diagnostics.MapNavFollower.ARRIVAL_M) { tr("The robot is already at the requested point", "Le robot est déjà au point demandé") }
         require(!BaseDeparture.inSafetyZone(base, target)) { tr("Destination inside the base safety zone: use Recharge to return to the base",
@@ -117,8 +118,11 @@ object PointPlanner {
             (it.kind == ShapeKind.ZONE && it.points.size >= 3) || (it.kind == ShapeKind.PASSAGE && it.points.size >= 2) }),
             RobotEnvelope.LUBA2.halfWidthM + 0.05, holes(map, obstacles), accesses, base = base, recordedBoundary = true)
 
+    /** An element the moves cannot avoid as a hole (virtual wall, outline of fewer than 3 points) refuses them. */
+    private fun requireInterpretedLines(map: RobotMap) { map.movesRefusal()?.let { throw IllegalArgumentException(it) } }
+
     private fun holes(map: RobotMap, obstacles: List<LocalObstacle>): List<List<Point>> =
-        map.shapes.filter { it.kind == ShapeKind.NO_GO || it.kind == ShapeKind.OBSTACLE || it.kind == ShapeKind.VISION_ZONE }.map { it.points }.filter { it.size >= 3 } +
+        map.shapes.filter { it.kind.avoidedByMoves }.map { it.points }.filter { it.size >= 3 } +
             obstacles.map { obstacle ->
                 val r = obstacle.exclusionRadiusM / cos(Math.PI / 64)
                 (0 until 64).map { i -> Point(obstacle.x + r * cos(i * 2 * Math.PI / 64), obstacle.y + r * sin(i * 2 * Math.PI / 64)) }
@@ -218,6 +222,7 @@ object PointPlanner {
     /** Surface of [tracePlan], built once to check several candidate outlines ([TrajectoryPlanner.requirePath]). */
     fun traceRoutes(map: RobotMap, obstacles: List<LocalObstacle>, accesses: List<List<Point>> = emptyList()): TrajectoryPlanner {
         require(map.complete && !map.source.contains("DÉMONSTRATION", true)) { tr("A complete real map is required", "Carte réelle complète obligatoire") }
+        requireInterpretedLines(map)
         val zones = map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
         require(zones.isNotEmpty()) { tr("No mapped zone", "Aucune zone cartographiée") }
         val passages = map.shapes.filter { it.kind == ShapeKind.PASSAGE && it.points.size >= 2 }

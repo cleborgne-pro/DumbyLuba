@@ -1660,6 +1660,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     }
     /** Connection for which the automatic map reading was already attempted (one attempt per connection). */
     private var autoMapReadConnection = -1L
+    /** Bound of a BLE map reading that keeps going without ending (each element has its own retries). */
+    private val MAP_READ_MAX_MS = 300_000L
     /**
      * Automatic BLE reading when no map is known for the connected robot (new installation, cache cleared, robot
      * never read): without it the map stays empty while the robot is connected, the account map being shown only
@@ -1676,11 +1678,48 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     }
     fun fetchMap() {
         mapReadRefusal()?.let { status(it); return }
-        mapJob?.cancel(); mapTransfer = MapTransfer(initialStation = stationReader.station ?: state.value.robotMap.station)
+        mapJob?.cancel()
+        val transfer = MapTransfer(initialStation = stationReader.station ?: state.value.robotMap.station, clock = { SystemClock.elapsedRealtime() })
+        mapTransfer = transfer
         update { it.copy(mapLoading = true).withMammotionMap(RobotMap(source = tr("Reading the BLE map…", "Lecture de la carte BLE…"), station = stationReader.station ?: it.mammotionMap.station)) }
         send(commands.sync(), "MAP_SYNC"); send(commands.mapHashes(), "MAP_HASHES")
-        event("map_start", tr("Read-only BLE outlines", "Lecture seule des contours BLE"))
-        mapJob = viewModelScope.launch { delay(60000); mapTransfer = null; update { it.copy(mapLoading = false, status = tr("Map incomplete: 60 s timeout, restart the reading", "Carte incomplète : timeout 60 s, relancer la lecture")) }; event("map_timeout", tr("Map not confirmed complete", "Carte non confirmée complète")) }
+        event("map_start", tr("Read-only BLE outlines", "Lecture seule des contours BLE"), mapOf("model" to fr.luba.poc.ui.RobotModel.detect(state.value.selected?.name).name, "productType" to state.value.productType))
+        // Each element that stops answering is asked again then left out (MapTransfer.tick): the reading moves on
+        // instead of stalling; the overall bound only covers a robot that keeps the link without ever finishing.
+        mapJob = viewModelScope.launch {
+            val end = SystemClock.elapsedRealtime() + MAP_READ_MAX_MS
+            while (mapTransfer === transfer && SystemClock.elapsedRealtime() < end) {
+                delay(250)
+                if (mapTransfer !== transfer) return@launch
+                val retries = transfer.tick(commands)
+                retries.forEach { send(it, "MAP_RETRY") }
+                mapProgress(transfer, retries.isNotEmpty())
+            }
+            if (mapTransfer !== transfer) return@launch
+            mapTransfer = null
+            update { it.copy(mapLoading = false, status = tr("Map incomplete: ${MAP_READ_MAX_MS / 60_000} min timeout, restart the reading", "Carte incomplète : timeout ${MAP_READ_MAX_MS / 60_000} min, relancer la lecture")) }
+            event("map_timeout", tr("Map not confirmed complete", "Carte non confirmée complète"), mapOf("source" to transfer.snapshot().source))
+        }
+    }
+    /** Records the reading steps and ends the reading when the map is complete or nothing more will come. */
+    private fun mapProgress(transfer: MapTransfer, changed: Boolean) {
+        val notices = transfer.notices()
+        notices.forEach { event(it.kind, it.detail, it.fields) }
+        if (!changed && notices.isEmpty() && !transfer.finished) return
+        val snapshot = transfer.snapshot()
+        update { it.withMammotionMap(snapshot) }
+        if (snapshot.complete) {
+            liveMapRead = true
+            state.value.selected?.address?.let { id -> viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { mapCache.save(id, snapshot) }.onFailure { handler.post { event("map_cache_error", tr("Cache failure: ${it.javaClass.simpleName}", "Échec du cache : ${it.javaClass.simpleName}")) } } } }
+            mapTransfer = null; update { it.copy(mapLoading = false) }; event("map_complete", snapshot.source); mapJob?.cancel()
+        } else if (transfer.finished) {
+            mapTransfer = null
+            val reason = transfer.failure?.let { tr("Map incomplete: $it, restart the reading", "Carte incomplète : $it, relancer la lecture") }
+                ?: tr("Map incomplete: ${transfer.missing} element(s) not read (${snapshot.source}), restart the reading", "Carte incomplète : ${transfer.missing} élément(s) non lu(s) (${snapshot.source}), relancer la lecture")
+            update { it.copy(mapLoading = false, status = reason) }
+            event("map_incomplete", reason, mapOf("source" to snapshot.source, "missing" to transfer.missing))
+            mapJob?.cancel()
+        }
     }
     private val scanAddresses = mutableSetOf<String>()
     private val scannerCallback = object : ScanCallback() {
@@ -2143,10 +2182,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (message.hasNav()) mapSyncReply(message.nav)
         mapTransfer?.let { transfer ->
             try {
-                transfer.accept(message, commands).forEach { send(it, "MAP_REQUEST_ACK") }
-                val snapshot = transfer.snapshot()
-                update { it.withMammotionMap(snapshot) }
-                if (snapshot.complete) { liveMapRead = true; state.value.selected?.address?.let { id -> viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { mapCache.save(id, snapshot) }.onFailure { handler.post { event("map_cache_error", tr("Cache failure: ${it.javaClass.simpleName}", "Échec du cache : ${it.javaClass.simpleName}")) } } } }; mapJob?.cancel(); mapTransfer = null; update { it.copy(mapLoading = false) }; event("map_complete", snapshot.source) }
+                val replies = transfer.accept(message, commands)
+                replies.forEach { send(it, "MAP_REQUEST_ACK") }
+                mapProgress(transfer, replies.isNotEmpty())
             } catch (error: Exception) { mapJob?.cancel(); mapTransfer = null; update { it.copy(mapLoading = false, status = tr("Map: ${error.message}", "Carte : ${error.message}")) }; event("map_error", error.message ?: tr("Invalid map", "Carte invalide")) }
         }
         if (mapTransfer == null && state.value.mammotionMap.complete) {
@@ -6642,7 +6680,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         if (!log.healthy || !state.value.ready || closing) throw NavAbort(tr("BLE / log unavailable", "BLE / journal indisponible"))
         val t = state.value.telemetry
         NavSafety.automaticPositionFailure(if (positionPrevious == 0L) null else SystemClock.elapsedRealtime() - positionPrevious, t.x, t.y)?.let { throw NavAbort(it) }
-        if (t.x != null && t.y != null && state.value.robotMap.shapes.any { it.kind == ShapeKind.NO_GO && Geometry.inside(Point(t.x, t.y), it.points) }) throw NavAbort(tr("Entered a no-go zone", "Entrée dans une zone interdite"))
+        if (t.x != null && t.y != null && state.value.robotMap.shapes.any { it.excludes && Geometry.inside(Point(t.x, t.y), it.points) }) throw NavAbort(tr("Entered a no-go zone", "Entrée dans une zone interdite"))
         // Move to a point beyond the mapped zones: 25 published there is not a contact ([offMapLatchIgnored]).
         if (t.robotState !in (config.drawState?.let { listOf(it) } ?: listOf(11, 20)) || !(fr.luba.poc.protocol.SelfCheck.nominal(t.selfCheck) ||
                 (config.pointDestination && !config.tonte && offMapLatchIgnored(t)))) throw NavAbort(tr("Robot state / protection changed", "État / protection robot changé"))
@@ -7137,7 +7175,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             delay(1500)
             mapReadRefusal()?.let { event("map_sync_read_refused", it); return null }
             fetchMap()
-            val deadline = SystemClock.elapsedRealtime() + 75_000
+            val deadline = SystemClock.elapsedRealtime() + MAP_READ_MAX_MS + 15_000
             delay(300)
             while (state.value.mapLoading && SystemClock.elapsedRealtime() < deadline) delay(300)
             val map = state.value.mammotionMap

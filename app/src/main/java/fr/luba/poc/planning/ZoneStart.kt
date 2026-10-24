@@ -6,6 +6,7 @@ import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
 import fr.luba.poc.map.kind
+import fr.luba.poc.map.excludes
 
 /** Origin of the start point of a mowing or survey preview. */
 enum class StartSource { NEAREST, SAVED, CHOSEN }
@@ -32,7 +33,7 @@ object ZoneStart {
     /** Zone among [zoneIds] containing [p], outside any no-go zone; null otherwise. */
     fun zoneAt(map: RobotMap, zoneIds: Collection<Long>, p: Point): Long? {
         if (!p.x.isFinite() || !p.y.isFinite()) return null
-        if (map.shapes.any { it.kind == ShapeKind.NO_GO && it.points.size >= 3 && Geometry.inside(p, it.points) }) return null
+        if (map.shapes.any { it.excludes && it.points.size >= 3 && Geometry.inside(p, it.points) }) return null
         return zoneIds.firstOrNull { id ->
             map.shapes.any { it.kind == ShapeKind.ZONE && it.id == id && it.points.size >= 3 && Geometry.inside(p, it.points) }
         }

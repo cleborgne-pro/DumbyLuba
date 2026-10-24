@@ -46,11 +46,16 @@ class MapTest {
         assertFalse(t.snapshot().shapes.single().kind.isContour)
         assertEquals(listOf(Point(1.0,2.0),Point(2.0,2.0)),t.snapshot().shapes.single().points)
     }
-    @Test fun `unknown type blocks the computation even if the transfer finishes`() {
+    @Test fun `rectangular no-go zone of a Luba 3 completes the map as an exclusion`() {
         val t=MapTransfer();val c=Commands()
         t.accept(msg(MctlNav.newBuilder().setToappGethashAck(NavGetHashListAck.newBuilder().setTotalFrame(1).setCurrentFrame(1).addDataCouple(42)).build()),c)
-        t.accept(msg(MctlNav.newBuilder().setToappGetCommondataAck(NavGetCommDataAck.newBuilder().setHash(42).setType(23).setTotalFrame(1).setCurrentFrame(1)).build()),c)
-        assertFalse(t.snapshot().complete)
+        fun pt(x:Float,y:Float)=CommDataCouple.newBuilder().setX(x).setY(y)
+        t.accept(msg(MctlNav.newBuilder().setToappGetCommondataAck(NavGetCommDataAck.newBuilder().setHash(42).setType(23).setAction(8).setTotalFrame(1).setCurrentFrame(1)
+            .addDataCouple(pt(0f,0f)).addDataCouple(pt(1f,0f)).addDataCouple(pt(1f,1f)).addDataCouple(pt(0f,1f))).build()),c)
+        val map=t.snapshot()
+        assertTrue(map.complete)
+        assertEquals(ShapeKind.NO_GO_RECT,map.shapes.single().kind)
+        assertTrue(map.shapes.single().excludes)
     }
     @Test fun `vision zones of a Luba 2 AWD X complete the map`() {
         // Issue DumbyLuba#1 (Luba-VP, firmware 1.30.31.19): 4 zones, 3 no-go, 4 passages and 11 rectangles of type 25.

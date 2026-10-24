@@ -110,7 +110,7 @@ object PaintedZone {
     fun mowable(map: RobotMap, pieces: List<List<Point>>): JtsGeometry {
         val shapes = pieces.filter { it.size >= 3 }.map { valid(polygon(it)) }
         if (shapes.isEmpty()) return factory.createPolygon()
-        val noGo = map.shapes.filter { it.kind == ShapeKind.NO_GO && it.points.size >= 3 }.map { valid(polygon(it.points)) }
+        val noGo = map.shapes.filter { it.excludes && it.points.size >= 3 }.map { valid(polygon(it.points)) }
         val painted = valid(UnaryUnionOp.union(shapes))
         return if (noGo.isEmpty()) painted else valid(painted.difference(UnaryUnionOp.union(noGo)))
     }

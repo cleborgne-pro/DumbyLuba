@@ -6,6 +6,7 @@ import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
 import fr.luba.poc.map.kind
+import fr.luba.poc.map.excludes
 import fr.luba.poc.planning.RasterCoverage
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
@@ -265,7 +266,7 @@ class CoverageBuilder(map: RobotMap, zoneIds: Collection<Long> = emptyList(), va
         fun target(map: RobotMap, zones: List<MapShape>): JtsGeometry {
             if (zones.isEmpty()) return factory.createPolygon()
             val area = UnaryUnionOp.union(zones.map { polygon(it.points) })
-            val noGo = map.shapes.filter { it.kind == ShapeKind.NO_GO && it.points.size >= 3 }.map { polygon(it.points) }
+            val noGo = map.shapes.filter { it.excludes && it.points.size >= 3 }.map { polygon(it.points) }
             return if (noGo.isEmpty()) area else area.difference(UnaryUnionOp.union(noGo))
         }
     }

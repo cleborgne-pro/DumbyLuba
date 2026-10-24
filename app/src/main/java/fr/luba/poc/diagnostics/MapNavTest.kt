@@ -76,7 +76,7 @@ object MapNavPlanner {
         require(start.x.isFinite() && start.y.isFinite() && radius.isFinite() && radius >= 2) { tr("Invalid start or radius", "Départ ou rayon invalide") }
         val zone = map.shapes.firstOrNull { it.kind == ShapeKind.ZONE && Geometry.inside(start, it.points) }
             ?: error(tr("Place the robot inside a mapped mowing zone", "Placer le robot dans une zone de tonte cartographiée"))
-        val holes = map.shapes.filter { it.kind == ShapeKind.NO_GO }.map { it.points } + obstacles.map { obstacle ->
+        val holes = map.shapes.filter { it.excludes }.map { it.points } + obstacles.map { obstacle ->
             // The general margin already includes the robot envelope; keep at least its real reserve.
             val disc = obstacle.keepOutDisc(RobotEnvelope.LUBA2)
             val r = max(0.05, disc.radiusM - MARGIN_M) / cos(PI / 64)

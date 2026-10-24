@@ -9,43 +9,98 @@ data class Point(val x: Double, val y: Double) {
 data class MapShape(val id: Long, val type: Int, val points: List<Point>, val name: String = "")
 
 /**
- * Kind of a map boundary, from the upstream `type` code (0 = zone, 1 = no-go, 2 = passage, 25/26 = zones of the vision
- * module of the Luba 2 AWD X / Vision models, PyMammotion `VISUAL_SAFETY_ZONE` / `VISUAL_OBSTACLE_ZONE`).
+ * Kind of a map element, from the upstream `type` code. Every type known to PyMammotion (`PathType`,
+ * `pymammotion/data/model/hash_list.py`, commit c0e5ada) has its kind; any other type is [UNKNOWN]: kept, drawn,
+ * avoided by the moves when it is a closed outline, and refusing the local planning. What each kind does is carried by
+ * [isContour], [isExclusion], [avoidedByMoves], [refusesPlanning] and [informational], never by a type list elsewhere.
  */
-enum class ShapeKind {
-    ZONE, NO_GO, PASSAGE, OBSTACLE,
+enum class ShapeKind(val types: Set<Int>, private val en: String, private val fr: String) {
+    /** Type 0, mowing zone. */
+    ZONE(setOf(0), "zone", "zone"),
+    /** Type 1, no-go zone (keep-out outline). */
+    NO_GO(setOf(1), "no-go zone", "zone interdite"),
+    /** Type 2, passage between zones. */
+    PASSAGE(setOf(2), "passage", "passage"),
+    /** Type 3, transfer zone in front of the dock (`TRANSFER_ZONE`, ephemeral, hash 0): drawn only. */
+    TRANSFER_ZONE(setOf(3), "dock transfer zone", "zone de transfert de la base"),
+    /** Type 10, planned mowing lines / breakpoint (`LINE`): drawn only. */
+    MOW_LINE(setOf(10), "planned mowing lines", "lignes de tonte prévues"),
+    /** Type 12, clippings dump spot (`DUMP`, models with a collector): drawn only. */
+    DUMP(setOf(12), "clippings dump spot", "point de vidage"),
+    /** Type 13, drawing (`SVG` pattern): no boundary, acknowledged by [MapTransfer], drawn only if it carries points. */
+    DRAWING(setOf(13), "drawing", "dessin"),
+    /** Type 18, path driven during the current mowing (`DYNAMICS_LINE`): drawn only. */
+    MOW_PROGRESS(setOf(18), "mowing progress", "progression de la tonte"),
+    /** Types 19 and 20, corridor line and waypoints between zones (`CORRIDOR_LINE` / `CORRIDOR_POINT`, Yuka mini): drawn
+     * only, never used as a passage by the local routes. */
+    CORRIDOR(setOf(19, 20), "corridor between zones", "couloir entre zones"),
+    /** Type 21, user-drawn virtual wall (`VIRTUAL_WALL`): a line the robot must not cross; the local planning and moves
+     * do not know how to respect a line, so they refuse the map. */
+    VIRTUAL_WALL(setOf(21), "virtual wall", "mur virtuel"),
+    /** Type 22, sibling of the rectangular no-go zones (`NO_GO_ZONE_VARIANT`), meaning not confirmed upstream: avoided by
+     * the moves, planning refused, like [VISION_ZONE]. */
+    NO_GO_VARIANT(setOf(22), "no-go zone variant (unconfirmed)", "variante de zone interdite (non confirmée)"),
+    /** Type 23, user-drawn rectangular no-go zone (`NO_GO_ZONE`, APK `updateNoGoZone`, seen on a LUBA 3): an exclusion
+     * like [NO_GO] for the planning and the moves when it is a closed outline; with fewer than 3 points it refuses them. */
+    NO_GO_RECT(setOf(23), "rectangular no-go zone", "zone interdite rectangulaire"),
     /**
      * No-Stop zone (type 25, PyMammotion `VISUAL_SAFETY_ZONE`): the robot keeps going there even when its vision module
      * sees an obstacle (the bumper still stops it), as shown in the Mammotion app (DumbyLuba#1). Ordinary ground for
      * DumbyLuba: neither avoided nor refused by the planning, only drawn.
      */
-    NO_STOP_ZONE,
+    NO_STOP_ZONE(setOf(25), "No-Stop zone", "zone No-Stop"),
     /** Vision obstacle zone (type 26, `VISUAL_OBSTACLE_ZONE`): never observed, meaning not confirmed, avoided by the moves, planning refused. */
-    VISION_ZONE;
+    VISION_ZONE(setOf(26), "vision obstacle zone", "zone d'obstacle vision"),
+    /** Any type PyMammotion does not know either. */
+    UNKNOWN(emptySet(), "unknown element", "élément inconnu");
 
-    /** Closed boundaries (zones and no-go) are filled; obstacles stay drawn as lines. */
+    val label: String get() = tr(en, fr)
+    /** Closed boundaries (zones and no-go) are filled and need 3 points for the map to be complete. */
     val isContour: Boolean get() = this == ZONE || this == NO_GO
+    /** Holes of the planning and the moves (with at least 3 points, see [MapShape.excludes]). */
+    val isExclusion: Boolean get() = this == NO_GO || this == NO_GO_RECT
+    /** Avoided by the moves as holes when they are closed outlines. */
+    val avoidedByMoves: Boolean get() = isExclusion || this == NO_GO_VARIANT || this == VISION_ZONE || this == UNKNOWN
+    /** Present on the map, the local mowing computation is refused (meaning not confirmed or not representable). */
+    val refusesPlanning: Boolean get() = this == VIRTUAL_WALL || this == NO_GO_VARIANT || this == VISION_ZONE || this == UNKNOWN
+    /** Shown on the map, ignored by the planning and the moves. */
+    val informational: Boolean get() = this in setOf(TRANSFER_ZONE, MOW_LINE, DUMP, DRAWING, MOW_PROGRESS, CORRIDOR, NO_STOP_ZONE)
 
     companion object {
         /** Upstream type of the No-Stop zones (seen on a Luba 2 AWD 3000X, firmware 1.30.31.19). */
         const val NO_STOP_TYPE = 25
         /** Upstream types of the vision module zones: No-Stop (25) and vision obstacle (26, not observed yet). */
         val VISION_TYPES = setOf(NO_STOP_TYPE, 26)
-        /** Upstream types interpreted by the application; any other type leaves the map incomplete. */
-        val SUPPORTED_TYPES = setOf(0, 1, 2) + VISION_TYPES
-        fun from(type: Int): ShapeKind = when (type) {
-            0 -> ZONE
-            1 -> NO_GO
-            2 -> PASSAGE
-            NO_STOP_TYPE -> NO_STOP_ZONE
-            in VISION_TYPES -> VISION_ZONE
-            else -> OBSTACLE
-        }
+        private val byType: Map<Int, ShapeKind> = entries.flatMap { kind -> kind.types.map { it to kind } }.toMap()
+        /** Upstream types the application knows (every PyMammotion `PathType`); any other one is [UNKNOWN]. */
+        val SUPPORTED_TYPES: Set<Int> = byType.keys
+        fun from(type: Int): ShapeKind = byType[type] ?: UNKNOWN
     }
 }
 
 /** Kind derived from the `type` code carried by the frame. */
 val MapShape.kind: ShapeKind get() = ShapeKind.from(type)
+/** Hole of the planning and the moves: a no-go zone, or a rectangular no-go zone with a closed outline. */
+val MapShape.excludes: Boolean get() = kind == ShapeKind.NO_GO || (kind == ShapeKind.NO_GO_RECT && points.size >= 3)
+/** Element that keeps the local mowing computation from running ([ShapeKind.refusesPlanning], or an exclusion that is not a closed outline). */
+val MapShape.refusesPlanning: Boolean get() = kind.refusesPlanning || (kind == ShapeKind.NO_GO_RECT && points.size < 3)
+/** Element the moves cannot avoid: a virtual wall, or an element to avoid that is not a closed outline. */
+val MapShape.refusesMoves: Boolean get() = kind == ShapeKind.VIRTUAL_WALL || (kind.avoidedByMoves && kind != ShapeKind.NO_GO && points.size < 3)
+/** Why the local planning refuses [this] map, null when it may run. */
+fun RobotMap.planningRefusal(): String? {
+    val refused = shapes.filter { it.refusesPlanning }
+    if (refused.isEmpty()) return null
+    val list = refused.groupBy { it.kind to it.type }.keys.sortedBy { it.second }.joinToString { (kind, type) -> "${kind.label} ($type)" }
+    return tr("Map with $list: meaning not confirmed or not representable, planning disabled",
+        "Carte avec $list : sens non confirmé ou non représentable, calcul désactivé")
+}
+/** Why the local moves refuse [this] map, null when they may run. */
+fun RobotMap.movesRefusal(): String? {
+    val refused = shapes.filter { it.refusesMoves }
+    if (refused.isEmpty()) return null
+    val list = refused.groupBy { it.kind to it.type }.keys.sortedBy { it.second }.joinToString { (kind, type) -> "${kind.label} ($type)" }
+    return tr("Map with $list that cannot be avoided: moves disabled", "Carte avec $list impossible à contourner : déplacements désactivés")
+}
 data class MapStation(val point: Point, val entryHeadingDegrees: Double?, val origin: String)
 /**
  * Boundary map. [mammotionShapes]: original Mammotion boundaries when [shapes] carries local corrections

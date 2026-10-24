@@ -35,7 +35,8 @@ reading" or "Not signed in · sign in"; tapping it opens the **Mammotion account
    in again"), it asks to sign in again; a network failure during this sign-in keeps the session for a later attempt.
 4. **Account robots** lists the account's `Luba…` devices (other products are ignored). The followed robot is the
    last one read, otherwise the first of the list. Tapping a robot (**Read the map**) reads its map through the cloud
-   (90 s at most, otherwise "Cloud map incomplete: 90 s timeout, planning disabled"); **Open the map** shows the
+   (an element that stops answering is asked again then left out, the message then gives how many were not read;
+   4 min at most overall); **Open the map** shows the
    complete map on the Map tab; **Refresh the list** reloads the robots.
 5. **Session** group: **Sign out** deletes the session (saved credentials are kept); **Forget saved credentials**
    erases the credentials and the session.

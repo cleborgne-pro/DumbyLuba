@@ -148,6 +148,8 @@ object ReadOnlyPolicy {
                     MctlNav.SubNavMsgCase.TODEV_GETHASH, MctlNav.SubNavMsgCase.APP_REQUEST_COVER_PATHS -> true
                     MctlNav.SubNavMsgCase.TODEV_GET_COMMONDATA ->
                         nav.todevGetCommondata.let { (it.subCmd == 1 && it.action == 8) || it.subCmd == 2 }
+                    // Drawing frame ack (map reading): echo only, no content.
+                    MctlNav.SubNavMsgCase.TODEV_SVG_MSG -> nav.todevSvgMsg.subCmd == 2 && !nav.todevSvgMsg.hasSvgMessage()
                     MctlNav.SubNavMsgCase.TODEV_TASKCTRL -> nav.todevTaskctrl.action in STOP_TASK_ACTIONS
                     else -> false
                 }

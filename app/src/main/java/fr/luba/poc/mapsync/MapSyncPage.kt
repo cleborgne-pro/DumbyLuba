@@ -360,10 +360,11 @@ private fun SyncMap(map: RobotMap, items: List<SyncItem>, run: MapSyncRun, focus
 private fun DrawScope.drawShape(shape: MapShape, path: (List<Point>, Boolean) -> Path, stroke: Stroke, colors: fr.luba.poc.ui.theme.LubaColors) {
     when (shape.kind) {
         ShapeKind.ZONE -> { val p = path(shape.points, true); drawPath(p, colors.ZoneFill); drawPath(p, colors.ZoneStroke, style = stroke) }
-        ShapeKind.NO_GO, ShapeKind.VISION_ZONE -> { val p = path(shape.points, true); drawPath(p, colors.NoGoFill); drawPath(p, colors.NoGoStroke, style = stroke) }
+        ShapeKind.NO_GO, ShapeKind.NO_GO_RECT, ShapeKind.NO_GO_VARIANT, ShapeKind.VISION_ZONE -> { val p = path(shape.points, shape.points.size >= 3); drawPath(p, colors.NoGoFill); drawPath(p, colors.NoGoStroke, style = stroke) }
         ShapeKind.PASSAGE -> drawPath(path(shape.points, false), colors.TextTertiary, style = stroke)
-        ShapeKind.OBSTACLE -> drawPath(path(shape.points, false), colors.ObstacleStroke, style = stroke)
+        ShapeKind.VIRTUAL_WALL -> drawPath(path(shape.points, false), colors.Danger, style = stroke)
         ShapeKind.NO_STOP_ZONE -> drawPath(path(shape.points, true), colors.Info, style = stroke)
+        else -> drawPath(path(shape.points, false), colors.ObstacleStroke, style = stroke)
     }
 }
 

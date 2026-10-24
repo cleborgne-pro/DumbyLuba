@@ -122,6 +122,10 @@ class Commands(private val userAccount: Int = 0) {
     fun mapHashesAck(total: Int, frame: Int) = nav(MctlNav.newBuilder().setTodevGethash(NavGetHashList.newBuilder().setPver(1).setSubCmd(2).setTotalFrame(total).setCurrentFrame(frame)).build())
     fun mapData(hash: Long) = nav(MctlNav.newBuilder().setTodevGetCommondata(NavGetCommData.newBuilder().setPver(1).setAction(8).setSubCmd(1).setHash(hash)).build())
     fun mapDataAck(f: NavGetCommDataAck) = nav(MctlNav.newBuilder().setTodevGetCommondata(NavGetCommData.newBuilder().setPver(1).setSubCmd(2).setAction(f.action).setType(f.type).setHash(f.hash).setTotalFrame(f.totalFrame).setCurrentFrame(f.currentFrame)).build())
+    /** Ack of a drawing (SVG pattern) frame, APK `sendResponseSvgDate` / PyMammotion `send_svg_response`: the robot
+     * sends the next frame of the drawing only once it is echoed, and repeats the unacknowledged one otherwise. */
+    fun svgAck(f: svg_message_ack_t) = nav(MctlNav.newBuilder().setTodevSvgMsg(svg_message_ack_t.newBuilder().setPver(1).setSubCmd(2)
+        .setTotalFrame(f.totalFrame).setCurrentFrame(f.currentFrame).setDataHash(f.dataHash).setPaternalHashA(f.paternalHashA)).build())
 
     // ---------------------------------------------------------------- map writing (sync with the Mammotion app)
     // APK 2.3.8 `MACommandHelper` (PyMammotion `navigation.py`): `todev_get_commondata` without `subCmd` (0), so that

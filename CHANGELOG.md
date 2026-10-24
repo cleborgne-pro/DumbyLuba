@@ -830,3 +830,27 @@ The bumper contact in manual mode, the slow approach at 80 units and self-check 
 (2026-10-22), but their fixes have not been tried on it yet. The Luba 2 AWD X series has its connection, map, camera
 and STOP checked, and was never driven by DumbyLuba: run the command cutoff test before mowing. Keep STOP within reach
 for the first mowing with this version.
+
+Version 1.15.1 (184): **map reading that no longer stalls on a drawing**. A tester's export (app 1.15.0, cloud reading, 48
+elements announced) stopped at 3 elements every time: the 4th element was a drawing (SVG pattern of the Mammotion app,
+`toapp_svg_msg`), never acknowledged, so the robot repeated it five times and went silent until the 90 s timeout. The
+reading (Bluetooth and account) now works element by element like the Mammotion app: every reading frame is echoed,
+stray ones included; drawings are acknowledged and counted as read without boundary; an element that stops answering
+is asked again (5 s / 3 s over Bluetooth, 10 s / 8 s over the account) then left out, and the reading goes on instead
+of waiting for the global timeout, which becomes an overall bound (5 min Bluetooth, 4 min account). An element left
+out or answered empty keeps the map incomplete, with the count in the message: a no-go zone never vanishes silently.
+Element types the application does not interpret (LUBA 3: 21 to 24) no longer keep the map open: they are kept,
+drawn and cached, and the mowing computation and the moves refuse the map while it holds them (their types are named).
+Each element is now in the log (`map_element`, `map_element_retry`, `map_element_abandoned`, `map_frame_ignored`), and
+drawing frames by their identifiers only. Not tried on a robot yet.
+
+**Every map element type known to PyMammotion.** Types 3 (dock transfer zone), 10 (planned lines), 12 (dump spot),
+13 (drawing), 18 (mowing progress) and 19/20 (corridor) are drawn only; 21 (virtual wall) is a thick red line that
+refuses the mowing computation and the moves; 22 (no-go variant, meaning unconfirmed) is avoided by the moves and
+refuses the computation; 23 (rectangular no-go zone of the Mammotion app, LUBA 3) is a hole for the computation and
+the moves, like a no-go zone. An unknown type never blocks the reading any more: the element is kept even without
+points, drawn, cached (any type is read back), and refuses the computation (and the moves when it is not a closed
+outline); the refusal names each element and its type. A frame the reading does not understand is skipped and noted
+(`map_frame_error`), a refused element-list frame is asked again; only the size limits end the reading. See
+[map element types](docs/features/supported-models.md#map-element-types). Types 21 to 23 are interpreted from
+PyMammotion, not from a map read by DumbyLuba.

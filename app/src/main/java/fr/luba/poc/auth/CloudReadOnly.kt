@@ -17,6 +17,7 @@ object CloudReadOnly {
             MsgCmdType.MSG_CMD_TYPE_NAV -> m.hasNav() && m.nav.allFields.size==1 && when {
                 m.nav.hasTodevGethash() -> m.nav.todevGethash.let { it.pver==1 && it.subCmd in listOf(0,2) }
                 m.nav.hasTodevGetCommondata() -> m.nav.todevGetCommondata.let { it.pver==1 && it.action==8 && it.subCmd in listOf(1,2) }
+                m.nav.hasTodevSvgMsg() -> m.nav.todevSvgMsg.let { it.pver==1 && it.subCmd==2 && !it.hasSvgMessage() }
                 m.nav.hasTodevTaskctrl() -> m.rcver==MsgDevice.DEV_NAVIGATION && m.nav.todevTaskctrl.let { it.allFields.size<=3 && it.type==1 && it.result==0 &&
                     (it.action==CANCEL_RETURN_ACTION || (nativeReturn && it.action==NATIVE_RETURN_ACTION)) }
                 else -> false

@@ -326,7 +326,7 @@ internal class LiveGeometry {
         var area = Path()
         map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 && (zones.isNullOrEmpty() || it.id in zones) }
             .forEach { area = combineOrKeep(PathOperation.Union, area, build(it.points, true)) }
-        map.shapes.filter { it.kind == ShapeKind.NO_GO && it.points.size >= 3 }
+        map.shapes.filter { it.excludes && it.points.size >= 3 }
             .forEach { area = combineOrKeep(PathOperation.Difference, area, build(it.points, true)) }
         if (surfaces.size > 8) surfaces.clear()
         return area

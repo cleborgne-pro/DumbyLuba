@@ -48,7 +48,8 @@ camera and native return to base only".
 The full read is triggered when the Account screen opens and by "Refresh from the
 account" (history and firmware over HTTP, then the MQTT reports; a failed part is listed, the others stay
 displayed). On the home screen and the map, the 30 s polling (without BLE, app in the foreground) fills in the same
-details; each poll waits 15 s at most for the position and battery. A map read waits 90 s at most.
+details; each poll waits 15 s at most for the position and battery. A map read asks again an element that stops answering
+(10 s after its request, 8 s after its last frame, 3 requests) then leaves it out, and is bounded to 4 min overall.
 
 ## Account actions (without BLE, on explicit request)
 

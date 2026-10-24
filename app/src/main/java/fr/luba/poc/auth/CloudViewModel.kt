@@ -192,23 +192,39 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         var requestedAt=Long.MAX_VALUE
         val link=connectMqtt(robot)
         try {
-            val commands=Commands(api.userAccount());val transfer=MapTransfer(3, cache.read(robot.id)?.station)
+            val commands=Commands(api.userAccount());val transfer=MapTransfer(3, cache.read(robot.id)?.station, requestTimeoutMs=10_000, frameTimeoutMs=8_000, maxAttempts=3)
             var completedAt: Long? = null
             if(readMap) mutable.value=mutable.value.copy(map=RobotMap(source=tr("Cloud read of ${robot.name}…", "Lecture cloud de ${robot.name}…")))
             fun send(bytes:ByteArray){api.invoke(bytes,robot.name,robot.id)}
             send(commands.sync(syncType=3));send(commands.reports(false,account=true));if(readMap)send(commands.mapHashes())
             requestedAt=System.currentTimeMillis()
-            withTimeout(if(readMap)90000L else 15000L) {
+            fun notices() { transfer.notices().forEach { n -> handler.post { if(log.healthy) log.append(n.kind,n.detail,n.fields) } } }
+            withTimeout(if(readMap) CLOUD_MAP_TIMEOUT_MS else 15000L) {
+                var nextKeep=System.currentTimeMillis()+5000
                 while(true) {
-                    val event=withTimeoutOrNull(5000){link.events.receive()}
+                    // Map reading: 1 s steps so that an element that stops answering is asked again (MapTransfer.tick).
+                    val event=withTimeoutOrNull(if(readMap) 1000L else 5000L){link.events.receive()}
+                    if(readMap && completedAt==null) {
+                        transfer.tick(commands).forEach(::send); notices()
+                        if(transfer.finished && !transfer.snapshot().complete) {
+                            val map=transfer.snapshot().copy(source="Cloud ${robot.name} · ${transfer.snapshot().source}")
+                            mutable.value=mutable.value.copy(map=map)
+                            status(transfer.failure?.let { tr("Cloud map not read: $it", "Carte cloud non lue : $it") }
+                                ?: tr("Cloud map incomplete: ${transfer.missing} element(s) not read (${map.source}), planning disabled", "Carte cloud incomplète : ${transfer.missing} élément(s) non lu(s) (${map.source}), calcul désactivé"))
+                            break
+                        }
+                    }
                     if(event==null){
                         if(completedAt != null && System.currentTimeMillis()-completedAt!! >= 10000) break
-                        send(commands.sync(syncType=3));send(commands.reports(true,account=true));continue
+                        if(System.currentTimeMillis()>=nextKeep){send(commands.sync(syncType=3));send(commands.reports(true,account=true));nextKeep=System.currentTimeMillis()+5000}
+                        continue
                     }
                     val bytes=(event as? CloudEvent.Proto)?.bytes ?: continue
                     val message=LubaMsg.parseFrom(bytes)
                     absorber.accept(message)
-                    handler.post { log.append("cloud_map_rx", tr("Cloud protobuf received", "Protobuf cloud reçu"), mapOf("bytes" to bytes.size,"msgType" to message.msgtypeValue,"navFields" to (if(message.hasNav()) message.nav.allFields.keys.map{it.name} else emptyList<String>()),"mapNav" to (if(message.hasNav() && (message.nav.hasToappGethashAck() || message.nav.hasToappGetCommondataAck())) message.nav.toString() else null))) }
+                    handler.post { log.append("cloud_map_rx", tr("Cloud protobuf received", "Protobuf cloud reçu"), mapOf("bytes" to bytes.size,"msgType" to message.msgtypeValue,"navFields" to (if(message.hasNav()) message.nav.allFields.keys.map{it.name} else emptyList<String>()),"mapNav" to (if(message.hasNav() && (message.nav.hasToappGethashAck() || message.nav.hasToappGetCommondataAck())) message.nav.toString() else null),
+                        // Drawing frames: identifiers only, never the SVG content.
+                        "svg" to (if(message.hasNav() && message.nav.hasToappSvgMsg()) message.nav.toappSvgMsg.let { mapOf("dataHash" to it.dataHash,"paternalHashA" to it.paternalHashA,"frame" to it.currentFrame,"totalFrames" to it.totalFrame,"subCmd" to it.subCmd,"type" to it.type,"result" to it.result) } else null))) }
                     if(!readMap) {
                         // Reading: recent position and device report (battery, charging contact).
                         if(positionSince(absorber.telemetry.value,requestedAt) && deviceSince(absorber.telemetry.value,requestedAt)) {
@@ -217,14 +233,15 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
                         }
                         continue
                     }
-                    transfer.accept(message,commands).forEach(::send)
+                    val replies=transfer.accept(message,commands); replies.forEach(::send); notices()
+                    if(replies.isEmpty() && completedAt==null) continue
                     val map=transfer.snapshot().copy(source="Cloud ${robot.name} · ${transfer.snapshot().source}")
                     mutable.value=mutable.value.copy(map=map)
-                    status(tr("Map: ${map.shapes.size} elements received", "Carte : ${map.shapes.size} éléments reçus"))
+                    status(tr("Map: ${transfer.read}/${transfer.announced ?: "?"} elements read", "Carte : ${transfer.read}/${transfer.announced ?: "?"} éléments lus"))
                     if(map.complete){cache.save(robot.id,map);preferences.edit().putString("robot",robot.id).apply();status(if(map.station?.entryHeadingDegrees != null) tr("Cloud map and base received", "Carte et base cloud reçues") else tr("Map received · base axis waiting for the robot to charge", "Carte reçue · axe de base en attente du robot en recharge"));if(completedAt==null) completedAt=System.currentTimeMillis();if(map.station?.entryHeadingDegrees != null || System.currentTimeMillis()-completedAt!! >= 10000) break}
                 }
             }
-        } catch(e:TimeoutCancellationException) {status(if(readMap) tr("Cloud map incomplete: 90 s timeout, planning disabled", "Carte cloud incomplète : timeout 90 s, calcul désactivé") else when {
+        } catch(e:TimeoutCancellationException) {status(if(readMap) tr("Cloud map incomplete: ${CLOUD_MAP_TIMEOUT_MS / 1000} s timeout, planning disabled", "Carte cloud incomplète : timeout ${CLOUD_MAP_TIMEOUT_MS / 1000} s, calcul désactivé") else when {
             deviceSince(absorber.telemetry.value,requestedAt) -> tr("API battery received · position not received within 15 s, last position kept", "Batterie API reçue · position non reçue en 15 s, dernière position conservée")
             positionSince(absorber.telemetry.value,requestedAt) -> tr("API position received · battery not received within 15 s", "Position API reçue · batterie non reçue en 15 s")
             else -> tr("API position not received within 15 s · last position kept", "Position API non reçue en 15 s · dernière position conservée")
@@ -235,6 +252,8 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
     private fun deviceSince(t:fr.luba.poc.protocol.Telemetry,at:Long)=(t.lastDeviceAt ?: 0)>=at
     private companion object {
         const val CAMERA_LIST_TIMEOUT_MS=25_000L
+        /** Bound of a cloud map reading (each element has its own retries, MapTransfer). */
+        const val CLOUD_MAP_TIMEOUT_MS=240_000L
         /** The cloud waits for the robot's answer (50504 if it does not answer): a bit more than the HTTP read timeout. */
         const val CAMERA_TOKEN_TIMEOUT_MS=30_000L
     }

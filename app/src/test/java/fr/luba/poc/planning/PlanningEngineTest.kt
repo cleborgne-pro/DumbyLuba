@@ -17,6 +17,35 @@ class PlanningEngineTest {
         val error=assertThrows(IllegalArgumentException::class.java) { PlanningTerrain(r) }
         assertTrue(error.message, error.message!!.contains("vision"))
     }
+    @Test fun rectangularNoGoZonesOfALuba3AreHolesLikeNoGoZones() {
+        // Type 23 (PyMammotion NO_GO_ZONE, user-drawn rectangle): same plan as the same rectangle as a type-1 no-go zone.
+        val base=request()
+        val rect=rectangle(4.0,3.0,1.5,1.5)
+        val asRect=CoverageEngine.plan(base.copy(map=base.map.copy(shapes=base.map.shapes+MapShape(9,23,rect)))).selected
+        val asNoGo=CoverageEngine.plan(request(holes=listOf(rect))).selected
+        assertTrue(asRect.diagnostics.toString(),asRect.valid)
+        assertEquals(asNoGo.preview!!.cuttingPaths,asRect.preview!!.cuttingPaths)
+        // Not a closed outline: refused instead of mowed through.
+        val error=assertThrows(IllegalArgumentException::class.java) { PlanningTerrain(base.copy(map=base.map.copy(shapes=base.map.shapes+MapShape(9,23,rect.take(2))))) }
+        assertTrue(error.message, error.message!!.contains("23"))
+    }
+    @Test fun virtualWallsVariantsAndUnknownTypesRefuseThePlanning() {
+        val base=request()
+        for (type in listOf(21,22,24,99)) {
+            val r=base.copy(map=base.map.copy(shapes=base.map.shapes+MapShape(9,type,rectangle(4.0,3.0,1.0,1.0))))
+            val error=assertThrows(IllegalArgumentException::class.java) { PlanningTerrain(r) }
+            assertTrue(error.message, error.message!!.contains("($type)"))
+        }
+    }
+    @Test fun informationalElementsAreIgnoredByThePlanning() {
+        // Dock transfer zone, planned lines, dump spot, drawing, mowing progress, corridor: drawn only.
+        val base=request()
+        val without=CoverageEngine.plan(base).selected
+        val extra=listOf(3,10,12,13,18,19,20).mapIndexed { i,type -> MapShape(20L+i,type,rectangle(4.0,3.0,1.0,1.0)) }
+        val with=CoverageEngine.plan(base.copy(map=base.map.copy(shapes=base.map.shapes+extra))).selected
+        assertTrue(with.diagnostics.toString(),with.valid)
+        assertEquals(without.preview!!.cuttingPaths,with.preview!!.cuttingPaths)
+    }
     @Test fun noStopZonesAreOrdinaryGroundForThePlanning() {
         // Type 25 (No-Stop zone, DumbyLuba#1): mowed like the rest of the zone, same plan as without it.
         val base=request()

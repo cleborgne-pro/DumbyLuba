@@ -7,6 +7,7 @@ import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
 import fr.luba.poc.map.kind
+import fr.luba.poc.map.excludes
 import fr.luba.poc.obstacles.LocalObstacle
 import org.json.JSONObject
 
@@ -194,7 +195,7 @@ object SilenceClearance {
         val zone = zones.firstOrNull { Geometry.inside(position, it.points) } ?: return tr("Robot outside the map zones", "Robot hors des zones de la carte")
         if (samples.any { !Geometry.inside(it, zone.points) }) return tr("Less than %.1f m clear in front of the robot in the zone", "Moins de %.1f m dégagés devant le robot dans la zone").format(CommandSilenceProbe.CLEARANCE_M)
         if (samples.any { p -> edgeDistance(p, zone) < halfWidthM }) return tr("Zone edge too close in front of the robot", "Bord de zone trop proche devant le robot")
-        map.shapes.filter { it.kind == ShapeKind.NO_GO && it.points.size >= 3 }.forEach { nogo ->
+        map.shapes.filter { it.excludes && it.points.size >= 3 }.forEach { nogo ->
             if (samples.any { Geometry.inside(it, nogo.points) || edgeDistance(it, nogo) < halfWidthM }) return tr("No-go zone in front of the robot", "Zone interdite devant le robot")
         }
         obstacles.forEach { o ->

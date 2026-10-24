@@ -59,7 +59,7 @@ object CoveragePlanner {
         if (zones.isEmpty()) return 0.0
         var surface: JtsGeometry = zones.first()
         zones.drop(1).forEach { surface = surface.union(it) }
-        map.shapes.filter { it.kind == ShapeKind.NO_GO }.forEach { surface = surface.difference(polygon(it.points)) }
+        map.shapes.filter { it.excludes }.forEach { surface = surface.difference(polygon(it.points)) }
         return surface.area
     }
 

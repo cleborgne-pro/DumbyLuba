@@ -71,6 +71,18 @@ class MapCacheTest {
         assertEquals(MapHeading.migrateDockEntry(152.5), cache.read("robot-A")!!.station!!.entryHeadingDegrees!!, 1e-9)
     }
 
+    @Test fun `element of a type not interpreted is kept by the cache`() {
+        // Known (23, rectangular no-go zone) or unknown (99, -1) types: the map is read back from the cache.
+        val cache = MapCache(context)
+        cache.save("robot-A", map)
+        val file = cacheFiles().single()
+        val good = file.readText()
+        for ((type, kind) in listOf(23 to ShapeKind.NO_GO_RECT, 99 to ShapeKind.UNKNOWN, -1 to ShapeKind.UNKNOWN)) {
+            file.writeText(JSONObject(good).apply { getJSONArray("shapes").getJSONObject(0).put("type", type) }.toString())
+            assertEquals(kind, cache.read("robot-A")!!.shapes.first { it.type == type }.kind)
+        }
+    }
+
     @Test fun `corrupted or abnormal file refused without exception`() {
         val cache = MapCache(context)
         cache.save("robot-A", map)
@@ -79,7 +91,6 @@ class MapCacheTest {
         fun refused(text: String, why: String) { file.writeText(text); assertNull(why, cache.read("robot-A")) }
         refused("{\"shapes\":[", "JSON tronqué")
         refused("", "fichier vide")
-        refused(JSONObject(good).apply { getJSONArray("shapes").getJSONObject(0).put("type", 7) }.toString(), "type de forme inconnu")
         refused(JSONObject(good).apply { getJSONObject("station").put("heading", 400.0) }.toString(), "cap hors bornes")
         refused(JSONObject(good).apply { getJSONArray("shapes").getJSONObject(0).getJSONArray("points").put(JSONArray().put("NaN").put(1.0)) }.toString(),
             "coordonnée non finie")

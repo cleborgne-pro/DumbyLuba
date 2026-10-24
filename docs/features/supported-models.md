@@ -141,6 +141,30 @@ bumper still stops it). Now (`map/Geometry.kt`):
 DumbyLuba does not drive the robot's vision module: inside a No-Stop zone as elsewhere, its own guards (bumper, lift,
 errors, link) apply.
 
+## Map element types
+
+Every element type known to PyMammotion (`PathType`, `hash_list.py`, commit c0e5ada) has its kind in
+`map/Geometry.kt` (`ShapeKind`), and what each kind does is carried by the kind itself:
+
+| Type | Kind | Map | Mowing computation | Moves |
+|------|------|-----|--------------------|-------|
+| 0 | zone | filled | mowed | allowed inside |
+| 1 | no-go zone | red | hole | avoided |
+| 2 | passage | grey band | link between zones | used |
+| 3, 10, 12, 13, 18, 19, 20 | dock transfer zone, planned lines, dump spot, drawing (SVG), mowing progress, corridor (Yuka mini) | thin dashed line | ignored | ignored |
+| 21 | virtual wall (line never to cross) | thick red line | refused | refused |
+| 22 | no-go zone variant (meaning not confirmed upstream) | like a no-go zone | refused | avoided |
+| 23 | rectangular no-go zone (drawn in the Mammotion app, LUBA 3) | like a no-go zone | hole | avoided |
+| 25 | No-Stop zone | light blue | ordinary ground | ordinary ground |
+| 26 | vision obstacle zone (never observed) | grey | refused | avoided |
+| other | unknown element | grey | refused | avoided if closed, refused otherwise |
+
+An element of type 22, 23 or 26, or of an unknown type, with fewer than 3 points cannot be avoided: the computation
+and the moves refuse the map, and the message names the elements and their types. An unknown type never blocks the
+reading: the element is kept (even without points), drawn, cached, and the map completes. Only a zone, no-go zone
+or passage answered without points leaves the map incomplete. The interpretation of types 21, 22 and 23 comes from
+PyMammotion and the Mammotion app code, not from a map read by DumbyLuba.
+
 ## LUBA 2 AWD X series: unlocked
 
 The X series (`Luba-VP…`) is a LUBA 2 AWD with a vision module: same platform, same Bluetooth protocol, and the 3000X

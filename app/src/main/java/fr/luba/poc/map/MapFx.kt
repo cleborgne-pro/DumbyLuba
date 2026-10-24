@@ -126,8 +126,8 @@ internal fun DrawScope.drawLawnLayers(
     for (shape in shapes) {
         when (shape.kind) {
             ShapeKind.ZONE -> Unit
-            ShapeKind.NO_GO -> {
-                val outline = path(shape.points, true)
+            ShapeKind.NO_GO, ShapeKind.NO_GO_RECT -> {
+                val outline = path(shape.points, shape.points.size >= 3)
                 drawPath(outline, colors.NoGoFill)
                 drawPath(outline, colors.NoGoStroke.copy(alpha = 0.7f), style = Stroke(1f * unit, join = StrokeJoin.Round))
             }
@@ -141,11 +141,19 @@ internal fun DrawScope.drawLawnLayers(
                 drawPath(line, Color.White.copy(alpha = 0.95f), style = Stroke(1.5f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
                     pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f * unit, 3f * unit))))
             }
-            ShapeKind.OBSTACLE, ShapeKind.VISION_ZONE -> {
-                val outline = path(shape.points, true)
-                drawPath(outline, colors.ObstacleFill)
+            ShapeKind.UNKNOWN, ShapeKind.VISION_ZONE, ShapeKind.NO_GO_VARIANT -> {
+                val closed = shape.points.size >= 3
+                val outline = path(shape.points, closed)
+                if (closed) drawPath(outline, colors.ObstacleFill)
                 drawPath(outline, colors.ObstacleStroke, style = Stroke(1.25f * unit, join = StrokeJoin.Round))
             }
+            // Virtual wall: a line never crossed, drawn thick in the danger colour.
+            ShapeKind.VIRTUAL_WALL -> drawPath(path(shape.points, false), colors.Danger, style = Stroke(3f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            // Elements shown for information (dock transfer zone, planned lines, dump spot, drawing, progress, corridor).
+            ShapeKind.TRANSFER_ZONE, ShapeKind.MOW_LINE, ShapeKind.DUMP, ShapeKind.DRAWING, ShapeKind.MOW_PROGRESS, ShapeKind.CORRIDOR ->
+                drawPath(path(shape.points, shape.kind == ShapeKind.TRANSFER_ZONE || shape.kind == ShapeKind.DUMP), colors.ObstacleStroke.copy(alpha = 0.6f),
+                    style = Stroke(1f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
+                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(3f * unit, 3f * unit))))
             // No-Stop zone: light blue tint and dashed outline, ordinary ground (mowed and crossed).
             ShapeKind.NO_STOP_ZONE -> {
                 val outline = path(shape.points, true)
