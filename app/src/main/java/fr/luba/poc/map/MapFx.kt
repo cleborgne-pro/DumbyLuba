@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.ui.theme.Drawing
 import fr.luba.poc.ui.theme.LubaColors
 import fr.luba.poc.ui.theme.MammotionColors
 import kotlin.math.hypot
@@ -123,6 +124,8 @@ internal fun DrawScope.drawLawnLayers(
             pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f * unit, 4f * unit))))
         else drawPath(outlines[i], colors.ZoneStroke, style = Stroke(1.5f * unit, join = StrokeJoin.Round))
     }
+    // Mammotion drawings: over the zones, under the no-go zones and the routes (switch in the Map sheet).
+    if (map.drawings.isNotEmpty() && MapDisplaySettings.current.patterns) drawPatterns(map.drawings, path, unit, colors)
     for (shape in shapes) {
         when (shape.kind) {
             ShapeKind.ZONE -> Unit
@@ -149,7 +152,8 @@ internal fun DrawScope.drawLawnLayers(
             }
             // Virtual wall: a line never crossed, drawn thick in the danger colour.
             ShapeKind.VIRTUAL_WALL -> drawPath(path(shape.points, false), colors.Danger, style = Stroke(3f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
-            // Elements shown for information (dock transfer zone, planned lines, dump spot, drawing, progress, corridor).
+            // Elements shown for information (dock transfer zone, planned lines, dump spot, progress, corridor); a drawing
+            // never carries points here, its tile and outlines are in RobotMap.drawings (drawPatterns).
             ShapeKind.TRANSFER_ZONE, ShapeKind.MOW_LINE, ShapeKind.DUMP, ShapeKind.DRAWING, ShapeKind.MOW_PROGRESS, ShapeKind.CORRIDOR ->
                 drawPath(path(shape.points, shape.kind == ShapeKind.TRANSFER_ZONE || shape.kind == ShapeKind.DUMP), colors.ObstacleStroke.copy(alpha = 0.6f),
                     style = Stroke(1f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
@@ -165,6 +169,33 @@ internal fun DrawScope.drawLawnLayers(
     }
     // Border types (OPEN, CURB, WALL, DANGER) over the outlines; reading the list here redraws the map when it changes.
     if (borders) drawBorderPortions(BorderTypeRepository.portions(map), path, unit)
+}
+
+/**
+ * Mammotion drawings ([MapDrawing]): an active pattern is a light purple fill with a thin outline and its tile
+ * footprint in fine dots; a pattern switched off ([MapDrawing.hidden]) only its faded dotted footprint; a pattern
+ * without usable outline (not SVG, too complex) only its footprint.
+ */
+internal fun DrawScope.drawPatterns(drawings: List<MapDrawing>, path: (List<Point>, Boolean) -> Path, unit: Float, colors: LubaColors) {
+    val tint = colors.Drawing
+    for (drawing in drawings) {
+        val tile = path(drawing.footprint, true)
+        if (drawing.hidden) {
+            drawPath(tile, tint.copy(alpha = 0.4f), style = Stroke(1f * unit, join = StrokeJoin.Round,
+                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2f * unit, 3f * unit))))
+            continue
+        }
+        for (shape in drawing.outline.shapes) {
+            val area = Path().apply {
+                fillType = if (shape.evenOdd) androidx.compose.ui.graphics.PathFillType.EvenOdd else androidx.compose.ui.graphics.PathFillType.NonZero
+                shape.paths.forEach { addPath(path(it.points, it.closed)) }
+            }
+            if (shape.filled) drawPath(area, tint.copy(alpha = 0.25f))
+            drawPath(area, tint.copy(alpha = 0.85f), style = Stroke(1f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+        drawPath(tile, tint.copy(alpha = 0.7f), style = Stroke(0.75f * unit, join = StrokeJoin.Round,
+            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(3f * unit, 3f * unit))))
+    }
 }
 
 /** Orange hatching (and thin outline) over the surface beyond the Mammotion boundaries. */

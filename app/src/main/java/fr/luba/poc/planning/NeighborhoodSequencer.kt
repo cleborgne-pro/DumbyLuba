@@ -93,6 +93,6 @@ internal class NeighborhoodSequencer(private val terrain: PlanningTerrain,
             if (repaired.second<old-1e-9) order=order.take(window.begin)+repaired.first+order.drop(window.end)
         }
         // Windows stay within their zone: the order metadata does not change.
-        return preview.copy(scheduledPaths=order,localOnly=true)
+        return preview.copy(scheduledPaths=order,localOnly=true,pathZoneIds=preview.zonesOf(order),outwardPaths=emptyMap())
     }
 }

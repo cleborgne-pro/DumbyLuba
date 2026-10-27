@@ -229,4 +229,84 @@ class CoveragePlannerTest {
         val costs=seen.map { it.meters+it.runs.size*10 }
         assertTrue(costs.zipWithNext().all { (a,b)->b<=a })
     }
+
+    /**
+     * Zamboni against Zigzag at the same angle, recorded boundary, 25 cm: the same passes (same mowed surface within 0.2
+     * point), no more runs, every run inside the chassis envelope; passes square to the boundary, the U-turns of the
+     * regular cells roll.
+     */
+    @Test fun zamboniDrivesTheZigzagPassesInAFrontAdvancingOrder() {
+        val robot = fr.luba.poc.obstacles.RobotEnvelope.LUBA2
+        val factory = org.locationtech.jts.geom.GeometryFactory()
+        for ((name, holes) in listOf("rectangle" to emptyList(), "rectangle with a hole" to listOf(hole))) for (angle in listOf(0, 30)) {
+            fun plan(mode: CoverageMode) = CoveragePlanner.plan(zone, holes, 0.25, 0.6, mode, true, recordedBoundary = true,
+                sweepOptions = SweepOptions(listOf(angle)), continuous = true, cutWidthM = 0.4)
+            val zigzag = plan(CoverageMode.LINES); val zamboni = plan(CoverageMode.ZAMBONI)
+            assertEquals("$name $angle°", angle, zamboni.angle)
+            assertEquals("$name $angle°", listOf(CoverageMode.ZAMBONI), zamboni.zoneModes)
+            assertEquals("$name $angle°: same passes", zigzag.passes.map { setOf(it.first(), it.last()) }.toSet(),
+                zamboni.passes.map { setOf(it.first(), it.last()) }.toSet())
+            fun mowed(p: Preview) = PassOrderMetrics.swept(p.runs + p.borders, zone, 0.4).area
+            assertEquals("$name $angle°: mowed surface", mowed(zigzag), mowed(zamboni), 0.002 * factory.createPolygon(
+                (zone + zone.first()).map { org.locationtech.jts.geom.Coordinate(it.x, it.y) }.toTypedArray()).area)
+            assertTrue("$name $angle°: ${zamboni.runs.size} runs against ${zigzag.runs.size}", zamboni.runs.size <= zigzag.runs.size)
+            // One U-turn per pass joined; more than the zigzag where a rolling U-turn joins passes the zigzag had to split.
+            assertEquals("$name $angle°: U-turns", zamboni.passes.size - zamboni.runs.size, zamboni.connectors)
+            assertTrue("$name $angle°: U-turns", zamboni.connectors >= zigzag.connectors)
+            var physical = RecordedBoundary.physicalArea(zone, robot)
+            holes.forEach { physical = physical.difference(RecordedBoundary.forbiddenArea(it, robot)) }
+            val envelope = TrajectoryEnvelope(physical, robot)
+            zamboni.runs.forEach { assertNull("$name $angle°", envelope.pathCollision(it)) }
+            val m = TurnOrder.step(0.25, TurnOptimizer.FOLLOW_RADIUS_M)
+            val order = PassOrderMetrics.order(zamboni, angle, 0.25, 2 * m + 2)
+            val drives = zamboni.runs.map { TurnOptimizer.drive(it, 0.3) }; val fast = zigzag.runs.map { TurnOptimizer.drive(it, 0.3) }
+            println("ZAMBONI $name $angle°: runs ${zigzag.runs.size} → ${zamboni.runs.size}, ${order.rolling} of ${order.turns} U-turns without pivot, " +
+                "front ${order.frontWidth} ranks, pivoted %.0f° → %.0f°, wear %.0f → %.0f, passes %.0f s → %.0f s".format(fast.sumOf { it.pivotDegrees },
+                    drives.sumOf { it.pivotDegrees }, fast.sumOf { it.wear }, drives.sumOf { it.wear }, fast.sumOf { it.durationS }, drives.sumOf { it.durationS }))
+            assertTrue("$name $angle°: front ${order.frontWidth}", order.frontWidth <= ZamboniOrder.window(0.25, TurnOptimizer.FOLLOW_RADIUS_M))
+            // Passes square to the boundary: every U-turn of the regular cells rolls. At 30° the pass ends are staggered by
+            // 0.43 m per row along the slanted boundary: a rolling U needs its passes shortened by more than the cut can
+            // sweep (TurnOptimizer.MAX_TRIM_M), so most U-turns stay pivots there (measured: 5 of 63 without the hole).
+            if (angle == 0) assertTrue("$name $angle°: ${order.rolling} of ${order.turns}", order.rolling >= 0.8 * order.turns)
+            assertTrue("$name $angle°: pivots", drives.sumOf { it.pivotDegrees } <= fast.sumOf { it.pivotDegrees })
+            assertTrue("$name $angle°: wear", drives.sumOf { it.wear } <= fast.sumOf { it.wear })
+        }
+    }
+
+    /**
+     * Spiral against Zigzag, recorded boundary, 25 cm, 40 cm cut, on the rectangle and on an L: mowed surface within 0.2
+     * point of the zigzag, cutting length at most 1.05 × the zigzag, no U-turn in the spiral chains (the U-turns left are
+     * those of the zigzag core, a pocket), every run inside the chassis envelope.
+     */
+    @Test fun spiralSweepsLikeTheZigzagWithoutUTurnsInItsChains() {
+        val robot = fr.luba.poc.obstacles.RobotEnvelope.LUBA2
+        val factory = org.locationtech.jts.geom.GeometryFactory()
+        val l = listOf(Point(0.0,0.0),Point(16.0,0.0),Point(16.0,6.0),Point(7.0,6.0),Point(7.0,14.0),Point(0.0,14.0))
+        for ((name, shape) in listOf("rectangle" to zone, "L" to l)) {
+            fun plan(mode: CoverageMode) = CoveragePlanner.plan(shape, emptyList(), 0.25, 0.6, mode, true, recordedBoundary = true,
+                continuous = true, cutWidthM = 0.4)
+            val zigzag = plan(CoverageMode.LINES); val spiral = plan(CoverageMode.SPIRAL)
+            assertEquals(name, listOf(CoverageMode.SPIRAL), spiral.zoneModes)
+            assertEquals(name, 0, spiral.angle)
+            val area = factory.createPolygon((shape + shape.first()).map { org.locationtech.jts.geom.Coordinate(it.x, it.y) }.toTypedArray()).area
+            fun mowed(p: Preview) = PassOrderMetrics.swept(p.runs + p.borders, shape, 0.4).area
+            fun length(p: Preview) = p.runs.sumOf { r -> r.zipWithNext().sumOf { (a, b) -> a.distance(b) } }
+            // Chains: the runs of the cells with a single pass, a closed spiral each.
+            val chains = spiral.runs.filterIndexed { i, _ -> spiral.runCellIds.count { it == spiral.runCellIds[i] } == 1 && spiral.passes.any { it == spiral.runs[i] || it.reversed() == spiral.runs[i] } }
+            val drives = spiral.runs.map { TurnOptimizer.drive(it, 0.3) }; val fast = zigzag.runs.map { TurnOptimizer.drive(it, 0.3) }
+            println(("SPIRAL $name: mowed %.2f / %.2f m² (zigzag / spiral), cutting %.0f / %.0f m (×%.3f), U-turns ${zigzag.connectors} / ${spiral.connectors}, " +
+                "runs ${zigzag.runs.size} / ${spiral.runs.size} (${chains.size} spiral chains), pivoted %.0f° / %.0f°, wear %.0f / %.0f, passes %.0f s / %.0f s").format(java.util.Locale.ROOT,
+                mowed(zigzag), mowed(spiral), length(zigzag), length(spiral), length(spiral) / length(zigzag), fast.sumOf { it.pivotDegrees }, drives.sumOf { it.pivotDegrees },
+                fast.sumOf { it.wear }, drives.sumOf { it.wear }, fast.sumOf { it.durationS }, drives.sumOf { it.durationS }))
+            assertTrue("$name: mowed", mowed(spiral) >= mowed(zigzag) - 0.002 * area)
+            assertTrue("$name: length", length(spiral) <= 1.05 * length(zigzag))
+            assertTrue("$name: chains", chains.isNotEmpty())
+            // No U-turn inside a chain: a U-turn joins two passes of a cell, and every chain is the only pass of its cell.
+            val chainCells = chains.map { c -> spiral.runCellIds[spiral.runs.indexOf(c)] }.toSet()
+            assertTrue(chainCells.all { cell -> spiral.passes.count { p -> spiral.runs.any { it == p } && spiral.runCellIds[spiral.runs.indexOf(p)] == cell } == 1 })
+            assertTrue("$name: U-turns ${spiral.connectors} against ${zigzag.connectors}", spiral.connectors < zigzag.connectors / 4)
+            val envelope = TrajectoryEnvelope(RecordedBoundary.physicalArea(shape, robot), robot)
+            spiral.runs.forEach { assertNull(name, envelope.pathCollision(it)) }
+        }
+    }
 }

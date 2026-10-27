@@ -20,11 +20,16 @@ object ReferenceRoutes {
     }
 
     /** Edges followed by actual mowing from the first cutting point: prepared mission then return to the approach point. */
-    fun routeEdges(map: RobotMap, base: MapBase, zone: MapShape): Pair<List<SimEdge>, Point> {
-        val request = PlanningRequest(map, listOf(zone.id), base.point,
-            config = PlanningConfig(spacingM = 0.25, minimumCoverage = 0.95, boundary = BoundaryMeaning.RECORDED_TRACE),
-            navigation = PlanningNavigation(emptyList(), base))
-        val plan = RoutePlanning.coverage(request)
+    fun routeEdges(map: RobotMap, base: MapBase, zone: MapShape, turnStyle: TurnStyle = TurnStyle.FAST): Pair<List<SimEdge>, Point> =
+        routeEdges(map, base, zone, plan(map, base, zone, turnStyle))
+
+    /** Mowing plan of [zone] as prepared by the map screen (spacing 25 cm, recorded boundaries). */
+    fun plan(map: RobotMap, base: MapBase, zone: MapShape, turnStyle: TurnStyle = TurnStyle.FAST): CoveragePlan =
+        RoutePlanning.coverage(PlanningRequest(map, listOf(zone.id), base.point,
+            config = PlanningConfig(spacingM = 0.25, minimumCoverage = 0.95, boundary = BoundaryMeaning.RECORDED_TRACE, turnStyle = turnStyle),
+            navigation = PlanningNavigation(emptyList(), base)))
+
+    fun routeEdges(map: RobotMap, base: MapBase, zone: MapShape, plan: CoveragePlan): Pair<List<SimEdge>, Point> {
         val routes = RoutePlanning.navigation(map, RobotEnvelope.LUBA2.halfWidthM + 0.05,
             map.shapes.filter { it.kind == ShapeKind.NO_GO }.map { it.points }, emptyList(), base = base, recordedBoundary = true)
         val engine = MowingSimulation(routes, base.point, plan.preview, map,

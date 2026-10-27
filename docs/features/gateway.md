@@ -3,7 +3,8 @@
 **A device mounted on the LUBA is required to control it over Bluetooth across the whole garden.** A second device
 placed on the robot, an old Android phone or an ESP32 board, holds the Bluetooth link right next to the LUBA, whose
 Bluetooth only reaches a few meters. The pilot phone talks to it over Wi-Fi, with no Bluetooth range limit. The gateway
-stops the robot if the pilot goes silent and, with a phone, can even follow the prepared route on its own.
+stops the robot if the pilot goes silent and can even follow the prepared route on its own (Android phone, and ESP32
+board since its firmware 0.3.0).
 
 ```
 Pilot phone (map, planning, guards) ── Wi-Fi, TCP 8766 ── Gateway (on the robot) ── BLE ── LUBA 2
@@ -12,7 +13,7 @@ Pilot phone (map, planning, guards) ── Wi-Fi, TCP 8766 ── Gateway (on th
 | | |
 |---|---|
 | **Access** | Service → **Wi-Fi gateway** |
-| **Status** | Android gateway in use on the robot (Redmi A1); autonomous tracking simulated and tested, then used on the robot during the tests of Oct 14 to 16 (incidents fixed up to 0.62.0; full checklist [not verified](../AUTONOMOUS_GATEWAY.md#to-validate-on-the-robot)); ESP32 gateway without autonomous tracking |
+| **Status** | Android gateway in use on the robot (Redmi A1); autonomous tracking simulated and tested, then used on the robot during the tests of Oct 14 to 16 (incidents fixed up to 0.62.0; full checklist [not verified](../AUTONOMOUS_GATEWAY.md#to-validate-on-the-robot)); ESP32 gateway with autonomous tracking since firmware 0.3.0 ([not tried on the robot](../AUTONOMOUS_GATEWAY.md#esp32-gateway-2026-10-23)) |
 | **Code** | `gateway/` (page `GatewayPanel.kt`, home screen `GatewayHomeScreen.kt`, pairing `GatewayPairing.kt`, `QrCode.kt`, `QrScanner.kt`, service `GatewayService.kt`), `autonomy/`, `firmware/esp32-gateway/` |
 | **References** | [Android gateway: how it works and setup](../ANDROID_GATEWAY.md) · [Autonomous tracking](../AUTONOMOUS_GATEWAY.md) · [ESP32 gateway](../../firmware/esp32-gateway/README.md) |
 
@@ -65,7 +66,11 @@ the service. With a gateway in use, a note recalls the 2 s silence rule.
    the Wi-Fi") and **Code shown on the gateway** (six digits, saved automatically), then **Find and test**. Scanning
    for and connecting to the robot then go through the gateway: tap the robot in Service → Bluetooth connection (or
    wait for the automatic connection, within 15 s), the gateway keeps it, reconnects to it on its own and restarts
-   with the phone.
+   with the phone. A gateway retries on its own only while it is in use (pilot connected, autonomous tracking) and
+   for 10 min after; beyond, it keeps a link that is up but, once the robot is lost (restart, out of range), leaves
+   it to the device using it and reconnects when the pilot phone connects to it again ("not connected: gateway
+   unused for 10 min" on its page). A LUBA accepts a single Bluetooth connection and stops advertising while held:
+   a second gateway left on with the same robot used to take it back after a robot restart.
 4. Turn **Go through the gateway** off to control the robot over direct Bluetooth without forgetting the gateway.
 
 The gateway address is optional: every gateway advertised on the Wi-Fi (mDNS `_dumbyluba._tcp`, instance
@@ -148,7 +153,7 @@ In the **Pilot** choice: *Gateway on the robot* (switch and forget, above), *Pai
 *Gateways on this Wi-Fi* and *Connection to the gateway* (above); with the gateway in use, also **Gateway health** (state received from
 the gateway, or "No information received: gateway not contacted yet." / "Gateway reachable; health state not received
 yet." / "Gateway unreachable: …"), **Routes** (switch **Hand routes over to the gateway**, see
-[Autonomous tracking](#autonomous-tracking-android-gateway)) and **ESP32 gateway updates** (switch **Updates during
+[Autonomous tracking](#autonomous-tracking-android-and-esp32-gateways)) and **ESP32 gateway updates** (switch **Updates during
 mowing**, see [ESP32 gateway](#esp32-gateway)).
 
 ## Security
@@ -165,20 +170,22 @@ mowing**, see [ESP32 gateway](#esp32-gateway)).
   the pilot.
 - Traffic is not encrypted: keep it to the home Wi-Fi ([SECURITY](../../SECURITY.md)).
 
-## Autonomous tracking (Android gateway)
+## Autonomous tracking (Android and ESP32 gateways)
 
 Switch **Hand routes over to the gateway** (pilot page, group *Routes*, on by default, can only be changed with the
 robot disconnected; subtitle "Autonomous tracking by the phone lying on the robot"). When it is off, or with a gateway
-that does not announce tracking (ESP32), routes are driven frame by frame from the pilot and a Wi-Fi outage of more
-than 2 s stops the robot. For every route (mowing, signal survey, transits, return
+that does not announce tracking (ESP32 before firmware 0.3.0), routes are driven frame by frame from the pilot and a
+Wi-Fi outage of more than 2 s stops the robot. For every route (mowing, signal survey, transits, return
 to base, resume after recharging), the pilot prepares the route and sends it once; the gateway follows it on its own
-with the same tracking loop and its own guards (telemetry, errors, lift).
+with the same tracking loop and its own guards (telemetry, errors, lift). The ESP32 board does the same since its
+firmware 0.3.0, without the overheating stop (no temperature on the board, see [ESP32 gateway](#esp32-gateway)).
 
 - **Good Wi-Fi**: progress, telemetry and surveys come back live; STOP interrupts tracking.
 - **Wi-Fi lost**: the robot **carries on alone**; the pilot shows "Gateway Wi-Fi lost for N s · the robot carries on
   alone" and retries every second. On reconnection, the gateway sends back the state and the missed surveys.
-- Automatic stop after **20 min** without a pilot, or if the gateway phone overheats critically.
-- Gateway phone battery **below 5 %** while not charging: blades are forbidden (a cutting segment stops or is not
+- Automatic stop after **20 min** without a pilot, or if the gateway phone overheats critically (Android gateway).
+- Gateway phone battery **below 5 %** while not charging (ESP32: board battery reported at 0 %, which its IP5306
+  chip reports below about 25 %): blades are forbidden (a cutting segment stops or is not
   started), but moves with blades stopped, including the return to base, remain allowed. If the gateway shuts down,
   the Bluetooth link drops and the robot stops.
 - Obstacle bypasses and recharging stay on the pilot: the robot stops and waits for it at those moments. Leaving
@@ -204,7 +211,11 @@ with the same tracking loop and its own guards (telemetry, errors, lift).
   the phone most likely lies (robot position at the last normal reading). A **Gateway** marker shows it on the map
   until the next tracking handed to the gateway. If the Bluetooth link drops first while the signal was already
   falling, the alert says "probably". The usual level is only learned while the robot drives 3 m with a steady signal
-  of −50 dBm or better: a phone left on the ground on purpose is never taken for a fall. See
+  of −50 dBm or better: a phone left on the ground on purpose is never taken for a fall. The point where the signal
+  was last normal must be current: a weaker signal found at the start of a new tracking, more than 3 s after the last
+  normal reading and with the robot already 75 cm or more from that point, does not stop the robot; the usual level
+  is learned again (a phone that shifted on the robot settles at its new level). Once a fall has been concluded, the
+  next tracking concludes again from the same point if the phone is still on the ground. See
   [technical detail](../AUTONOMOUS_GATEWAY.md#gateway-fallen-off-the-robot-130).
 
 ## Gateway health
@@ -249,7 +260,9 @@ and the gateway stays "Waiting for the pilot phone" (previously it wrongly showe
 ## ESP32 gateway
 
 A **LILYGO TTGO T-Call V1.3** board replaces the phone with the **same protocol**: the pilot stays in "Control via the
-gateway". Differences: no autonomous tracking (frame-by-frame control), no accelerometer and therefore no terrain,
+gateway". Since firmware 0.3.0 it runs the same autonomous tracking as the Android gateway (`autonomy` and `dock-exit`
+capabilities, [not tried on the robot yet](../AUTONOMOUS_GATEWAY.md#esp32-gateway-2026-10-23)). Differences: smaller
+memory for routes and surveys, no accelerometer and therefore no terrain nor thermal stop,
 reduced health (battery level and power supply), no QR code (no screen: the serial console command `pair` prints the
 same pairing link, to open on the pilot phone). Like the Android gateway, it lists every Mammotion mower, keeps the
 cutting height of every model (20 to 100 mm, H versions included) in the blades OFF of its safety stop, reports a
@@ -271,8 +284,8 @@ own. Installation: see the [firmware README](../../firmware/esp32-gateway/README
 
 ## Limitations
 
-- Read-only mode: the gateway lists every Mammotion mower (Android and ESP32 gateways), but autonomous tracking is only offered for the validated LUBA 2 AWD and the Android gateway refuses a leg for
-  a known robot name that is not validated ([supported models](supported-models.md)).
+- Read-only mode: the gateway lists every Mammotion mower (Android and ESP32 gateways), but autonomous tracking is only offered for the validated LUBA 2 AWD and the gateway (Android, and ESP32 since
+  firmware 0.3.0) refuses a leg for a known robot name that is not validated ([supported models](supported-models.md)).
 - Latency mostly comes from the **gateway phone's Wi-Fi** (screen off, Wi-Fi/Bluetooth coexistence, weak signal in the
   garden): moving the access point closer or adding a repeater remains the best remedy.
 - Both phones must speak the same gateway protocol (v2); the same app version is advised.

@@ -27,7 +27,7 @@ enum class ShapeKind(val types: Set<Int>, private val en: String, private val fr
     MOW_LINE(setOf(10), "planned mowing lines", "lignes de tonte prévues"),
     /** Type 12, clippings dump spot (`DUMP`, models with a collector): drawn only. */
     DUMP(setOf(12), "clippings dump spot", "point de vidage"),
-    /** Type 13, drawing (`SVG` pattern): no boundary, acknowledged by [MapTransfer], drawn only if it carries points. */
+    /** Type 13, drawing (`SVG` pattern): no boundary; its tile and outlines are kept in [RobotMap.drawings] ([MapDrawing]). */
     DRAWING(setOf(13), "drawing", "dessin"),
     /** Type 18, path driven during the current mowing (`DYNAMICS_LINE`): drawn only. */
     MOW_PROGRESS(setOf(18), "mowing progress", "progression de la tonte"),
@@ -104,10 +104,11 @@ fun RobotMap.movesRefusal(): String? {
 data class MapStation(val point: Point, val entryHeadingDegrees: Double?, val origin: String)
 /**
  * Boundary map. [mammotionShapes]: original Mammotion boundaries when [shapes] carries local corrections
- * ([MapCorrections]); the data attached to the robot map (base, access, heatmap) stay keyed on them.
+ * ([MapCorrections]); the data attached to the robot map (base, access, heatmap) stay keyed on them. [drawings]:
+ * Mammotion drawings (SVG patterns) read with the map, display only (ignored by the planning and the moves).
  */
 data class RobotMap(val shapes: List<MapShape> = emptyList(), val complete: Boolean = false, val source: String = tr("No map", "Aucune carte"), val station: MapStation? = null,
-    val mammotionShapes: List<MapShape>? = null) {
+    val mammotionShapes: List<MapShape>? = null, val drawings: List<MapDrawing> = emptyList()) {
     /** Boundaries as Mammotion recorded them (same as [shapes] without local correction). */
     val originalShapes: List<MapShape> get() = mammotionShapes ?: shapes
 }
@@ -126,8 +127,55 @@ data class Preview(val runs: List<List<Point>>, val meters: Double, val angle: I
      * the task height. */
     val pathHeights: List<Int> = emptyList(),
     /** Heights of the successive passes, from the first to the last; empty for a single pass. */
-    val cutHeights: List<Int> = emptyList()) {
+    val cutHeights: List<Int> = emptyList(),
+    /** Phase of the rows of each zone, aligned with [zoneIds]/[zoneAngles]: 0.5 centred in the zone, 0.2 or 0.8 shifted
+     * by 0.3 spacing ("Change every session"); empty when unknown (older saves: centred). */
+    val zonePhases: List<Double> = emptyList(),
+    /** Pattern actually applied on each zone, aligned with [zoneIds]; empty when unknown (older saves: [mode]). */
+    val zoneModes: List<CoverageMode> = emptyList(),
+    /** Zone id of each path of [cuttingPaths], set when the zones are merged ([MultiZonePlanner.combine]) and kept by the
+     * reorderings of the merged plan; empty when unknown (older saves, previews built by hand). */
+    val pathZoneIds: List<Long> = emptyList(),
+    /** Zamboni: number of cells of each zone driven in their front-advancing order, aligned with [zoneIds]; 0 when every
+     * cell of the zone keeps the zigzag order, −1 when the zone was ordered as in Zigzag because its Zamboni order had no
+     * safe link (warning in the preview for both). Spiral from the centre ([SpiralDirection.FROM_CENTRE]): number of chains
+     * of each zone driven outwards, −1 when the zone is driven from the edge because no order from the centre had safe
+     * links (warning in the preview). Empty for the other modes or when unknown. */
+    val zoneReorderedCells: List<Int> = emptyList(),
+    /** Spiral from the centre ([SpiralDirection.FROM_CENTRE]), one zone before its local order: the indices of [runs] that
+     * are spiral chains driven outwards, entered only at their first point (the centre end), each with the runs to mow
+     * before it (its core and the chains inside it) ([fr.luba.poc.planning.LocalMowingOrder]). Empty otherwise; not carried
+     * once the zones are ordered and merged (the order and directions are then fixed by [scheduledPaths]). */
+    val outwardRuns: Map<Int, Set<Int>> = emptyMap(),
+    /** Spiral from the centre, one zone before its local order: reach of a core (one cut and one spacing). It does not
+     * constrain the order: every path the order puts before an outward chain within this distance of its first point (a
+     * pocket pass whichever chain its pocket was given to, a loop) is added to the chain's [outwardPaths]. 0 otherwise;
+     * not carried once merged. */
+    val outwardReachM: Double = 0.0,
+    /** Spiral from the centre, once ordered ([fr.luba.poc.planning.LocalMowingOrder]) and merged
+     * ([MultiZonePlanner.combine]): the constraints of [outwardRuns], and the paths the order puts before their chain
+     * within [outwardReachM] of its first point, as indices of [cuttingPaths] (each outward chain with the paths to mow before it), kept in the mission checkpoint so that a reordered resume never drives a chain
+     * before its core or the chains inside it ([fr.luba.poc.simulation.SmartResume.afterRecharge]). Empty otherwise,
+     * when unknown (older saves) and after a reordering of [cuttingPaths] that does not follow them. */
+    val outwardPaths: Map<Int, Set<Int>> = emptyMap()) {
     val cuttingPaths: List<List<Point>> get() = scheduledPaths ?: if (startWithBorders) borders + runs else runs + borders
+    /** [pathZoneIds] when it gives the zone of every path of [cuttingPaths], otherwise null. */
+    val cuttingPathZones: List<Long>? get() = pathZoneIds.takeIf { it.isNotEmpty() && it.size == cuttingPaths.size }
+
+    /**
+     * Zone of each path of [paths], a reordering of [cuttingPaths] (the same paths, possibly reversed or repeated), read
+     * from [cuttingPathZones]; empty when it is unknown or a path is not found or belongs to two zones.
+     */
+    fun zonesOf(paths: List<List<Point>>): List<Long> {
+        val zones = cuttingPathZones ?: return emptyList()
+        val byPath = HashMap<List<Point>, Long?>()
+        cuttingPaths.forEachIndexed { i, path ->
+            for (key in listOf(path, path.reversed())) {
+                if (key !in byPath) byPath[key] = zones[i] else if (byPath[key] != zones[i]) byPath[key] = null
+            }
+        }
+        return paths.map { byPath[it] ?: return emptyList() }
+    }
 }
 object Geometry {
     /** Approximate cutting width of the LUBA 2 AWD 1000, in meters: used only for display (stripes). Adjustable in the interface. */
@@ -158,7 +206,9 @@ object Geometry {
              obstacles:List<fr.luba.poc.obstacles.ObstacleDisc> = emptyList(),
              robot:fr.luba.poc.obstacles.RobotEnvelope = fr.luba.poc.obstacles.RobotEnvelope.LUBA2,
              recordedBoundary:Boolean=false, basePoint:Point?=null,
-             outerOffsetM:Double=CoveragePlanner.RECORDED_OUTER_OFFSET_M, onProgress:(Preview)->Unit={}):Preview =
-        CoveragePlanner.plan(zone,holes,spacing,margin,mode,borders,borderPasses,noGoPasses,obstacles,robot,recordedBoundary,basePoint,onProgress,outerOffsetM=outerOffsetM)
+             outerOffsetM:Double=CoveragePlanner.RECORDED_OUTER_OFFSET_M,
+             turnStyle:TurnStyle=TurnStyle.FAST, speedMps:Double=0.3, cutWidthM:Double=spacing, onProgress:(Preview)->Unit={}):Preview =
+        CoveragePlanner.plan(zone,holes,spacing,margin,mode,borders,borderPasses,noGoPasses,obstacles,robot,recordedBoundary,basePoint,onProgress,
+            outerOffsetM=outerOffsetM,turnStyle=turnStyle,speedMps=speedMps,cutWidthM=cutWidthM)
     fun demo()=RobotMap(listOf(MapShape(1,0,listOf(Point(0.0,0.0),Point(16.0,0.0),Point(16.0,11.0),Point(0.0,11.0))),MapShape(2,1,listOf(Point(6.0,4.0),Point(9.0,4.0),Point(9.0,7.0),Point(6.0,7.0)))),true,"DÉMONSTRATION · " + tr("fictional map", "carte fictive"))
 }

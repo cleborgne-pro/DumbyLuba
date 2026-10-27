@@ -38,6 +38,90 @@ class MowingTaskSettingsTest {
         assertEquals(80f, high.chargeLow); assertEquals(95f, high.chargeHigh)
     }
 
+    @Test fun directionOfThePassesIsKeptAndFolded() {
+        val store = MowingTaskStore(context)
+        val chosen = MowingTaskSettings(mode = CoverageMode.CHECKERBOARD, orientation = OrientationMode.MANUAL, manualAngleDeg = 35)
+        store.write(chosen)
+        assertEquals(chosen, MowingTaskStore(context).read())
+        store.write(MowingTaskSettings(orientation = OrientationMode.EACH_SESSION))
+        assertEquals(OrientationMode.EACH_SESSION, MowingTaskStore(context).read().orientation)
+        // Angle folded into 0..179, like the direction of a pass.
+        assertEquals(20, MowingTaskSettings(manualAngleDeg = 200).sanitized().manualAngleDeg)
+        assertEquals(170, MowingTaskSettings(manualAngleDeg = -10).sanitized().manualAngleDeg)
+        assertEquals(0, MowingTaskSettings(manualAngleDeg = 180).sanitized().manualAngleDeg)
+    }
+
+    @Test fun unknownNamesAndOlderFilesFallBackToTheDefaults() {
+        val prefs = context.getSharedPreferences("mowing_task", 0)
+        prefs.edit().clear().putString("mode", "SPIRAL_FROM_THE_FUTURE").putString("orientation_mode", "SIDEWAYS")
+            .putInt("manual_angle_deg", 400).commit()
+        val read = MowingTaskStore(context).read()
+        assertEquals(CoverageMode.LINES, read.mode)
+        assertEquals(OrientationMode.AUTOMATIC, read.orientation)
+        assertEquals(40, read.manualAngleDeg)
+        // File written before the direction setting: automatic, 0°.
+        prefs.edit().clear().putString("mode", CoverageMode.OPTIMIZED.name).putFloat("spacing_m", 0.3f).commit()
+        val older = MowingTaskStore(context).read()
+        assertEquals(CoverageMode.OPTIMIZED, older.mode)
+        assertEquals(OrientationMode.AUTOMATIC, older.orientation)
+        assertEquals(0, older.manualAngleDeg)
+    }
+
+    @Test fun zamboniIsAMowingModeKeptByNameWithTheDirectionOfThePasses() {
+        val store = MowingTaskStore(context)
+        val chosen = MowingTaskSettings(mode = CoverageMode.ZAMBONI, orientation = OrientationMode.MANUAL, manualAngleDeg = 120)
+        assertEquals(chosen, chosen.sanitized())
+        store.write(chosen)
+        assertEquals(chosen, MowingTaskStore(context).read())
+        assertEquals("ZAMBONI", context.getSharedPreferences("mowing_task", 0).getString("mode", null))
+        assertTrue(CoverageMode.ZAMBONI.usesOrientation)
+        assertEquals(180, CoverageMode.ZAMBONI.orientationPeriod)
+        // Appended at the end (Spiral after it): the names and positions of the older modes are unchanged.
+        assertEquals(listOf(CoverageMode.LINES, CoverageMode.CHECKERBOARD, CoverageMode.TOUR, CoverageMode.SURVEY_GRID, CoverageMode.OPTIMIZED,
+            CoverageMode.ZAMBONI, CoverageMode.SPIRAL), CoverageMode.entries)
+        assertEquals("Zamboni", CoverageMode.ZAMBONI.label)
+    }
+
+    @Test fun spiralIsAMowingModeKeptByNameWithoutDirectionOfThePasses() {
+        val store = MowingTaskStore(context)
+        // The saved direction stays for the next zigzag, unused by the spiral.
+        val chosen = MowingTaskSettings(mode = CoverageMode.SPIRAL, orientation = OrientationMode.MANUAL, manualAngleDeg = 35)
+        assertEquals(chosen, chosen.sanitized())
+        store.write(chosen)
+        assertEquals(chosen, MowingTaskStore(context).read())
+        assertEquals("SPIRAL", context.getSharedPreferences("mowing_task", 0).getString("mode", null))
+        assertFalse(CoverageMode.SPIRAL.usesOrientation)
+        assertFalse(CoverageMode.SPIRAL.isSurvey)
+        assertEquals(CoverageMode.entries.last(), CoverageMode.SPIRAL)
+        assertEquals("Spirale", CoverageMode.SPIRAL.label)
+        assertTrue(orientationUnusedNote().contains("Spirale"))
+    }
+
+    @Test fun spiralDirectionIsKeptByNameAndDefaultsToTheEdge() {
+        val store = MowingTaskStore(context)
+        val prefs = context.getSharedPreferences("mowing_task", 0)
+        assertEquals(SpiralDirection.FROM_EDGE, MowingTaskSettings().spiralDirection)
+        val chosen = MowingTaskSettings(mode = CoverageMode.SPIRAL, spiralDirection = SpiralDirection.FROM_CENTRE)
+        assertEquals(chosen, chosen.sanitized())
+        store.write(chosen)
+        assertEquals(chosen, MowingTaskStore(context).read())
+        assertEquals("FROM_CENTRE", prefs.getString("spiral_direction", null))
+        // Kept while another mode is chosen, for the next spiral.
+        store.write(chosen.copy(mode = CoverageMode.LINES))
+        assertEquals(SpiralDirection.FROM_CENTRE, MowingTaskStore(context).read().spiralDirection)
+        // Unknown name or file written before the setting: from the edge, the behaviour before it.
+        prefs.edit().clear().putString("mode", CoverageMode.SPIRAL.name).putString("spiral_direction", "SIDEWAYS").commit()
+        assertEquals(SpiralDirection.FROM_EDGE, MowingTaskStore(context).read().spiralDirection)
+        prefs.edit().clear().putString("mode", CoverageMode.SPIRAL.name).commit()
+        assertEquals(SpiralDirection.FROM_EDGE, MowingTaskStore(context).read().spiralDirection)
+        // Labels, note and summary of the preview (unit tests run in French).
+        assertEquals(listOf("Depuis le bord", "Depuis le centre"), SpiralDirection.entries.map { it.label })
+        assertTrue(spiralNote(SpiralDirection.FROM_CENTRE).contains("du centre vers le contour"))
+        assertTrue(spiralNote().contains("vers l'intérieur"))
+        assertEquals("Spirale depuis le centre (expérimental)", spiralSummary(SpiralDirection.FROM_CENTRE))
+        assertEquals("Spirale depuis le bord (expérimental)", spiralSummary(SpiralDirection.FROM_EDGE))
+    }
+
     @Test fun returnReserveIsKeptAndBoundedByTheLowThreshold() {
         val store = MowingTaskStore(context)
         store.write(MowingTaskSettings(chargeLow = 25f, chargeHigh = 90f, returnReserve = 15f))

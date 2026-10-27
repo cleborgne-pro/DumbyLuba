@@ -36,6 +36,41 @@ class OffMapLatchTest {
         assertFalse(PointPlanner.beyondMapped(withPassage, Point(25.0, 10.0)))
     }
 
+    @Test fun noGoZoneCountsAsAnEdgeOfTheTaskArea() {
+        val noGo = MapShape(3, 1, listOf(Point(8.0, 8.0), Point(12.0, 8.0), Point(12.0, 12.0), Point(8.0, 12.0)))
+        val withNoGo = map.copy(shapes = map.shapes + noGo)
+        assertTrue("centre inside the no-go", PointPlanner.atExclusion(withNoGo, Point(10.0, 10.0)))
+        assertTrue("centre 18 cm from it, rear of the chassis inside", PointPlanner.atExclusion(withNoGo, Point(12.18, 10.0)))
+        assertFalse(PointPlanner.atExclusion(withNoGo, Point(12.5, 10.0)))
+        assertFalse("no no-go zone", PointPlanner.atExclusion(map, Point(10.0, 10.0)))
+        assertFalse("incomplete map", PointPlanner.atExclusion(withNoGo.copy(complete = false), Point(10.0, 10.0)))
+        assertFalse(PointPlanner.atExclusion(withNoGo, null))
+        // The move to a point keeps beyondMapped alone: a no-go zone is not beyond the map.
+        assertFalse(PointPlanner.beyondMapped(withNoGo, Point(12.18, 10.0)))
+        assertTrue(OffMapLatch.atEdge(withNoGo, Point(12.18, 10.0)))
+        assertTrue(OffMapLatch.atEdge(withNoGo, Point(19.8, 10.0)))
+        assertFalse(OffMapLatch.atEdge(withNoGo, Point(15.0, 15.0)))
+    }
+
+    /**
+     * 2026-10-25, 15:33:37 (Fold log): pivot at a corner of the Aire de jeux border pass, self-check 25 without a contact
+     * code. On the real map, the robot stood 18 cm from a no-go zone, right behind it: back-off impossible, joystick
+     * refused, robot pushed by hand.
+     */
+    @Test fun fieldCaseOfTheBorderPivotAgainstANoGoZone() {
+        val json = org.json.JSONObject(requireNotNull(javaClass.getResourceAsStream("/planner-reference-map.json")).bufferedReader().use { it.readText() })
+        val array = json.getJSONArray("shapes")
+        val shapes = (0 until array.length()).map { i -> val s = array.getJSONObject(i); val p = s.getJSONArray("points")
+            MapShape(s.getString("id").toLong(), s.getInt("type"), (0 until p.length()).map { Point(p.getJSONArray(it).getDouble(0), p.getJSONArray(it).getDouble(1)) }, s.getString("name")) }
+        val real = RobotMap(shapes, true, "BLE")
+        val stuck = Point(-18.8601, 12.9687)
+        assertTrue(PointPlanner.atExclusion(real, stuck))
+        assertFalse("inside the zone: not beyond the map", PointPlanner.beyondMapped(real, stuck))
+        assertTrue(OffMapLatch.ignored(25L, 0, OffMapLatch.atEdge(real, stuck)))
+        // Swing poles (registered obstacles, not no-go zones): 25 there stays the collision lock.
+        assertFalse(OffMapLatch.atEdge(real, Point(-8.8, 9.34)))
+    }
+
     @Test fun sectionsTravelToTheGatewayAndAreBounded() {
         val sections = listOf(listOf(Point(20.0, 10.0), Point(24.0, 10.0)))
         val spec = LegSpec(1, 2, 0, cutting = false, shown = true, watchBattery = false, departure = false, lastArrivalM = null,

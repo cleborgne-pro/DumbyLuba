@@ -65,14 +65,15 @@ object RobotRoute {
     fun departure(routes: TrajectoryPlanner, physical: TrajectoryPlanner?, start: Point, heading: Double,
                   target: Point, targetHeading: Double?): List<SimEdge> {
         fun transit(points: List<Point>) = points.zipWithNext().filter { (a,b) -> a.distance(b)>1e-8 }.map { (a,b) -> SimEdge(a,b,false) }
+        // Joining a pass near the outline: aligned with it rather than nose first ([TrajectoryPlanner.alignedArrival]).
         val failure = try {
-            val path = routes.directJoin(routes.between(start,target,heading,targetHeading),heading,targetHeading)
+            val path = routes.alignedArrival(routes.directJoin(routes.between(start,target,heading,targetHeading),heading,targetHeading),heading,targetHeading)
             routes.requirePath(path,heading,targetHeading)
             return transit(path)
         } catch (e: IllegalArgumentException) { e }
         val escape = physical?.let { escapePoint(routes,it,start,heading) } ?: throw failure
         val direction = Math.toDegrees(kotlin.math.atan2(escape.y-start.y,escape.x-start.x))
-        val rest = routes.between(escape,target,direction,targetHeading)
+        val rest = routes.alignedArrival(routes.between(escape,target,direction,targetHeading),direction,targetHeading)
         routes.requirePath(rest,direction,targetHeading)
         return listOf(SimEdge(start,escape,false,escape=true)) + transit(rest)
     }

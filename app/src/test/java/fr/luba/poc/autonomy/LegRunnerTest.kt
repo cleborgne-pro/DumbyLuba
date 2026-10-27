@@ -144,12 +144,38 @@ class LegRunnerTest {
         val env = robotAtStart()
         var latchedAt = 0L
         env.onTick = {
-            if (it.elapsedMs > 15_000 && latchedAt == 0L) { it.selfCheck = 41L; latchedAt = it.elapsedMs }
+            if (it.elapsedMs > 15_000 && latchedAt == 0L) { it.selfCheck = 20L; latchedAt = it.elapsedMs }
             if (latchedAt > 0 && it.elapsedMs > latchedAt + 1000) it.selfCheck = 10L
         }
         val result = run(env, spec())
         assertEquals(LegOutcome.FAILED, result.outcome)
+        assertEquals("Protection / état robot changé (état 20, protection 20)", result.text)
+    }
+
+    /** Raised play house of 2026-10-25: self-check 41 for one second while the robot drives under it. */
+    @Test fun shortPositioningLossIsRiddenThrough() {
+        val env = robotAtStart()
+        var lostAt = 0L
+        env.onTick = {
+            if (it.elapsedMs > 15_000 && lostAt == 0L) { it.selfCheck = 41L; lostAt = it.elapsedMs }
+            if (lostAt > 0 && it.elapsedMs > lostAt + 4000) it.selfCheck = 10L
+        }
+        val result = run(env, spec())
+        assertEquals(result.text, LegOutcome.DONE, result.outcome)
+        assertTrue(env.events.toString(), fr.luba.poc.simulation.PositioningGrace.EVENT in env.events)
+        assertTrue(env.sent.none { it == "ROUTE_LATCH_STOP" })
+    }
+
+    @Test fun lastingPositioningLossStopsAfterTheGrace() {
+        val env = robotAtStart()
+        var lostAt = 0L
+        env.onTick = { if (it.elapsedMs > 15_000 && lostAt == 0L) { it.selfCheck = 41L; lostAt = it.elapsedMs } }
+        val result = run(env, spec())
+        assertEquals(LegOutcome.FAILED, result.outcome)
         assertEquals("Protection / état robot changé (état 20, protection 41)", result.text)
+        val rode = env.elapsedMs - lostAt
+        assertTrue("ridden $rode ms", rode in fr.luba.poc.simulation.PositioningGrace.MAX_MS..fr.luba.poc.simulation.PositioningGrace.MAX_MS + 3000)
+        assertTrue(env.events.toString(), fr.luba.poc.simulation.PositioningGrace.EVENT + "_spent" in env.events)
     }
 
     @Test fun stopLockIsNotHeldForAContact() {

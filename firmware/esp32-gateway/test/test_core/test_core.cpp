@@ -5,6 +5,7 @@
 #include "gw_commands.h"
 #include "gw_ota.h"
 #include "gw_protocol.h"
+#include "gw_reconnect.h"
 #include "gw_safety.h"
 
 using gw::Bytes;
@@ -331,6 +332,285 @@ void test_protocol_frames() {
   TEST_ASSERT_FALSE(q.feed(tooLong, 3));
 }
 
+// One write per session pass: HEALTH, outbox in order, PING only after PING_MS without sending; same frames as before.
+void test_protocol_gather_single_write() {
+  namespace P = gw::proto;
+  uint32_t lastHealth = 0, lastTx = 0;
+  const Bytes health = P::Health().encode();
+  const std::deque<Bytes> none;
+  // First pass: HEALTH due, nothing queued, no PING (HEALTH just left).
+  TEST_ASSERT_TRUE(P::healthDue(1000, lastHealth));
+  P::Outgoing o = P::gather(1000, &health, none, lastHealth, lastTx);
+  assertBytes(P::encode(P::HEALTH, health), o.bytes);
+  TEST_ASSERT_EQUAL(1, o.frames);
+  TEST_ASSERT_TRUE(o.health);
+  TEST_ASSERT_FALSE(o.ping);
+  TEST_ASSERT_EQUAL_UINT32(1000, lastHealth);
+  TEST_ASSERT_EQUAL_UINT32(1000, lastTx);
+  // Outbox frames concatenated in order, no PING while frames leave.
+  const std::deque<Bytes> outbox = {P::encode(P::NOTIFY, Bytes{1, 2}), P::encode(P::WRITTEN, P::ints({0, 7}))};
+  TEST_ASSERT_FALSE(P::healthDue(1000 + P::HEALTH_MS - 1, lastHealth));
+  o = P::gather(1000 + P::PING_MS + 10, nullptr, outbox, lastHealth, lastTx);
+  Bytes expected = outbox[0];
+  expected.insert(expected.end(), outbox[1].begin(), outbox[1].end());
+  assertBytes(expected, o.bytes);
+  TEST_ASSERT_EQUAL(2, o.frames);
+  TEST_ASSERT_FALSE(o.health);
+  TEST_ASSERT_FALSE(o.ping);
+  TEST_ASSERT_EQUAL_UINT32(1000 + P::PING_MS + 10, lastTx);
+  TEST_ASSERT_EQUAL_UINT32(1000, lastHealth);
+  // Quiet: nothing before PING_MS, then a PING alone.
+  o = P::gather(lastTx + P::PING_MS - 1, nullptr, none, lastHealth, lastTx);
+  TEST_ASSERT_TRUE(o.bytes.empty());
+  TEST_ASSERT_EQUAL(0, o.frames);
+  const uint32_t quiet = lastTx + P::PING_MS;
+  o = P::gather(quiet, nullptr, none, lastHealth, lastTx);
+  assertBytes(P::encode(P::PING), o.bytes);
+  TEST_ASSERT_EQUAL(1, o.frames);
+  TEST_ASSERT_TRUE(o.ping);
+  TEST_ASSERT_EQUAL_UINT32(quiet, lastTx);
+  // HEALTH due again with queued frames: HEALTH first, then the outbox, still a single buffer.
+  const uint32_t later = 1000 + P::HEALTH_MS;
+  TEST_ASSERT_TRUE(P::healthDue(later, lastHealth));
+  o = P::gather(later, &health, outbox, lastHealth, lastTx);
+  expected = P::encode(P::HEALTH, health);
+  expected.insert(expected.end(), outbox[0].begin(), outbox[0].end());
+  expected.insert(expected.end(), outbox[1].begin(), outbox[1].end());
+  assertBytes(expected, o.bytes);
+  TEST_ASSERT_EQUAL(3, o.frames);
+  TEST_ASSERT_EQUAL_UINT32(later, lastHealth);
+  // The pilot parses the batch back into the same frames.
+  P::Parser parser;
+  TEST_ASSERT_TRUE(parser.feed(o.bytes.data(), o.bytes.size()));
+  P::Frame f;
+  TEST_ASSERT_TRUE(parser.next(f));
+  TEST_ASSERT_EQUAL_HEX8(P::HEALTH, f.type);
+  TEST_ASSERT_TRUE(parser.next(f));
+  TEST_ASSERT_EQUAL_HEX8(P::NOTIFY, f.type);
+  TEST_ASSERT_TRUE(parser.next(f));
+  TEST_ASSERT_EQUAL_HEX8(P::WRITTEN, f.type);
+  TEST_ASSERT_FALSE(parser.next(f));
+}
+
+// Exact HEALTH_MS / PING_MS limits: one millisecond short sends nothing, the limit itself sends.
+void test_protocol_gather_exact_limits() {
+  namespace P = gw::proto;
+  const Bytes health = P::Health().encode();
+  const std::deque<Bytes> none;
+  TEST_ASSERT_TRUE(P::healthDue(0, 0));
+  TEST_ASSERT_TRUE(P::healthDue(123456, 0));
+  TEST_ASSERT_FALSE(P::healthDue(1000, 1000));
+  TEST_ASSERT_FALSE(P::healthDue(1000 + P::HEALTH_MS - 1, 1000));
+  TEST_ASSERT_TRUE(P::healthDue(1000 + P::HEALTH_MS, 1000));
+  TEST_ASSERT_TRUE(P::healthDue(1000 + P::HEALTH_MS + 1, 1000));
+
+  uint32_t lastHealth = 1000, lastTx = 1000;
+  P::Outgoing o = P::gather(1000 + P::PING_MS - 1, nullptr, none, lastHealth, lastTx);
+  TEST_ASSERT_TRUE(o.bytes.empty());
+  TEST_ASSERT_EQUAL(0, o.frames);
+  TEST_ASSERT_FALSE(o.ping);
+  TEST_ASSERT_EQUAL_UINT32(1000, lastTx);
+  o = P::gather(1000 + P::PING_MS, nullptr, none, lastHealth, lastTx);
+  assertBytes(P::encode(P::PING), o.bytes);
+  TEST_ASSERT_TRUE(o.ping);
+  TEST_ASSERT_EQUAL_UINT32(1000 + P::PING_MS, lastTx);
+  TEST_ASSERT_EQUAL_UINT32(1000, lastHealth);
+
+  // HEALTH and PING due together: HEALTH alone (it resets the PING delay, as with one write per frame).
+  lastHealth = 1000;
+  lastTx = 1000;
+  const uint32_t both = 1000 + P::HEALTH_MS;
+  TEST_ASSERT_TRUE(P::healthDue(both, lastHealth));
+  o = P::gather(both, &health, none, lastHealth, lastTx);
+  assertBytes(P::encode(P::HEALTH, health), o.bytes);
+  TEST_ASSERT_EQUAL(1, o.frames);
+  TEST_ASSERT_TRUE(o.health);
+  TEST_ASSERT_FALSE(o.ping);
+  TEST_ASSERT_EQUAL_UINT32(both, lastHealth);
+  TEST_ASSERT_EQUAL_UINT32(both, lastTx);
+
+  // PING due with queued frames: the frames alone, the PING delay restarts.
+  lastTx = 1000;
+  const std::deque<Bytes> one = {P::encode(P::NOTIFY, Bytes{9})};
+  o = P::gather(1000 + 10 * P::PING_MS, nullptr, one, lastHealth, lastTx);
+  assertBytes(one[0], o.bytes);
+  TEST_ASSERT_FALSE(o.ping);
+  TEST_ASSERT_EQUAL_UINT32(1000 + 10 * P::PING_MS, lastTx);
+}
+
+// Empty outbox, HEALTH and PING not due: empty buffer (no write), clocks untouched.
+void test_protocol_gather_nothing_due() {
+  namespace P = gw::proto;
+  const std::deque<Bytes> none;
+  uint32_t lastHealth = 5000, lastTx = 5100;
+  const P::Outgoing o = P::gather(5100 + P::PING_MS - 1, nullptr, none, lastHealth, lastTx);
+  TEST_ASSERT_TRUE(o.bytes.empty());
+  TEST_ASSERT_EQUAL(0, o.frames);
+  TEST_ASSERT_FALSE(o.health);
+  TEST_ASSERT_FALSE(o.ping);
+  TEST_ASSERT_EQUAL_UINT32(5000, lastHealth);
+  TEST_ASSERT_EQUAL_UINT32(5100, lastTx);
+  // Same time as the last send.
+  const P::Outgoing same = P::gather(5100, nullptr, none, lastHealth, lastTx);
+  TEST_ASSERT_TRUE(same.bytes.empty());
+  TEST_ASSERT_EQUAL_UINT32(5100, lastTx);
+}
+
+// millis() wrapping around 2^32: HEALTH_MS and PING_MS measured across the wrap, no early or missed frame.
+void test_protocol_gather_millis_wrap() {
+  namespace P = gw::proto;
+  const Bytes health = P::Health().encode();
+  const std::deque<Bytes> none;
+  const uint32_t before = 0xFFFFFFFFu - 100;  // 101 ms before the wrap
+  TEST_ASSERT_FALSE(P::healthDue(before + 200, before));               // 200 ms later, after the wrap
+  TEST_ASSERT_FALSE(P::healthDue(before + P::HEALTH_MS - 1, before));  // wraps to a small value
+  TEST_ASSERT_TRUE(P::healthDue(before + P::HEALTH_MS, before));
+  TEST_ASSERT_TRUE(before + P::HEALTH_MS < before);  // the check above did cross the wrap
+
+  uint32_t lastHealth = before, lastTx = before;
+  P::Outgoing o = P::gather(before + P::PING_MS - 1, nullptr, none, lastHealth, lastTx);
+  TEST_ASSERT_TRUE(o.bytes.empty());
+  TEST_ASSERT_EQUAL_UINT32(before, lastTx);
+  const uint32_t ping = before + P::PING_MS;
+  TEST_ASSERT_TRUE(ping < before);
+  o = P::gather(ping, nullptr, none, lastHealth, lastTx);
+  assertBytes(P::encode(P::PING), o.bytes);
+  TEST_ASSERT_EQUAL_UINT32(ping, lastTx);
+
+  // HEALTH across the wrap with queued frames.
+  const std::deque<Bytes> outbox = {P::encode(P::WRITTEN, P::ints({0, 1}))};
+  const uint32_t due = before + P::HEALTH_MS;
+  TEST_ASSERT_TRUE(P::healthDue(due, lastHealth));
+  o = P::gather(due, &health, outbox, lastHealth, lastTx);
+  Bytes expected = P::encode(P::HEALTH, health);
+  expected.insert(expected.end(), outbox[0].begin(), outbox[0].end());
+  assertBytes(expected, o.bytes);
+  TEST_ASSERT_EQUAL(2, o.frames);
+  TEST_ASSERT_EQUAL_UINT32(due, lastHealth);
+  TEST_ASSERT_EQUAL_UINT32(due, lastTx);
+}
+
+// Large frames (payload at the parser limit MAX_PAYLOAD) gathered in one buffer: the parser gets the same frames back,
+// whether the buffer arrives at once, in 512-byte reads (as the session reads TCP) or byte by byte.
+void test_protocol_gather_large_frames_parse_back() {
+  namespace P = gw::proto;
+  Bytes big(P::MAX_PAYLOAD), almost(P::MAX_PAYLOAD - 1);
+  for (size_t i = 0; i < big.size(); i++) big[i] = (uint8_t)(i * 31 + 7);
+  for (size_t i = 0; i < almost.size(); i++) almost[i] = (uint8_t)(i * 17 + 3);
+  P::Health h;
+  h.batteryPercent = 77;
+  h.wifiRssiDbm = -61;
+  const Bytes health = h.encode();
+  const std::deque<Bytes> outbox = {P::encode(P::NOTIFY, big), P::encode(P::NOTIFY, Bytes{}),
+                                    P::encode(P::EVENT, almost), P::encode(P::WRITTEN, P::ints({3, 0})),
+                                    P::encode(P::NOTIFY, big)};
+  uint32_t lastHealth = 0, lastTx = 0;
+  const P::Outgoing o = P::gather(42, &health, outbox, lastHealth, lastTx);
+  TEST_ASSERT_EQUAL(6, o.frames);
+  size_t total = 3 + health.size();
+  for (const auto &f : outbox) total += f.size();
+  TEST_ASSERT_EQUAL_UINT32(total, o.bytes.size());
+
+  std::vector<P::Frame> expected(6);
+  expected[0].type = P::HEALTH, expected[0].payload = health;
+  expected[1].type = P::NOTIFY, expected[1].payload = big;
+  expected[2].type = P::NOTIFY;
+  expected[3].type = P::EVENT, expected[3].payload = almost;
+  expected[4].type = P::WRITTEN, expected[4].payload = P::ints({3, 0});
+  expected[5].type = P::NOTIFY, expected[5].payload = big;
+
+  const size_t chunks[] = {o.bytes.size(), 512, 1};
+  for (size_t chunk : chunks) {
+    P::Parser parser;
+    for (size_t at = 0; at < o.bytes.size(); at += chunk) {
+      const size_t n = o.bytes.size() - at < chunk ? o.bytes.size() - at : chunk;
+      TEST_ASSERT_TRUE(parser.feed(o.bytes.data() + at, n));
+    }
+    P::Frame f;
+    for (const auto &e : expected) {
+      TEST_ASSERT_TRUE(parser.next(f));
+      TEST_ASSERT_EQUAL_HEX8(e.type, f.type);
+      assertBytes(e.payload, f.payload);
+    }
+    TEST_ASSERT_FALSE(parser.next(f));
+  }
+}
+
+// Reference: the former send loop, one write per frame (session.cpp before the single write). Returns the bytes
+// written; [framesOut] counts as the former loop did when every write succeeds.
+static Bytes legacyPass(uint32_t t, bool healthProvider, const Bytes &health, const std::deque<Bytes> &out,
+                        uint32_t &lastHealth, uint32_t &lastTx, size_t &framesOut) {
+  namespace P = gw::proto;
+  Bytes wire;
+  if (healthProvider && (lastHealth == 0 || t - lastHealth >= P::HEALTH_MS)) {
+    lastHealth = t;
+    const Bytes f = P::encode(P::HEALTH, health);
+    wire.insert(wire.end(), f.begin(), f.end());
+    framesOut++;
+    lastTx = t;
+  }
+  for (const auto &f : out) {
+    wire.insert(wire.end(), f.begin(), f.end());
+    lastTx = t;
+  }
+  framesOut += out.size();
+  if (t - lastTx >= P::PING_MS) {
+    const Bytes f = P::encode(P::PING);
+    wire.insert(wire.end(), f.begin(), f.end());
+    framesOut++;
+    lastTx = t;
+  }
+  return wire;
+}
+
+// Pseudo-random session (irregular passes, bursts and silences, with and without a health provider, across the
+// millis() wrap): the gathered write is byte for byte the former sequence of writes, with the same clocks and count.
+void test_protocol_gather_matches_frame_by_frame() {
+  namespace P = gw::proto;
+  uint32_t seed = 0x2545F491u;
+  auto rnd = [&seed]() {
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return seed;
+  };
+  for (int run = 0; run < 4; run++) {
+    const bool provider = run != 3;
+    uint32_t t = run == 0 ? 1 : 0xFFFFFFFFu - 40000 + run * 1234;  // runs 1..3 cross 2^32
+    uint32_t oldHealth = 0, oldTx = 0, newHealth = 0, newTx = 0;
+    size_t oldCount = 0, newCount = 0;
+    bool wrapped = false;
+    for (int pass = 0; pass < 4000; pass++) {
+      const uint32_t r = rnd();
+      const uint32_t step = r % 10 == 0 ? 200 + rnd() % 400 : r % 4;  // mostly 0..3 ms, sometimes a silence
+      const uint32_t next = t + step;
+      if (next < t) wrapped = true;
+      t = next;
+      std::deque<Bytes> out;
+      const uint32_t queued = rnd() % 7 == 0 ? rnd() % 4 : 0;
+      for (uint32_t i = 0; i < queued; i++) {
+        Bytes payload(rnd() % 40);
+        for (auto &b : payload) b = (uint8_t)rnd();
+        out.push_back(P::encode(i % 2 ? P::WRITTEN : P::NOTIFY, payload));
+      }
+      P::Health h;
+      h.batteryPercent = (int)(pass % 101);
+      const Bytes health = h.encode();
+
+      const Bytes legacy = legacyPass(t, provider, health, out, oldHealth, oldTx, oldCount);
+      const bool due = provider && P::healthDue(t, newHealth);
+      const P::Outgoing o = P::gather(t, due ? &health : nullptr, out, newHealth, newTx);
+      newCount += o.frames;
+      assertBytes(legacy, o.bytes);
+      TEST_ASSERT_EQUAL_UINT32(oldHealth, newHealth);
+      TEST_ASSERT_EQUAL_UINT32(oldTx, newTx);
+      TEST_ASSERT_EQUAL_UINT32(oldCount, newCount);
+      TEST_ASSERT_EQUAL(due, o.health);
+    }
+    if (run != 0) TEST_ASSERT_TRUE(wrapped);
+  }
+}
+
 void test_protocol_open_and_scan() {
   std::string a, n;
   const std::string text = "AA:BB:CC:DD:EE:FF\nLuba-VS123";
@@ -388,6 +668,29 @@ void test_is_mower() {
 }
 
 // Pairing link read by GatewayPairing.parse (same as the Android gateway's QR code).
+void test_pairing_window() {
+  gw::proto::PairingWindow w;
+  TEST_ASSERT_FALSE(w.isOpen(0, 0));  // closed until the button opens it
+  TEST_ASSERT_EQUAL_UINT32(0, w.remainingMs(0));
+  w.open(1000, 2);
+  TEST_ASSERT_TRUE(w.isOpen(1000, 2));
+  TEST_ASSERT_EQUAL_UINT32(gw::proto::PairingWindow::DURATION_MS, w.remainingMs(1000));
+  TEST_ASSERT_TRUE(w.isOpen(1000 + gw::proto::PairingWindow::DURATION_MS - 1, 2));
+  TEST_ASSERT_FALSE(w.isOpen(1000 + gw::proto::PairingWindow::DURATION_MS, 2));  // time is up
+  TEST_ASSERT_EQUAL_UINT32(0, w.remainingMs(1000 + gw::proto::PairingWindow::DURATION_MS));
+  // A pilot authenticated with the code: closed at once, and stays closed.
+  w.open(5000, 3, 60000);
+  TEST_ASSERT_TRUE(w.isOpen(6000, 3));
+  TEST_ASSERT_FALSE(w.isOpen(6001, 4));
+  TEST_ASSERT_FALSE(w.isOpen(6002, 3));
+  // millis() wrapping around during the window.
+  w.open(0xFFFFFF00u, 0, 1000);
+  TEST_ASSERT_TRUE(w.isOpen(0x100u, 0));
+  TEST_ASSERT_EQUAL_UINT32(1000 - 0x200, w.remainingMs(0x100u));
+  w.close();
+  TEST_ASSERT_FALSE(w.isOpen(0x101u, 0));
+}
+
 void test_pairing_uri() {
   TEST_ASSERT_EQUAL_STRING("dumbyluba://pair?v=2&host=192.168.0.187&port=8766&code=123456&name=ESP32",
                            gw::proto::pairingUri("192.168.0.187", 8766, "123456", "ESP32").c_str());
@@ -459,6 +762,27 @@ void test_protocol_welcome_and_config() {
   TEST_ASSERT_EQUAL_STRING("0", v.c_str());
 }
 
+// Retained robot: automatic retries while the gateway is in use and for 10 min after, then a pilot is awaited.
+void test_reconnect_only_while_in_use() {
+  const uint32_t idle = gw::ReconnectPolicy::IDLE_RETRY_MS;
+  gw::ReconnectPolicy p(1000);
+  // Start counts as a use: a restarted gateway reaches its robot on its own.
+  TEST_ASSERT_TRUE(p.mayRetry(1000 + idle - 1, false));
+  TEST_ASSERT_FALSE(p.mayRetry(1000 + idle, false));
+  TEST_ASSERT_TRUE(p.pausedNow(1000 + idle, false));
+  TEST_ASSERT_FALSE(p.pausedNow(1000 + idle + 5000, false));  // reported once
+  // Pilot attached: retries go on however long the robot stays away (restart, out of range).
+  TEST_ASSERT_TRUE(p.mayRetry(1000 + 5 * idle, true));
+  TEST_ASSERT_TRUE(p.mayRetry(1000 + 6 * idle - 1, false));
+  TEST_ASSERT_FALSE(p.mayRetry(1000 + 6 * idle, false));
+  TEST_ASSERT_TRUE(p.pausedNow(1000 + 6 * idle, false));  // reported again after a new use
+  // millis() wrap-around.
+  gw::ReconnectPolicy w(0xFFFFFF00u);
+  TEST_ASSERT_TRUE(w.mayRetry(0x00000100u, false));
+  w.used(0xFFFFFFF0u);
+  TEST_ASSERT_FALSE(w.mayRetry(0xFFFFFFF0u + idle, false));
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_stop_encoding);
@@ -479,14 +803,22 @@ int main(int, char **) {
   RUN_TEST(test_safety_driver_height_reports);
   RUN_TEST(test_safety_blade_bits_luba2_only);
   RUN_TEST(test_protocol_frames);
+  RUN_TEST(test_protocol_gather_single_write);
+  RUN_TEST(test_protocol_gather_exact_limits);
+  RUN_TEST(test_protocol_gather_nothing_due);
+  RUN_TEST(test_protocol_gather_millis_wrap);
+  RUN_TEST(test_protocol_gather_large_frames_parse_back);
+  RUN_TEST(test_protocol_gather_matches_frame_by_frame);
   RUN_TEST(test_protocol_open_and_scan);
   RUN_TEST(test_wire_texts_match_android_gateway);
   RUN_TEST(test_is_mower);
   RUN_TEST(test_pairing_uri);
+  RUN_TEST(test_pairing_window);
   RUN_TEST(test_limiter);
   RUN_TEST(test_ota_policy);
   RUN_TEST(test_ota_nonce_single_use_and_expiry);
   RUN_TEST(test_ota_message_and_md5);
   RUN_TEST(test_protocol_welcome_and_config);
+  RUN_TEST(test_reconnect_only_while_in_use);
   return UNITY_END();
 }

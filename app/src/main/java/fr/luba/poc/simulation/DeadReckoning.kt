@@ -52,6 +52,10 @@ class DeadReckoning(
         const val CONFIRM_RUN_M = 0.15
         /** Obvious gap (published heading wrong after a stop, survey of 2026-10-10: 80–90°): adopted from the first measurement. */
         const val OBVIOUS_INNOVATION_DEGREES = 45.0
+        /** Straight line after the first confirmation over which the gap is measured again as a whole. */
+        const val LINE_RUN_M = 1.0
+        /** Unexplained change of the published heading between two positions that ends that measurement. */
+        const val LINE_HEADING_STEP_DEGREES = 10.0
         /** Robot "at rest" in rotation: no rotation command above this threshold is acting any more. */
         const val REST_ANGULAR = 40
         /** Minimum commanded rotation (units × s, ≈ 35°) between two rests to calibrate the gain. */
@@ -212,6 +216,20 @@ class DeadReckoning(
     private var runX = 0.0
     private var runY = 0.0
     /**
+     * Same straight line since its start, in the frame of the published heading (without the gap): after the first
+     * confirmation, the gap is measured again over all of it while the robot keeps driving straight ([provisional]),
+     * RTK noise only at its two ends (≈ 1.4° over 60 cm instead of ≈ 5° over 15 cm for 1 cm of noise).
+     */
+    private var lineX = 0.0
+    private var lineY = 0.0
+    private var provisional = false
+    /**
+     * Straight line (m) over which the confirmed gap was measured: the line of the first confirmation, then the
+     * measurements added to it. Taken over with the gap by a chained drive ([inheritHeading]); 0 while unconfirmed.
+     */
+    var headingSupportM = 0.0
+        private set
+    /**
      * Commanded rotation (units × s) and measured rotation accumulated since the last "at rest" position.
      * Between two rests, the ratio depends neither on the actual delay nor on inertia: all the commanded rotation has
      * happened. Isolated intervals are skewed by them (end of pivot: small commands, residual rotation).
@@ -226,6 +244,30 @@ class DeadReckoning(
     val calibration: Calibration? get() = if (rotationCalibrated) Calibration(metersPerUnit, degreesPerUnit) else null
 
     private fun wrap180(degrees: Double) = ((degrees + 540) % 360 + 360) % 360 - 180
+
+    /**
+     * Heading gap already confirmed by the previous drive, taken over by this one (the robot has not moved since): the
+     * first confirmation over a short straight line ([CONFIRM_RUN_M], ≈ 5° of RTK noise for 1 cm) is no longer needed
+     * and the measurements that follow refine it as usual. Only before the first position of this instance.
+     */
+    fun inheritHeading(offset: Double, supportM: Double) {
+        require(offset.isFinite() && supportM.isFinite() && supportM >= 0)
+        check(fix == null) { "inheritHeading before the first position only" }
+        headingOffset = wrap180(offset); headingConfirmed = true; largeInnovation = 0.0; runX = 0.0; runY = 0.0
+        headingSupportM = supportM
+    }
+
+    /**
+     * Interval ([alongM], [acrossM] in the frame of the published heading) consistent with the straight line measured
+     * after the first confirmation: its own direction stays within [LARGE_INNOVATION_DEGREES] of the direction of the
+     * whole line (an RTK noise of the previous end comes back here with the opposite sign: ≈ 20° for 3 cm over 16 cm,
+     * against the gap), and the gap the whole line gives stays within it of the current gap.
+     */
+    private fun provisionalStep(alongM: Double, acrossM: Double): Boolean {
+        val line = Math.toDegrees(atan2(lineY, lineX))
+        if (hypot(alongM, acrossM) >= COURSE_MIN_M && abs(wrap180(Math.toDegrees(atan2(acrossM, alongM)) - line)) > LARGE_INNOVATION_DEGREES) return false
+        return abs(wrap180(line - headingOffset)) <= LARGE_INNOVATION_DEGREES
+    }
 
     /** Fused heading: published heading corrected by the gap observed while moving. */
     fun heading(reported: Double): Double = ((reported + headingOffset) % 360 + 360) % 360
@@ -257,6 +299,7 @@ class DeadReckoning(
                 pureRotation = false
                 // The robot realigned its own heading: the old gap no longer holds, confirm again while driving.
                 headingOffset = 0.0; headingConfirmed = false; largeInnovation = 0.0; runX = 0.0; runY = 0.0
+                lineX = 0.0; lineY = 0.0; provisional = false; headingSupportM = 0.0
                 restUnits = 0.0; restTurned = 0.0; restStarted = false
             } else if (abs(turnUnits) >= 20 && abs(linearUnits) < 10 && turned * turnUnits > 0 &&
                     steadyRotation(fixAt - commandDelayMs - STEADY_MS, at - commandDelayMs))
@@ -274,7 +317,7 @@ class DeadReckoning(
             val straight = linearUnits >= 40 && abs(predictedTurn) <= 12
             // Heading assumed during the interval (middle of the predicted rotation).
             val believed = heading + headingOffset - predictedTurn / 2
-            if (!straight) { runX = 0.0; runY = 0.0 }
+            if (!straight) { runX = 0.0; runY = 0.0; lineX = 0.0; lineY = 0.0; provisional = false }
             else {
                 // Chord of the cumulative straight line, expressed in the frame of the assumed heading: RTK noise only
                 // affects its two ends. Also measured at low speed (less than 8 cm per second: execution bench of
@@ -282,6 +325,11 @@ class DeadReckoning(
                 val rad = Math.toRadians(believed)
                 val dx = position.x - previous.x; val dy = position.y - previous.y
                 runX += dx * cos(rad) + dy * sin(rad); runY += -dx * sin(rad) + dy * cos(rad)
+                // Published heading changed without a matching command (partial robot realignment): the line measured in
+                // its frame no longer holds as a whole.
+                if (provisional && abs(wrap180(turned - predictedTurn)) > LINE_HEADING_STEP_DEGREES) { provisional = false; lineX = 0.0; lineY = 0.0 }
+                val published = Math.toRadians(heading - predictedTurn / 2)
+                lineX += dx * cos(published) + dy * sin(published); lineY += -dx * sin(published) + dy * cos(published)
                 val chord = hypot(runX, runY)
                 val innovation = Math.toDegrees(atan2(runY, runX))
                 if (!headingConfirmed) {
@@ -289,7 +337,21 @@ class DeadReckoning(
                     if (chord >= COURSE_MIN_M && (abs(innovation) >= OBVIOUS_INNOVATION_DEGREES || chord >= CONFIRM_RUN_M)) {
                         headingOffset = wrap180(headingOffset + innovation)
                         headingConfirmed = true; largeInnovation = 0.0; runX = 0.0; runY = 0.0
+                        provisional = true; headingSupportM = chord
                     }
+                } else if (provisional && provisionalStep(dx * cos(published) + dy * sin(published), -dx * sin(published) + dy * cos(published))) {
+                    // Same straight line going on after the first confirmation: gap measured again over all of it
+                    // (bench of the sync with the Mammotion app: confirmed over 15 cm, 10° off once in ten draws, the
+                    // outline driven that much askew). Ends at the first curve or pivot, or after [LINE_RUN_M].
+                    val line = hypot(lineX, lineY)
+                    headingOffset = wrap180(Math.toDegrees(atan2(lineY, lineX)))
+                    headingSupportM = line
+                    runX = 0.0; runY = 0.0
+                    if (line >= LINE_RUN_M) provisional = false
+                } else if (provisional) {
+                    // Interval off the line (robot pushed or slid, RTK jump): never adopted at once, like a large gap of
+                    // a confirmed heading; the usual measurements take over from the next position.
+                    provisional = false; lineX = 0.0; lineY = 0.0; runX = 0.0; runY = 0.0
                 } else if (chord >= CONFIRM_RUN_M) {
                     // Heading already confirmed: a direction measured over 15 cm still carries RTK noise (≈ 5° for
                     // 1 cm; ≈ 10° over 8 cm: execution bench of 2026-10-10, two wrong measurements over 20° adopted
@@ -304,6 +366,7 @@ class DeadReckoning(
                         else -> COURSE_GAIN * min(1.0, chord / COURSE_FULL_M) * innovation
                     })
                     largeInnovation = if (large && largeInnovation * innovation <= 0) innovation else 0.0
+                    if (!large) headingSupportM += chord
                     runX = 0.0; runY = 0.0
                 }
             }

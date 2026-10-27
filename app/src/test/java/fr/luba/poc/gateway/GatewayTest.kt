@@ -419,6 +419,35 @@ class GatewayTest {
         assertNotNull(links.poll(2, TimeUnit.SECONDS))
     }
 
+    @Test fun idleGatewayLeavesTheRobotToTheDeviceUsingIt() {
+        // 2026-10-25: robot restarted under the ESP32 in use; the idle Redmi, still retrying, took it back first.
+        val opened = LinkedBlockingQueue<Pair<FakeLink, RobotLink.Listener>>()
+        val shared = GatewayRobot({ _, listener ->
+            FakeLink(listener).also { link ->
+                opened.offer(link to listener)
+                Thread { Thread.sleep(20); listener.onReady(link, 247) }.start()
+            }
+        }, { reports += it }, keepaliveMs = 60_000, retryMs = 200, idleRetryMs = 1500).also { robot = it }
+        shared.connect("AA:BB:CC:DD:EE:FF", "Luba-VS")
+        val (first, firstListener) = requireNotNull(opened.poll(1, TimeUnit.SECONDS))
+        assertTrue(waitFor { shared.state.ready })
+        // Lost within the window after its last use: retried on its own.
+        firstListener.onLost(first, 8, "robot redémarré")
+        val (second, secondListener) = requireNotNull(opened.poll(2, TimeUnit.SECONDS))
+        assertTrue(waitFor { shared.state.ready })
+        // Unused beyond the window: the link is kept, but once lost the gateway waits for a pilot.
+        Thread.sleep(1600)
+        secondListener.onLost(second, 8, "robot redémarré")
+        assertNull(opened.poll(1, TimeUnit.SECONDS))
+        assertTrue(waitFor { shared.state.retryPaused })
+        assertTrue(shared.state.label, shared.state.label.contains("inutilisée"))
+        assertEquals(1, reports.count { it.startsWith("Reconnexion automatique suspendue") })
+        // A pilot (or the gateway screen) asking for the robot reconnects it at once.
+        shared.connect("AA:BB:CC:DD:EE:FF", "Luba-VS")
+        assertNotNull(opened.poll(1, TimeUnit.SECONDS))
+        assertTrue(waitFor { shared.state.ready && !shared.state.retryPaused })
+    }
+
     @Test fun samePhoneReconnectingWaitsForItsPreviousSessionAndLearnsTheStop() {
         serve(silenceMs = 400)
         val first = GatewayChannel.open("127.0.0.1", server.localPort, code)

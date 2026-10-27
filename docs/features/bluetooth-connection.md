@@ -67,7 +67,7 @@ Bluetooth"), **Robot**, **Bluetooth identifier**, **Signal · MTU**, **Battery**
   codes. Then synchronization every 5 s (1.5 s while reading a map), renewal of the report subscription every 8 s,
   signal reading every 5 s (30 s through a gateway, skipped while the robot moves through it).
 - Only one GATT operation at a time, each confirmed within 1.5 s (through a gateway: 5 s for maintenance writes,
-  see [gateway](gateway.md#autonomous-tracking-android-gateway)). Length, CRC, duplicates and continuity of the
+  see [gateway](gateway.md#autonomous-tracking-android-and-esp32-gateways)). Length, CRC, duplicates and continuity of the
   received sequences are checked; an encrypted frame ("Encrypted BLE not supported") or a sequence break ("BluFi
   sequence lost") stops acquisition instead of silently resuming.
 - The foreground service `RobotLinkService` starts as soon as the link is ready

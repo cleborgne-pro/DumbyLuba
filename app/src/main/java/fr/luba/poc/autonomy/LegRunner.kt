@@ -55,6 +55,9 @@ class LegRunner(
     private val slideVelocity: ((Point) -> Point?)? = spec.slideField?.takeUnless { it.isEmpty }?.let { field -> field::velocity }
     /** Slides measured during pivots, handed to the pilot (`pivot_slide` event). */
     private val slideMeter = fr.luba.poc.simulation.PivotSlideMeter()
+    /** Short positioning loss ridden through (self-check 41 under a raised play house, 2026-10-25). */
+    private val positioningGrace = fr.luba.poc.simulation.PositioningGrace()
+    private var ridingPositioning = false
 
     init { reckoning.slide = slideVelocity }
 
@@ -290,7 +293,19 @@ class LegRunner(
                 val protectionUp = !(live.robotState in (if (spec.departure) listOf(11, 15, 20, 39) else listOf(11, 20)) && (SelfCheck.nominal(live.selfCheck) || offMapLatch))
                 // Protection waiting for the contact code: cleared, or delay elapsed without contact → stop on the protection.
                 latch?.let { (since, reason) -> if (!protectionUp || now - since >= CollisionLatch.CONTACT_GRACE_MS) error(reason) }
-                if (protectionUp) {
+                // Positioning loss (weak satellite signal) with the robot still driving: ridden through for a few seconds.
+                val riding = protectionUp && latch == null &&
+                    positioningGrace.rides(now, live.robotState, live.selfCheck, live.x?.let { x -> live.y?.let { y -> Point(x, y) } })
+                if (!protectionUp) positioningGrace.reset()
+                if (riding && !ridingPositioning) env.event(fr.luba.poc.simulation.PositioningGrace.EVENT,
+                    tr("Positioning lost (self-check ${live.selfCheck}): route continued for a few seconds", "Positionnement perdu (self-check ${live.selfCheck}) : trajet poursuivi quelques secondes"),
+                    mapOf("selfCheck" to live.selfCheck, "edge" to follower.index, "x" to live.x, "y" to live.y,
+                        "maxMs" to fr.luba.poc.simulation.PositioningGrace.MAX_MS, "maxM" to fr.luba.poc.simulation.PositioningGrace.MAX_M))
+                if (!riding && ridingPositioning && protectionUp) env.event(fr.luba.poc.simulation.PositioningGrace.EVENT + "_spent",
+                    tr("Positioning still lost after the grace: robot stopped", "Positionnement toujours perdu après le délai de grâce : robot arrêté"),
+                    mapOf("selfCheck" to live.selfCheck, "elapsedMs" to positioningGrace.elapsedMs(now), "edge" to follower.index))
+                ridingPositioning = riding
+                if (protectionUp && !riding) {
                     val reason = fr.luba.poc.simulation.ProtectionPause.reason(live.robotState, live.selfCheck)
                     // Collision lock (25) published before the contact code (2026-10-15, 11:00:06): immediate stop, then the
                     // contact read from the error history gives the back-off and the bypass ([CollisionLatch]).

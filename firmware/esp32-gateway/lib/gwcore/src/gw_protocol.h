@@ -117,6 +117,22 @@ struct Health {
   Bytes encode() const;
 };
 
+// What one pass of the pilot session sends, gathered for a single TCP write: with TCP_NODELAY each write is its own
+// segment and radio frame, airtime shared with Bluetooth. Order: HEALTH, the outbox, then PING only when nothing has
+// left for PING_MS.
+struct Outgoing {
+  Bytes bytes;        // concatenated frames
+  size_t frames = 0;  // frames in [bytes]
+  bool health = false;
+  bool ping = false;
+};
+// HEALTH due: first pass ([lastHealthMs] 0), then every HEALTH_MS.
+bool healthDue(uint32_t nowMs, uint32_t lastHealthMs);
+// [health]: HEALTH payload when due (healthDue), null otherwise. Updates [lastHealthMs] and [lastTxMs] as if the
+// frames were sent.
+Outgoing gather(uint32_t nowMs, const Bytes *health, const std::deque<Bytes> &outbox, uint32_t &lastHealthMs,
+                uint32_t &lastTxMs);
+
 // Splits a TCP stream into frames.
 class Parser {
  public:
@@ -141,6 +157,26 @@ class AttemptLimiter {
   size_t max_;
   uint32_t window_;
   std::deque<uint32_t> failures_;
+};
+
+// Pairing window opened by a press on the board's PWR button (on the T-Call it resets the ESP32: power-on reset).
+// While open, GET /pair hands the code over Wi-Fi to the phone that asks for it, so that the pilot can be paired
+// without the serial console. Closed after [durationMs], or as soon as a pilot authenticates with the code (the
+// phone that has just been paired checks it; a pilot that already knew it ends the window too).
+class PairingWindow {
+ public:
+  static constexpr uint32_t DURATION_MS = 180000;
+  // [authenticated]: count of pilots authenticated so far (only those that come after count).
+  void open(uint32_t nowMs, uint32_t authenticated, uint32_t durationMs = DURATION_MS);
+  void close() { open_ = false; }
+  // Updates and returns the state: closes once the time is up or a pilot has authenticated since the opening.
+  bool isOpen(uint32_t nowMs, uint32_t authenticated);
+  // Milliseconds left (0 when closed); call after isOpen().
+  uint32_t remainingMs(uint32_t nowMs) const;
+
+ private:
+  bool open_ = false;
+  uint32_t since_ = 0, duration_ = 0, authenticated_ = 0;
 };
 
 }  // namespace proto

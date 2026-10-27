@@ -6,9 +6,15 @@ import org.junit.Test
 class MapDisplayTest {
     @Test fun roundTripsEveryDisplay() {
         MapBackdrop.entries.forEach { backdrop ->
-            val display = MapDisplay(backdrop, zoneNames = false, scaleBar = false, routeAnimation = false)
+            val display = MapDisplay(backdrop, zoneNames = false, scaleBar = false, routeAnimation = false, patterns = false)
             assertEquals(display, MapDisplay.decode(display.encode()))
         }
+    }
+
+    @Test fun valueSavedBeforeThePatternsSwitchKeepsPatternsShown() {
+        assertEquals(MapDisplay(MapBackdrop.DOTS, routeAnimation = false), MapDisplay.decode("DOTS;true;true;false"))
+        assertEquals(true, MapDisplay.decode("DOTS;true;true;false").patterns)
+        assertEquals(false, MapDisplay.decode("GRID;true;true;true;false").patterns)
     }
 
     @Test fun missingOrUnknownValuesFallBackFieldByField() {

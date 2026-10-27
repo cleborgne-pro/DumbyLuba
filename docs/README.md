@@ -49,7 +49,7 @@
 | Document | Topic |
 |---|---|
 | [ANDROID_GATEWAY.md](ANDROID_GATEWAY.md) | Android gateway (Redmi A1) placed on the robot: roles, protocol, discovery |
-| [AUTONOMOUS_GATEWAY.md](AUTONOMOUS_GATEWAY.md) | autonomous route tracking by the gateway (works in simulation, not yet tried on the robot) |
+| [AUTONOMOUS_GATEWAY.md](AUTONOMOUS_GATEWAY.md) | autonomous route tracking by the gateway (tested in simulation, used on the robot during the tests of Oct 14 to 16; full checklist not yet run on the robot) |
 | [AUTONOMOUS_GATEWAY_MEASUREMENTS_2026-10-11.jsonl](AUTONOMOUS_GATEWAY_MEASUREMENTS_2026-10-11.jsonl) · [GATEWAY_BYPASS_MEASUREMENTS_2026-10-12.jsonl](GATEWAY_BYPASS_MEASUREMENTS_2026-10-12.jsonl) | raw measurements quoted in AUTONOMOUS_GATEWAY.md |
 | [REDMI_RELAY_POC.md](REDMI_RELAY_POC.md) | relay to the home server |
 | [RELIEF.md](RELIEF.md) | estimated terrain and the "Signals and terrain" view (menu paths have changed: see [signal surveys](features/signal-surveys-and-terrain.md)) |
@@ -59,6 +59,7 @@
 
 | Document | Topic |
 |---|---|
+| [ROBOT_TRIAL_PLAN.md](ROBOT_TRIAL_PLAN.md) | single field-trial plan for the three NOW roadmap items: Redmi autonomous tracking, motor watchdog and recharge/resume cycle, map sync with the Mammotion app; order of the day, measurements, report template |
 | [MILESTONE_1_TEST.md](MILESTONE_1_TEST.md) | first physical test: connection and telemetry, robot stationary |
 | [DIAGNOSTIC_CAMPAIGN.md](DIAGNOSTIC_CAMPAIGN.md) | Bluetooth diagnostics campaign, robot stationary, blades OFF |
 | [BLADE_TESTS.md](BLADE_TESTS.md) | supervised blade height and rotation tests (written for 0.1.4) |

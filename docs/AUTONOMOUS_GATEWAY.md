@@ -122,6 +122,13 @@ signal to the robot (`autonomy/GatewayDetachment.kt`, wired in `GatewayRobot`):
   as for a lift), the tracking ends `FAILED` with "Gateway fell off the robot near x=…, y=… (Bluetooth −52 dBm instead
   of −24 dBm, robot 1.6 m away)", and a `gateway_detached` tracking event carries the fields `x`, `y`, `rssiDbm`,
   `mountedDbm`, `robotX`, `robotY`, `distanceM`, `probable`.
+- **Stale drop point** (2026-10-25): the drop point is only trusted if the first weak reading of a streak comes at
+  most 3 s (`ANCHOR_FRESH_MS`) after the last mounted reading, or with the robot within 0.75 m of it. Otherwise the
+  readings stopped in between (between two trackings) while the robot moved, and nothing tells where a phone would
+  have fallen: the level is learned again from the new readings (no stop). Field case: −19 dBm until the end of a
+  tracking at 15:54:46, −51 dBm from the next one at 15:54:50, verdict "fell near" a point 1.5 m back left a minute
+  earlier, while the same phone then drove the robot 12 m with a steady −24 dBm. After a verdict the drop point is
+  known: the next tracking concludes again from it while the phone stays on the ground.
 - **Bluetooth lost first** (robot link closed during a tracking): if the last reading was already 10 dB below the
   mounted level and the robot 0.75 m or more from the drop point, the same verdict with `probable` set ("probably
   fell"); otherwise a plain Bluetooth loss.

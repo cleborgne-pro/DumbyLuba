@@ -28,8 +28,11 @@ class EnvelopeGuard;
 
 // Channel to the pilot phone (absent during a Wi-Fi outage). Must not block.
 using PilotSink = std::function<void(int type, const Bytes &payload)>;
-// Runs [body] on a new task / thread; false if it could not be started.
+// Runs [body] on another task / thread (ESP32: long-lived worker, gw_worker.h); false if it could not be handed over.
 using Spawner = std::function<bool(const char *name, std::function<void()> body)>;
+// Names given to the Spawner: a route tracking, a blob decoding.
+constexpr const char *TASK_LEG = "leg";
+constexpr const char *TASK_PREPARE = "leg-prepare";
 
 // The robot and the device carrying it, as seen by the autonomous route tracking.
 class LegHost {
@@ -60,9 +63,12 @@ Opt<std::string> refusal(const RobotView &view, int64_t nowMs, const Point &appr
 struct AutonomyLimits {
   int64_t orphanLimitMs = 20 * 60000LL;
   int64_t stopWaitMs = 6000;
-  // ESP32: 4 MB of PSRAM for everything; the Android gateway accepts 8 MB blobs and keeps 4 of each kind.
+  // ESP32: 4 MB of PSRAM for everything; the Android gateway accepts 8 MB blobs. Kept: 4 of each kind like the
+  // Android gateway, because the pilot (RemoteLegs.KEPT) assumes the last 4 of each are still there and does not send
+  // them again (keeping 2 refused trackings with "Surface d'enveloppe … non reçue"). Short of PSRAM, roomFor() still
+  // forgets the oldest ones before an upload.
   size_t maxBlobBytes = 1536 * 1024;
-  size_t maxKept = 2;
+  size_t maxKept = 4;
   size_t maxUploads = 3;
   size_t maxSamples = 30000;
   // Free memory before accepting an upload (unset: no check): largest allocatable block and total free bytes.

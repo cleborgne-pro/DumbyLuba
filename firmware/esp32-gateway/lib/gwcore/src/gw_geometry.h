@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "gw_alloc.h"
 #include "gw_types.h"
 
 namespace gw {
@@ -84,13 +85,14 @@ class AreaIndex {
  private:
   double tolerance_;
   size_t edges_ = 0;
-  std::vector<double> ax_, ay_, bx_, by_, lengths_, maxXs_, minXs_;
+  // In PSRAM on the ESP32 (gw_alloc.h): kept as long as the surface, never in the internal RAM.
+  ExtVector<double> ax_, ay_, bx_, by_, lengths_, maxXs_, minXs_;
   double minX_ = 0, minY_ = 0, cell_ = 1;
   int cols_ = 1, rows_ = 1;
-  std::vector<uint32_t> cellStart_, cellEdges_;  // edges closer than the tolerance to each cell (CSR)
-  std::vector<uint32_t> rowStart_, byMaxX_, byMinX_;  // edges of each row by decreasing max x / increasing min x
-  std::vector<uint8_t> cellState_;  // cells without a nearby edge: 1 inside, 2 outside, 0 to test
-  mutable std::vector<uint32_t> seen_;
+  ExtVector<uint32_t> cellStart_, cellEdges_;  // edges closer than the tolerance to each cell (CSR)
+  ExtVector<uint32_t> rowStart_, byMaxX_, byMinX_;  // edges of each row by decreasing max x / increasing min x
+  ExtVector<uint8_t> cellState_;  // cells without a nearby edge: 1 inside, 2 outside, 0 to test
+  mutable ExtVector<uint32_t> seen_;
   mutable uint32_t generation_ = 0;
 
   uint32_t nextGeneration() const;

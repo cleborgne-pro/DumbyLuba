@@ -1,0 +1,8 @@
+# Olimex ESP32-S3-DevKit-Lipo (8 MB flash): two OTA slots of 4,128,768 bytes (2.1 times those of min_spiffs.csv),
+# rollback (otadata), settings (nvs, same size as on the T-Call) and the core dump; no SPIFFS (unused by the gateway).
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x3F0000,
+app1,     app,  ota_1,   0x400000,0x3F0000,
+coredump, data, coredump,0x7F0000,0x10000,

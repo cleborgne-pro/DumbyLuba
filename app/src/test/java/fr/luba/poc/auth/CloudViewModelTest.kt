@@ -106,9 +106,43 @@ class CloudViewModelTest {
         val vm = model()
         assertTrue(vm.state.value.accountSaved)
         vm.login("moi@example.com", "secret", rememberAccount = false)
-        until("sign-in") { !vm.state.value.busy && vm.state.value.status == "0 LUBA dans le compte" }
+        until("sign-in") { !vm.state.value.busy && vm.state.value.status == "Aucun appareil dans le compte" }
         assertFalse(vm.state.value.accountSaved); assertNull(accounts.read()); assertTrue(vm.state.value.connected)
         assertNull(vm.state.value.selected)
+    }
+
+    @Test fun `LUBA 1 listed by its product key whatever its account name, other devices reported as unrecognized`() {
+        sessionStore.save(session().toString())
+        server.json(devicesPath, robots(Triple("MA5000H23A0012345", "iot5", "a1FbaU4Bqk5"), Triple("RTK-AB1234", "iot6", "a1qXkZ5P39W")))
+        val vm = model()
+        vm.refresh()
+        until("robots") { !vm.state.value.busy && vm.state.value.robots.isNotEmpty() }
+        assertEquals(listOf("MA5000H23A0012345"), vm.state.value.robots.map { it.name }); assertEquals("1 LUBA dans le compte", vm.state.value.status)
+        server.json(devicesPath, robots(Triple("RTK-AB1234", "iot6", "a1qXkZ5P39W")))
+        vm.refresh()
+        until("no mower") { !vm.state.value.busy && vm.state.value.robots.isEmpty() }
+        assertTrue(vm.state.value.status, vm.state.value.status.startsWith("1 appareil dans le compte, aucun reconnu comme tondeuse Mammotion"))
+    }
+
+    @Test fun `LUBA 1 with an empty account name and a spaced key is listed, skipped devices logged without name nor iotId`() {
+        sessionStore.save(session().toString())
+        server.json(devicesPath, robots(Triple("", "iot-luba1", " a1FbaU4Bqk5 "), Triple("", "iot-SECRET-0", "zzEmpty"),
+            Triple("AB", "iot-SECRET-1", "zzShort"), Triple("XYZ", "iot-SECRET-2", "zzThree"),
+            Triple("RTK-AB12345678", "iot-SECRET-3", "a1qXkZ5P39W")))
+        val vm = model()
+        vm.refresh()
+        until("robots") { !vm.state.value.busy && vm.state.value.robots.isNotEmpty() }
+        assertEquals(listOf("iot-luba1"), vm.state.value.robots.map { it.id }); assertEquals("iot-luba1", vm.state.value.selected?.id)
+        assertEquals("1 LUBA dans le compte", vm.state.value.status)
+        val diagnostics = java.io.File(app.filesDir, "diagnostics")
+        fun skipped() = diagnostics.walkTopDown().filter { it.isFile && it.extension == "jsonl" }
+            .flatMap { it.readLines().asSequence() }.map { JSONObject(it) }.filter { it.getString("event") == "cloud_device_skipped" }.toList()
+        until("skipped devices logged") { skipped().size == 4 }
+        val lines = skipped()
+        lines.forEach { line -> (0..3).forEach { assertFalse(line.toString(), line.toString().contains("iot-SECRET-$it")) } }
+        lines.forEach { assertFalse(it.toString(), it.toString().contains("RTK-AB12345678")); assertFalse(it.toString(), it.toString().contains("XYZ")) }
+        assertEquals(listOf(Triple("zzEmpty", "", 0), Triple("zzShort", "A", 2), Triple("zzThree", "X", 3), Triple("a1qXkZ5P39W", "RTK-AB", 14)),
+            lines.map { it.getJSONObject("fields") }.map { Triple(it.getString("productKey"), it.getString("namePrefix"), it.getInt("nameLength")) })
     }
 
     @Test fun `rejected credentials or missing network shown without session`() {

@@ -180,6 +180,10 @@ lock refines the same contact. Bumper / lift alert bits still raise the critical
 The LUBA 2 only gives the 1014 when its error history is read: the joystick now reads it every 500 ms (before
 2026-10-22 nothing read it while driving, so a contact went unseen or ended as "Wheels commanded without progress").
 A stop on wheels without progress while driving also keeps the 3 s window open, so a late 1014 is still logged.
+A contact the robot dates more than **15 s** before it is read is not placed on the map (`contact_late` in the log):
+the robot has moved since, and its current position is not where it hit. On 2026-10-25 the contacts of learning
+trials on swing poles, read 20 to 63 s later while driving by hand, were logged about 1 m away and then avoided by
+every mowing computation as presumed obstacles.
 The LUBA 2 also only records the contact in **manual mowing mode** (state 20): driven in ready mode (11), a pressed
 bumper left no trace at all (Fold log of 2026-10-22, 16:48-16:49: joystick and slow approach, error history unchanged,
 state 11 throughout). The joystick and the slow approach therefore drive in manual mode with blades OFF, renewed every

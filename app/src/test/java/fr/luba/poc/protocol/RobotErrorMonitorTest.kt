@@ -6,6 +6,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RobotErrorMonitorTest {
+    /** 2026-10-25: contact of 14:53:13 (learning trial) read at 14:54:16 while driving by hand, logged 1 m away. */
+    @Test fun contactReadLongAfterItHappenedIsNotPlacedAtTheCurrentPosition() {
+        val at = 1792936393L
+        assertTrue(BumperEvents.placedLate(RobotError(-1014, "systemUpdateBuf", at), (at + 63) * 1000))
+        assertTrue(BumperEvents.placedLate(RobotError(-1014, "systemUpdateBuf", at), (at + 21) * 1000))
+        assertFalse(BumperEvents.placedLate(RobotError(-1014, "systemUpdateBuf", at), (at + 1) * 1000 + 400))
+        // Robot internal clock (not a date) or no time: placed as before.
+        assertFalse(BumperEvents.placedLate(RobotError(-1014, "systemUpdateBuf", 137498), (at + 63) * 1000))
+        assertFalse(BumperEvents.placedLate(RobotError(-1014, "direct"), (at + 63) * 1000))
+    }
+
     @org.junit.Test fun signedFirmwareCollisionStillConfirmsContact() {
         org.junit.Assert.assertTrue(BumperEvents.confirmsContact(RobotError(-1014,"systemUpdateBuf",1791460131)))
         org.junit.Assert.assertFalse(BumperEvents.confirmsContact(RobotError(-1207,"direct")))

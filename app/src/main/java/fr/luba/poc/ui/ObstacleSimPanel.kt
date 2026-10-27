@@ -121,14 +121,14 @@ internal fun ObstacleSimPage(state: RobotUi, back: () -> Unit) {
     val routeReady = route != null && routeZone == zoneId
     PushedPage(ServicePage.OBSTACLE_SIM.title, back, bottomBar = {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
-            if (!routeReady) PrimaryPillButton(if (computing) tr("Computing…", "Calcul…") else tr("Prepare route", "Préparer le trajet"), ::prepare, Modifier.weight(1f),
+            if (!routeReady) PrimaryPillButton(if (computing) tr("Computing…", "Calcul…") else tr("Prepare route", "Préparer le trajet"), latestAction(::prepare), Modifier.weight(1f),
                 enabled = base != null && zoneId >= 0 && !computing && map.complete, icon = Icons.Rounded.Route)
             else {
-                SecondaryPillButton(if (sim == null) tr("Start", "Lancer") else tr("Restart", "Recommencer"), ::restart, Modifier.weight(1f),
+                SecondaryPillButton(if (sim == null) tr("Start", "Lancer") else tr("Restart", "Recommencer"), latestAction(::restart), Modifier.weight(1f),
                     enabled = probe != null && !computing, icon = Icons.Rounded.Replay)
                 PrimaryPillButton(if (playing) "Pause" else tr("Play", "Lecture"), { playing = !playing }, Modifier.weight(1f),
                     enabled = sim?.running == true && !computing, icon = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow)
-                SecondaryPillButton(tr("End", "Fin"), ::finish, Modifier.weight(0.7f), enabled = sim?.running == true && !computing, icon = Icons.Rounded.SkipNext)
+                SecondaryPillButton(tr("End", "Fin"), latestAction(::finish), Modifier.weight(0.7f), enabled = sim?.running == true && !computing, icon = Icons.Rounded.SkipNext)
             }
         }
     }) {

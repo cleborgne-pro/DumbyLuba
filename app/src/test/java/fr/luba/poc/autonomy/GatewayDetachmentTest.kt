@@ -10,10 +10,11 @@ import kotlin.math.log10
 
 class GatewayDetachmentTest {
     /** Robot driving along x at 0.4 m/s, one reading per second; [rssi] from the robot position. */
-    private fun drive(detector: GatewayDetachment, seconds: Int, startX: Double = 0.0, rssi: (Point) -> Int): Pair<Int, GatewayDetachment.Verdict>? {
+    private fun drive(detector: GatewayDetachment, seconds: Int, startX: Double = 0.0, startMs: Long = 0,
+                      rssi: (Point) -> Int): Pair<Int, GatewayDetachment.Verdict>? {
         for (t in 0 until seconds) {
             val here = Point(startX + 0.4 * t, 0.0)
-            detector.reading(t * 1000L, rssi(here), here)?.let { return t to it }
+            detector.reading(startMs + t * 1000L, rssi(here), here)?.let { return t to it }
         }
         return null
     }
@@ -97,6 +98,33 @@ class GatewayDetachmentTest {
         val again = Point(12.0, 0.0)
         val second = requireNotNull(drive(detector, 40, startX = 8.0) { if (it.x < again.x) -24 else fallen(again, it) }).second
         assertTrue("${second.point} vs first ${verdict.point}", second.point.distance(again) <= 0.41)
+    }
+
+    @Test fun weakerLevelFromTheStartOfTheNextRouteFarFromAStaleDropPointIsLearnedAgain() {
+        // 2026-10-25 at 15:54:58: −19 dBm until a route ended at x = 4.4, readings stopped while the robot was moved
+        // 1.5 m on, then −51 dBm from the start of the next route; the same phone then drove the robot 12 m.
+        val detector = GatewayDetachment()
+        drive(detector, 12) { -19 }
+        detector.rearm()
+        assertNull((0 until 30).firstNotNullOfOrNull { t ->
+            val here = Point(5.9 + 0.4 * t, 0.0)
+            detector.reading(60_000L + t * 1000, -45 + t % 3, here)
+        })
+        assertEquals("level learned again on the robot", -44.0, detector.mountedDbm!!.toDouble(), 1.0)
+        // A later fall is detected from that level.
+        val drop = Point(20.0, 0.0)
+        val (_, verdict) = requireNotNull(drive(detector, 30, startX = 18.0, startMs = 100_000) { if (it.x < drop.x) -45 else fallen(drop, it) - 21 })
+        assertTrue("${verdict.point}", verdict.point.distance(drop) <= 0.41)
+    }
+
+    @Test fun phoneStillOnTheGroundAfterAVerdictConcludesAgainAtTheNextRoute() {
+        val detector = GatewayDetachment()
+        val drop = Point(4.0, 0.0)
+        val first = requireNotNull(drive(detector, 40) { if (it.x < drop.x) -24 else fallen(drop, it) }).second
+        // Next route a minute later, phone still on the ground: drop point known, concluded again.
+        detector.rearm()
+        val again = (0 until 5).firstNotNullOfOrNull { t -> val here = Point(9.0 + 0.4 * t, 0.0); detector.reading(100_000L + t * 1000, fallen(drop, here), here) }
+        assertEquals(first.point, requireNotNull(again).point)
     }
 
     @Test fun verdictRebuiltFromEventFields() {

@@ -126,8 +126,9 @@ object DriftRecovery {
      * overlapping an edge a straight escape ahead, then a blades-OFF link
      * ([RobotRoute.departure], optional escape included) up to the projection of the start on the interrupted edge,
      * advanced by [skipM] then by the [ENTRY_OFFSETS_M] as long as the link fails; the rest of the route is unchanged.
-     * First a link keeping the tracking tolerance up to the entry pivot and over [LOOKAHEAD_M] after it, so as not to
-     * resume right at the edge; failing that, the first safe one.
+     * First a link keeping the tracking tolerance up to the entry pivot and over [LOOKAHEAD_M] after it, and meeting a
+     * pass near the outline along its axis ([ObstacleBypass.arrivesAligned]), so as not to resume right at the edge or
+     * nose first into the border; failing that, the first safe one.
      */
     fun plan(routes: TrajectoryPlanner, physical: TrajectoryPlanner, path: List<SimEdge>, origins: List<Int>?, index: Int,
              position: Point, headingDegrees: Double, trail: List<Point>, skipM: Double = 0.0): DriftPlan {
@@ -170,8 +171,9 @@ object DriftRecovery {
                     catch (error: IllegalArgumentException) { failure = error; continue }
                 // Chassis overlapping an edge: never a pivot or a link that does not start with the escape.
                 if (backOff == null && !inside && link.firstOrNull()?.escape != true) continue
+                // Strict: also along the pass axis when it lies near the outline, rather than nose first into the border.
                 if (strict && !(ObstacleBypass.followTolerant(routes, link, start, headingDegrees, headingOf(e)) &&
-                        ahead(routes, path, entryIndex, entry))) continue
+                        ObstacleBypass.arrivesAligned(routes, link, headingOf(e)) && ahead(routes, path, entryIndex, entry))) continue
                 val rest = listOf(e.copy(a = entry)) + path.drop(entryIndex + 1)
                 val restOrigins = (entryIndex until path.size).map { origins?.get(it) ?: it }
                 val edges = link + rest

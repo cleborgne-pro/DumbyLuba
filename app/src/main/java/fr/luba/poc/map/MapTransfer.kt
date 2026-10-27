@@ -14,6 +14,15 @@ import fr.luba.poc.proto.MctrlNavProto.*
  * - an element answered as a drawing (type 13, `toapp_svg_msg`) is done without boundary; one answered without
  *   points (`action` 8, empty frame) is done too, the reading goes on, but the map stays incomplete: the Mammotion app
  *   skips it, here a no-go zone must never vanish silently;
+ * - the content of the drawings (`svg_message_t`) is kept apart from the reading progress ([keepDrawing]): frames
+ *   stored by `dataHash` and `currentFrame` (a repeated frame is kept once, a series with another `totalFrame`
+ *   replaces the previous one), complete when as many frames as `totalFrame` are stored (a single frame when
+ *   `totalFrame` is 0), `svg_file_data` concatenated in `currentFrame` order (PyMammotion cuts it in 500-character
+ *   slices), placement read from the last frame. Seen on a real map on 2026-10-27: a two-frame drawing numbered
+ *   `currentFrame` 1 and 2 of `totalFrame` 2, sent in order, assembled and drawn correctly; the single frame at 0, frames
+ *   arriving out of order and pushed tiles are still to be confirmed on a capture. A tile whose `dataHash` is not in the
+ *   element list but whose parent (`paternalHashA`) is, pushed by the robot, is kept too.
+ *   They are published in [RobotMap.drawings] ([MapDrawing]), bounded by [MAX_DRAWINGS] and [MAX_TOTAL_SVG_CHARS];
  * - every PyMammotion element type has its [ShapeKind]; an element of any other type is kept and drawn
  *   ([ShapeKind.UNKNOWN]), even without points, the map completes and the planning and moves refuse it
  *   ([MapShape.refusesPlanning], [MapShape.refusesMoves]); a frame that cannot be understood is skipped, only the size
@@ -29,6 +38,17 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
     private val roots = sortedMapOf<Int, NavGetHashListAck>()
     private val frames = mutableMapOf<Long, MutableMap<Int, NavGetCommDataAck>>()
     private val drawingFrames = mutableMapOf<Long, MutableSet<Int>>()
+    /** Drawing frames with their content, by `dataHash` (frames by `currentFrame`), until the series is complete. */
+    private class SvgSeries(val parent: Long, val total: Int) {
+        val frames = sortedMapOf<Int, svg_message_t>()
+        var chars = 0
+        /** Some `svg_file_data` was dropped (size limits): the drawing keeps its footprint only. */
+        var oversized = false
+    }
+    private val svgSeries = mutableMapOf<Long, SvgSeries>()
+    /** Drawings assembled, by `dataHash`, kept in [snapshot] when they or their parent belong to the element list. */
+    private val drawings = linkedMapOf<Long, MapDrawing>()
+    private var drawingNotices = 0
     /** Elements answered without points or as a drawing: done, no boundary. */
     private val withoutBoundary = mutableMapOf<Long, String>()
     private val abandoned = mutableSetOf<Long>()
@@ -36,6 +56,7 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
     private var ignoredNotices = 0
     private var total = 0
     private var hashList: List<Long> = emptyList()
+    private var hashSet: Set<Long> = emptySet()
     private var current: Long? = null
     private var attempts = 0
     private var rootAttempts = 1
@@ -82,6 +103,7 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
                 deadline = clock() + frameTimeoutMs
                 if (rootsComplete) {
                     hashList = roots.values.flatMap { it.dataCoupleList }.distinct()
+                    hashSet = hashList.toHashSet()
                     if (hashList.size > 1024) throw LimitException(tr("Map too large: ${hashList.size} elements", "Carte trop volumineuse : ${hashList.size} éléments"))
                     note("map_hash_list", tr("${hashList.size} map elements announced", "${hashList.size} éléments de carte annoncés"), mapOf("elements" to hashList.size, "frames" to total))
                     out.addAll(next(commands))
@@ -144,7 +166,13 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
 
     private fun drawingFrame(f: svg_message_ack_t, commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
         val out = mutableListOf(commands.svgAck(f))
-        if (!rootsComplete || f.result != 0) return out
+        if (f.result != 0) return out
+        // The content never changes the reading progress below, nor stops it.
+        try { keepDrawing(f) } catch (e: RuntimeException) {
+            if (drawingNotices++ < 40) note("map_drawing_error", tr("Drawing frame content skipped: ${e.javaClass.simpleName}", "Contenu de trame de motif ignoré : ${e.javaClass.simpleName}"),
+                mapOf("hash" to f.dataHash, "frame" to f.currentFrame, "totalFrames" to f.totalFrame))
+        }
+        if (!rootsComplete) return out
         // A drawing tile tied to the element being read (its parent) is progress of that element.
         if (current != null && f.paternalHashA == current) deadline = clock() + frameTimeoutMs
         val h = f.dataHash
@@ -156,6 +184,59 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
             if (h == current) out.addAll(next(commands))
         }
         return out
+    }
+
+    /** Stores the content of a drawing frame and assembles the drawing once its series is complete. */
+    private fun keepDrawing(f: svg_message_ack_t) {
+        val h = f.dataHash
+        if (h == 0L || h in drawings || !f.hasSvgMessage()) return
+        // Once the list is known, a drawing belonging neither to it nor to one of its zones is not kept.
+        if (rootsComplete && h !in hashSet && f.paternalHashA !in hashSet) return
+        val single = f.totalFrame <= 0
+        if (f.totalFrame > MAX_DRAWING_FRAMES || (!single && f.currentFrame !in 0..f.totalFrame)) return
+        var series = svgSeries[h]
+        // New series (other frame count, or a single frame): replaces the previous one.
+        if (series == null || series.total != f.totalFrame || single) {
+            if (series == null && svgSeries.size >= MAX_DRAWINGS) return
+            series = SvgSeries(f.paternalHashA, f.totalFrame).also { svgSeries[h] = it }
+        }
+        if (f.currentFrame in series.frames) return
+        var message = f.svgMessage
+        val data = message.svgFileData.length
+        if (series.oversized || series.chars + data > SvgOutline.MAX_SVG_CHARS || storedSvgChars() + data > MAX_TOTAL_SVG_CHARS) {
+            series.oversized = true
+            message = message.toBuilder().clearSvgFileData().build()
+        } else series.chars += data
+        series.frames[f.currentFrame] = message
+        if (single || series.frames.size >= series.total) {
+            svgSeries.remove(h)
+            assemble(h, series)
+        }
+    }
+
+    private fun storedSvgChars() = svgSeries.values.sumOf { it.chars } + drawings.values.sumOf { it.svg.length }
+
+    private fun assemble(h: Long, series: SvgSeries) {
+        val last = series.frames.values.last()
+        val svg = if (series.oversized) "" else series.frames.values.joinToString("") { it.svgFileData }
+        val name = last.svgFileName.ifEmpty { series.frames.values.firstOrNull { it.svgFileName.isNotEmpty() }?.svgFileName.orEmpty() }
+        val fields = mapOf("hash" to h, "zone" to series.parent, "frames" to series.frames.size, "svgChars" to svg.length,
+            "fileName" to name, "x" to last.xMove, "y" to last.yMove, "scale" to last.scale, "rotate" to last.rotate,
+            "baseWidthM" to last.baseWidthM, "baseHeightM" to last.baseHeightM, "baseWidthPix" to last.baseWidthPix,
+            "baseHeightPix" to last.baseHeightPix, "hidden" to last.hideSvg, "oversized" to series.oversized,
+            "listed" to (h in hashSet), "zoneListed" to (series.parent in hashSet))
+        if (drawings.size >= MAX_DRAWINGS) {
+            if (drawingNotices++ < 40) note("map_drawing_ignored", tr("Too many drawings: drawing left out", "Trop de motifs : motif ignoré"), fields)
+            return
+        }
+        val drawing = MapDrawing.of(h, series.parent, last.xMove, last.yMove, last.scale, last.rotate, last.baseWidthM, last.baseHeightM,
+            last.baseWidthPix, last.baseHeightPix, name, svg, last.hideSvg)
+        if (drawing == null) {
+            if (drawingNotices++ < 40) note("map_drawing_ignored", tr("Drawing with an unusable placement left out", "Motif au placement inutilisable ignoré"), fields)
+            return
+        }
+        drawings[h] = drawing
+        note("map_drawing", tr("Drawing read (${svg.length} characters)", "Motif lu (${svg.length} caractères)"), fields)
     }
 
     private fun finish(h: Long, reason: String, type: Int, frameCount: Int) {
@@ -174,7 +255,7 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
 
     private fun request(h: Long, commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
         attempts++
-        frames.remove(h); drawingFrames.remove(h)
+        frames.remove(h); drawingFrames.remove(h); svgSeries.remove(h)
         deadline = clock() + requestTimeoutMs
         return listOf(commands.sync(syncType = syncType), commands.mapData(h))
     }
@@ -213,12 +294,15 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
         val uninterpreted = shapes.filter { it.kind == ShapeKind.UNKNOWN }.map { it.type }.distinct().sorted()
         val empty = withoutBoundary.count { it.value == EMPTY }
         val done = rootsComplete && abandoned.isEmpty() && empty == 0 && hashList.all(::done)
+        // A drawing of the list, or a tile pushed into a zone of the list.
+        val kept = if (!rootsComplete) emptyList() else drawings.values.filter { it.hash in hashSet || (it.zoneHash != 0L && it.zoneHash in hashSet) }
         val label = tr("${if (syncType == 2) "BLE" else "Cloud"} map · $read/${if (rootsComplete) hashList.size else "?"} items",
             "Carte ${if (syncType == 2) "BLE" else "cloud"} · $read/${if (rootsComplete) hashList.size else "?"} éléments") +
             (if (abandoned.isNotEmpty()) tr(" · ${abandoned.size} without answer", " · ${abandoned.size} sans réponse") else "") +
             (if (empty > 0) tr(" · $empty empty", " · $empty vide(s)") else "") +
-            (if (uninterpreted.isNotEmpty()) tr(" · unknown types: ${uninterpreted.joinToString()}", " · types inconnus : ${uninterpreted.joinToString()}") else "")
-        return RobotMap(shapes, done && shapes.all { !it.kind.isContour || it.points.size >= 3 }, label, stationReader.station)
+            (if (uninterpreted.isNotEmpty()) tr(" · unknown types: ${uninterpreted.joinToString()}", " · types inconnus : ${uninterpreted.joinToString()}") else "") +
+            (if (kept.isNotEmpty()) tr(" · ${kept.size} patterns", " · ${kept.size} motifs") else "")
+        return RobotMap(shapes, done && shapes.all { !it.kind.isContour || it.points.size >= 3 }, label, stationReader.station, drawings = kept)
     }
 
     /** Size limit of the reading (elements, points): the only failure that ends it at once. */
@@ -227,6 +311,12 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
     companion object {
         /** Upstream type of the drawings (SVG patterns, PyMammotion `PathType.SVG`). */
         const val DRAWING_TYPE = 13
+        /** Most drawings kept for one map (and series being assembled). */
+        const val MAX_DRAWINGS = 64
+        /** Most SVG characters kept for one map, all drawings together. */
+        const val MAX_TOTAL_SVG_CHARS = 2 * 1024 * 1024
+        /** Most frames of one drawing (`svg_file_data` sent by 500 characters: 256 KB fit in 525 frames). */
+        const val MAX_DRAWING_FRAMES = 1024
         private const val DRAWING = "drawing"
         private const val NO_GEOMETRY = "no geometry"
         private const val EMPTY = "empty"

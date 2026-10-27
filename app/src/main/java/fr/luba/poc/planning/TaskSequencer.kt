@@ -69,7 +69,13 @@ internal class TaskSequencer(private val terrain: PlanningTerrain,private val ev
         if(!best.second.isFinite()) return preview
         val zoneOrder=best.first.map { path -> terrain.zones[zones.indexOfFirst { it.covers(line(path)) }].id }.distinct()
         val angles=preview.zoneIds.zip(preview.zoneAngles).toMap()
-        return preview.copy(scheduledPaths=best.first,localOnly=true,zoneIds=zoneOrder,
-            zoneAngles=zoneOrder.map { angles[it] ?: preview.angle })
+        val phases=preview.zoneIds.zip(preview.zonePhases).toMap()
+        val modes=preview.zoneIds.zip(preview.zoneModes).toMap()
+        val reordered=preview.zoneIds.zip(preview.zoneReorderedCells).toMap()
+        return preview.copy(scheduledPaths=best.first,localOnly=true,zoneIds=zoneOrder,pathZoneIds=preview.zonesOf(best.first),outwardPaths=emptyMap(),
+            zoneAngles=zoneOrder.map { angles[it] ?: preview.angle },
+            zonePhases=if(phases.size==preview.zoneIds.size) zoneOrder.map { phases[it] ?: 0.5 } else emptyList(),
+            zoneModes=if(modes.size==preview.zoneIds.size) zoneOrder.map { modes[it] ?: preview.mode } else emptyList(),
+            zoneReorderedCells=if(reordered.size==preview.zoneIds.size) zoneOrder.map { reordered[it] ?: 0 } else emptyList())
     }
 }

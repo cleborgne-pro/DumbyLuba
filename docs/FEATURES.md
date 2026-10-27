@@ -32,7 +32,7 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 
 | Page | In short |
 |---|---|
-| [Preparing a mowing session](features/mowing-preparation.md) | zones in mowing order, Zigzag / Optimized / Checkerboard modes, task settings (height, decreasing-height passes, speed, recharge thresholds, border laps), start point, planning engine, robot footprint |
+| [Preparing a mowing session](features/mowing-preparation.md) | zones in mowing order, Zigzag / Optimized / Checkerboard / Zamboni / Spiral (experimental) modes, direction of the passes (automatic, every session or manual, chosen on the map), task settings (height, decreasing-height passes, speed, recharge thresholds, border laps), start point, planning engine, robot footprint |
 | [Mowing simulation](features/simulation.md) | animated route with battery, recharges and resumes, no command sent to the robot |
 | [Real mowing](features/real-mowing.md) | route tracking over BLE, mowing bar, blades, speed, automatic stops, working hours, pivots on slopes, recharge during mowing |
 | [Resuming an interrupted mowing session](features/mowing-resume.md) | progress saving for any tracked task, resume with overlap, Unblock, Resume further on, automatic resume after a gateway loss while recharging |
@@ -78,5 +78,5 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 | M5 Mammotion map | Implemented: BLE and cloud reading, local cache, local corrections (0.60.0) |
 | M6 Position on the map and history | Implemented: last reliable RTK position, track, surveys and progress in local files; task history with replay of the actual route (0.53.0) |
 | M7 Safe geometric generation | Implemented: 690 × 513 mm footprint checked on translations, pivots and links |
-| M8 External BLE trajectory tracking | Implemented: app-driven mowing, recharge and resume, working hours (0.51.0), resume of any interrupted task (0.61.0); full physical validation still to be continued; autonomous tracking by the gateway not yet tried on the robot |
+| M8 External BLE trajectory tracking | Implemented: app-driven mowing, recharge and resume, working hours (0.51.0), resume of any interrupted task (0.61.0); full physical validation still to be continued; autonomous tracking by the gateway tested in simulation and used on the robot during the tests of Oct 14 to 16, full checklist not yet run on the robot |
 | M9 Accuracy and comparison | Modeled tracking bench ([results](TRACKING_EXECUTION.md)); field measurements to be completed |

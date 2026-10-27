@@ -50,8 +50,9 @@ class RobotBleTonteTest {
         assertEquals(55, s0.heightMm)
         assertNotNull("Progress saved from the start", bench.state.missionCheckpoint)
         assertNotNull(bench.state.mowingRecord)
-        // Straight exit with blades stopped, then cutting at the requested height.
-        bench.until(60_000, "blades running") { bench.sim.bladesOn }
+        // Straight exit with blades stopped, then cutting at the requested height. The first pass runs along the
+        // border: the link joins it along its axis (TrajectoryPlanner.alignedArrival), a few seconds longer than nose first.
+        bench.until(90_000, "blades running") { bench.sim.bladesOn }
         assertFalse("Blades started on the base", bench.sim.charging)
         assertEquals(55, bench.sim.heightMm)
         bench.until(30 * 60_000, "end of mowing") { !bench.state.robotRoute.running }

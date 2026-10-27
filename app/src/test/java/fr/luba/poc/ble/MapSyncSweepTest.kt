@@ -22,8 +22,9 @@ import java.io.File
  *
  *   MAPSYNC_SWEEP=121-420 [MAPSYNC_SWEEP_OUT=file] ./gradlew :app:testDebugUnitTest --tests '*MapSyncSweepTest' --rerun
  *
- * One line per draw (phase, robot map commands, final message) then a summary. Measured on 2026-10-24 over 300 draws:
- * 53 failures (17.7 %) before the outline was faced in place, 35 (11.7 %) after, all safe aborts (nothing recorded).
+ * One line per draw (phase, robot map commands, final message) then a summary. Measured over 300 draws: 53 failures
+ * (17.7 %) before the outline was faced in place, 35 (11.7 %) after (2026-10-24), 1 (0.3 %) once the heading is kept
+ * from the previous drive and measured over the whole straight line (2026-10-25); all safe aborts (nothing recorded).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])

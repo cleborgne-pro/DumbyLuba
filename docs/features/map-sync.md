@@ -89,6 +89,14 @@ closer tracking on tight curves, evenly spaced points.
    robot state that changes stops the drive. The robot first faces the first edge of the outline in place: the join
    leaves it up to 25° off, and the arc that corrected it while driving took the chassis about 15 cm towards the
    element (footprint check, outline abandoned). A pivot on the spot adds no recorded point.
+   The heading gap measured by the previous drive (move to the outline, then join) is kept when it was measured over
+   at least 40 cm of straight line and the robot has not moved since (published position within 30 cm, published
+   heading within 5°, less than a minute): each drive used to confirm its heading again over its first 15 cm of
+   straight line, that is over the short link before the outline, where 1 cm of RTK noise can put it 10° off; the
+   robot then drove the outline that much askew and drifted towards the element. After that first confirmation the
+   gap is also measured again over the whole straight line as long as the robot keeps driving straight (up to 1 m),
+   instead of being refined 15 cm at a time (every tracking by the phone or the Redmi gateway; the heading kept from one
+drive to the next only for the drives of the sync tracked by the phone).
 6. Recording ended (action 1); the robot must leave its recording state within 20 s.
 7. The robot map is read again; the new element is recognised by a new identifier of the same type overlapping the
    wanted outline by at least 50 % (passage: axis within 1 m on average). If it is missing, the mapping is saved
@@ -143,11 +151,15 @@ cancelled, nothing saved), an outline too close to the station refused, a sync s
 while the robot records.
 
 **Success rate under the position noise** (`MapSyncSweepTest`, optional: `MAPSYNC_SWEEP=121-420`): the same no-go zone
-over many draws of the simulated RTK and heading noise. Measured on 2026-10-24 over 300 draws: 35 outlines abandoned
-(11.7 %; 53, i.e. 17.7 %, before the outline was faced in place), none at the join any more, all safe aborts (recording
-cancelled, nothing saved, corrections kept on the phone: start the sync again). The remaining failures are the
-footprint and corridor checks of the drive with the chassis 15 cm from the element; their margins are kept until the
-first real tries say how the LUBA 2 tracks an outline.
+over many draws of the simulated RTK and heading noise. Measured on 2026-10-25 over 300 draws: 1 outline abandoned
+(0.3 %), against 35 (11.7 %) on 2026-10-24 and 53 (17.7 %) before the outline was faced in place; all safe aborts
+(recording cancelled, nothing saved, corrections kept on the phone: start the sync again). The 35 were the footprint
+and corridor checks of the outline drive: the heading, confirmed again over the 15 cm of the link before the outline,
+was up to 10° off, the robot drove the outline askew and its actual chassis, on the simulator, entered the no-go zone
+being recorded on 7 draws out of 60 (sometimes without the check stopping it). The heading kept from the previous
+drive and measured over the whole straight line fixed it (no contact over 60 draws, `MapSyncBenchTest` checks the
+actual chassis). The margins of the outline (15 cm, chords cutting up to 6 cm of it) are kept until the first real
+tries say how the LUBA 2 tracks an outline.
 
 **Not verified until a first real try**: that the LUBA 2 firmware accepts the motion commands of the app while it
 records (the official app does the same over Bluetooth), the exact moment it saves the element, how it treats a new

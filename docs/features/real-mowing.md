@@ -144,7 +144,11 @@ leave, the safe corridor:
    chassis away from the border (1.1.5).
 3. **Link with blades stopped** back to the route, level with the interrupted spot; if that would bring the robot
    right up against the border (15 cm tracking tolerance, next metre included), it rejoins the route up to 4 m
-   further on.
+   further on. A pass near the border is joined **along its axis** (last segment within 25° of the pass, from an
+   approach point inside the zone), never nose first: arriving square to a border pass put the front 35 cm ahead of
+   the robot centre over the border. The nearest entry where this fits is preferred to a closer one met nose first.
+   The same applies to the link after a contact bypass, to the start or resume of a mission and to the other links
+   built from the robot's pose.
 4. Mowing continues (blades restarted on the pass). `route_drift_recovery` event in the log.
 
 A new exit less than 1 m from the previous one rejoins the route 1 m further each time. The stop is kept on the 4th
@@ -173,7 +177,10 @@ mowing:
    the trail was ahead of the robot. Since 1.1.5 the resume leaves straight ahead in that case.
 
 Protection 41 is the "weak satellite signal" of the Mammotion app ([positioning lost](safety.md#positioning-lost-self-check-41)):
-for it and the other positioning conditions (40, 42, 99), the wait lasts up to **5 minutes**.
+for it and the other positioning conditions (40, 42, 99), the wait lasts up to **5 minutes**. A short loss is first
+ridden through: the route goes on for up to 20 s and 5 m while the robot still drives
+([positioning lost](safety.md#positioning-lost-self-check-41)), so passing under a raised play house or a tree no
+longer stops the mowing.
 
 The stop is kept if the protection lasts more than **30 s** (5 min for a positioning loss), if it is the lock after STOP (self-check 11, to be
 unlocked) or the Mammotion app's working hours (self-check 23), for any other robot state, or after **5 pauses** in

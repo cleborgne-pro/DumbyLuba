@@ -1,7 +1,8 @@
 // Robot Bluetooth link held by the gateway: port of app/.../gateway/GatewayRobot.kt.
 //
-// - Connection requested by the pilot (OPEN) then kept up: automatic reconnection as long as the robot is
-//   retained, sync every 5 s when no pilot is connected.
+// - Connection requested by the pilot (OPEN) then kept up, sync every 5 s when no pilot is connected. Automatic
+//   reconnection to the retained robot while the gateway is in use (pilot, autonomous tracking) and for 10 min after
+//   (gw::ReconnectPolicy); beyond, the next pilot reconnects it.
 // - The gateway alone numbers the BluFi frames: its own frames (keep-alive, stop) and those of successive
 //   pilots form a single sequence.
 // - One GATT operation at a time; the response goes back to its sender.
@@ -26,6 +27,8 @@ struct State {
   std::string name;
   bool connecting = false;
   bool ready = false;
+  // Robot retained but no automatic attempt: gateway unused for 10 min (gw::ReconnectPolicy), a pilot is awaited.
+  bool retryPaused = false;
   int mtu = 23;
   int pilot = -1;
   int rssi = 0;
@@ -63,6 +66,16 @@ void stopAutonomy(const std::string &reason);
 void write(int session, const gw::Bytes &frame);
 void readRssi(int session);
 void scan(int session);
+// Tasks of the robot link and of the autonomous tracking (status page): lowest free stack seen (bytes, -1: no
+// task), route trackings run by the long-lived worker.
+struct TaskStats {
+  int robotStackFree = -1;
+  int notifyStackFree = -1;
+  int legStackFree = -1;
+  int prepareStackFree = -1;
+  uint32_t legsRun = 0;
+};
+TaskStats taskStats();
 // Releases the robot (no more reconnection); reason for refusal or empty.
 std::string release(bool forget);
 // Called regularly from the main loop (timeout watchdog).

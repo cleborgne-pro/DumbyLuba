@@ -142,9 +142,11 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         load()
     }
     fun refresh()=work {load()}
-    private fun load(){val a=api.devices();val robots=(0 until a.length()).map{a.getJSONObject(it)}.map { CloudRobot(it.getString("deviceName"),it.getString("iotId"),it.getString("productKey")) }.filter{fr.luba.poc.protocol.ModelSupport.isMower(it.name)}
+    private fun load(){val a=api.devices();val found=CloudRobotFilter.split((0 until a.length()).map{a.getJSONObject(it)}.map { CloudRobot(it.getString("deviceName"),it.getString("iotId"),it.getString("productKey")) });val robots=found.robots
+        // Devices left out, anonymous (product key and short name prefix) for the diagnostics export: DumbyLuba#3.
+        found.skipped.forEach { event("cloud_device_skipped",tr("Account device not recognized as a mower", "Appareil du compte non reconnu comme tondeuse"),it.fields) }
         val selected=robots.firstOrNull { it.id == preferences.getString("robot",null) } ?: robots.firstOrNull()
-        mutable.value=mutable.value.copy(robots=robots,selected=selected,telemetry=fr.luba.poc.protocol.Telemetry(),details=if(selected?.id==mutable.value.selected?.id) mutable.value.details else RobotDetails(),connected=true,map=selected?.let{cache.read(it.id)} ?: RobotMap(),lastKnown=selected?.let{positionStore.read(it.id)});status(tr("${robots.size} LUBA in the account", "${robots.size} LUBA dans le compte"))}
+        mutable.value=mutable.value.copy(robots=robots,selected=selected,telemetry=fr.luba.poc.protocol.Telemetry(),details=if(selected?.id==mutable.value.selected?.id) mutable.value.details else RobotDetails(),connected=true,map=selected?.let{cache.read(it.id)} ?: RobotMap(),lastKnown=selected?.let{positionStore.read(it.id)});status(found.status)}
     fun logout(){job?.cancel();api.logout();preferences.edit().clear().apply();val saved=accountStore.read();mutable.value=CloudUi(accountSaved=saved!=null,accountEmail=saved?.email.orEmpty());status(tr("Session deleted", "Session supprimée"))}
     /**
      * Entering local mode: camera stopped and session deleted (the saved credentials are kept for a later return to

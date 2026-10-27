@@ -44,14 +44,15 @@ object CoverageEngine {
         return config.weights.score(m.copy(durationSeconds=duration))
     }
     internal fun planOptimized(input: PlanningRequest,checkpoint: () -> Unit): PlanningResult {
-        val mixed=AutomaticPlanner.plan(input,CoverageMode.OPTIMIZED,checkpoint)
-        val simple=AutomaticPlanner.plan(input,CoverageMode.LINES,checkpoint)
+        // The direction follows the shape: the orientation setting applies to neither plan.
+        val mixed=AutomaticPlanner.plan(input,CoverageMode.OPTIMIZED,checkpoint,orientation=false)
+        val simple=AutomaticPlanner.plan(input,CoverageMode.LINES,checkpoint,orientation=false)
         val a=mixed.selected; val b=simple.selected
         val keepMixed=a.valid && (!b.valid || robotScore(a,input.config)<=robotScore(b,input.config)+1e-6 &&
             a.metrics!!.coveredAreaM2+1e-6>=b.metrics!!.coveredAreaM2-0.002*b.metrics.targetAreaM2)
         val chosen=if(keepMixed) mixed else simple
         val selected=chosen.selected.copy(name="optimized-"+chosen.selected.name,
-            preview=chosen.selected.preview?.copy(mode=CoverageMode.OPTIMIZED))
+            preview=chosen.selected.preview?.let { p -> p.copy(mode=CoverageMode.OPTIMIZED,zoneModes=p.zoneModes.map { CoverageMode.OPTIMIZED }) })
         return chosen.copy(selected=selected,candidates=mixed.candidates.map { it.copy(name="mixed-"+it.name) }+
             simple.candidates.map { it.copy(name="single-"+it.name) },
             phaseNanos=(mixed.phaseNanos.keys+simple.phaseNanos.keys).associateWith { (mixed.phaseNanos[it] ?: 0)+(simple.phaseNanos[it] ?: 0) },
@@ -87,7 +88,7 @@ object CoverageEngine {
         val baseline=try { timed("baseline_generation") {
             MultiZonePlanner.plan(terrain.zones,terrain.holes,c.spacingM,c.marginM,mode,c.borders,
                 c.borderPasses,c.noGoPasses,terrain.obstacleDiscs,request.robot,c.boundary==BoundaryMeaning.RECORDED_TRACE,
-                request.start,c.bordersFirst,c.nearbyNoGo,progress={ _,_,_->checkpoint() },outerOffsetM=c.outerOffsetM).copy(localOnly=true)
+                request.start,c.bordersFirst,c.nearbyNoGo,progress={ _,_,_->checkpoint() },outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM).copy(localOnly=true)
         } } catch (e: IllegalArgumentException) {
             val failed=CandidateResult("baseline",PlanStatus.NO_SOLUTION_FOUND,null,null,null,listOf(e.message ?: tr("Generation impossible", "Génération impossible")))
             return PlanningResult(request.hash,strategy,failed,listOf(failed),terrain.assumptions,phases,transitions.queries,transitions.hits)
@@ -131,7 +132,7 @@ object CoverageEngine {
                                 option.copy(decompose={ BoustrophedonDecomposer().cells(it) }) else option
                             val raw=CoveragePlanner.plan(zone.points,terrain.holes,c.spacingM,c.marginM,CoverageMode.LINES,c.borders,
                                 c.borderPasses,c.noGoPasses,terrain.obstacleDiscs,request.robot,c.boundary==BoundaryMeaning.RECORDED_TRACE,
-                                entry,sweepOptions=settings,outerOffsetM=c.outerOffsetM)
+                                entry,sweepOptions=settings,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM)
                             previews.add(MowingOrder.apply(raw,c.bordersFirst,c.nearbyNoGo,entry))
                         }
                         MultiZonePlanner.combine(terrain.zones,previews,CoverageMode.LINES,request.start).copy(localOnly=true)

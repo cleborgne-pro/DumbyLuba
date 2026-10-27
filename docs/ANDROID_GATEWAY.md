@@ -13,8 +13,9 @@ Fold (planning, tracking, safety)  ── Wi-Fi TCP 8766 ──  Redmi A1 (on th
 
 - **The Redmi connects to the robot itself and holds the Bluetooth link**: on the Redmi, Service →
   Bluetooth connection, tap the robot (or automatic connection if it is the only one).
-  The robot is remembered; the gateway reconnects to it on its own (loss, restart, update)
-  and sends a sync every 5 s when no pilot is attached.
+  The robot is remembered; the gateway reconnects to it on its own (loss, restart, update) while it is in use
+  (pilot attached, autonomous tracking) and for 10 min after, then waits for the next pilot (the robot is left to
+  the device using it, e.g. the ESP32 gateway), and sends a sync every 5 s when no pilot is attached.
   "Release the robot" on the same page hands the robot back to other phones / the Mammotion app.
 - The Fold **attaches** to this link: it connects immediately if the Redmi already holds the
   robot. The gateway numbers the BluFi frames itself (sequence byte rewritten), which

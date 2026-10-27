@@ -199,6 +199,29 @@ object PointPlanner {
         return !inner.covers(point(p))
     }
 
+    /** No-go zones of the last map widened by [fr.luba.poc.protocol.OffMapLatch.INSIDE_TOLERANCE_M], cached like [innerCache]. */
+    private var exclusionCache: Pair<List<MapShape>, org.locationtech.jts.geom.prep.PreparedGeometry?>? = null
+
+    /**
+     * True if the robot centre [p] stands inside a no-go zone of [map] or within
+     * [fr.luba.poc.protocol.OffMapLatch.INSIDE_TOLERANCE_M] of it (chassis across its edge). Same conditions as
+     * [beyondMapped] on the map.
+     */
+    fun atExclusion(map: RobotMap, p: Point?): Boolean {
+        if (p == null || !p.x.isFinite() || !p.y.isFinite() || !map.complete || map.source.contains("DÉMONSTRATION", true)) return false
+        val shapes = map.shapes
+        val widened = exclusionCache?.takeIf { it.first === shapes }?.second ?: run {
+            val noGos = shapes.filter { it.kind == ShapeKind.NO_GO && it.points.size >= 3 }
+            val built = if (noGos.isEmpty()) null else try {
+                org.locationtech.jts.geom.prep.PreparedGeometryFactory.prepare(UnaryUnionOp.union(noGos.map { polygon(it.points).let { area -> if (area.isValid) area else area.buffer(0.0) } })
+                    .buffer(fr.luba.poc.protocol.OffMapLatch.INSIDE_TOLERANCE_M))
+            } catch (_: RuntimeException) { null }
+            exclusionCache = shapes to built
+            built
+        } ?: return false
+        return widened.covers(point(p))
+    }
+
     /** True if [p] lies beyond [surface] by more than [toleranceM]. */
     fun beyond(surface: Area, p: Point, toleranceM: Double = 0.1): Boolean =
         runCatching { surface.distance(point(p)) > toleranceM }.getOrDefault(false)

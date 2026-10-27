@@ -21,6 +21,14 @@ import java.util.Locale
  * purpose (gateway used as a fixed relay) sees its signal change as the robot moves, or is too far to be that strong:
  * its level is never confirmed and nothing is ever concluded.
  *
+ * The drop point must be current: the first weak reading of the streak comes at most [ANCHOR_FRESH_MS] after the last
+ * mounted one, or with the robot still near it. Otherwise (readings stopped between two routes while the robot moved,
+ * then a weaker level from the start of the next route) nothing tells where the phone would have fallen: the level is
+ * learned again from these readings instead of stopping the robot. 2026-10-25 at 15:54:58: −19 dBm until the end of a
+ * route, −51 dBm from the next one, "fallen near" a point 1.5 m back left a minute earlier, while the same phone then
+ * drove the robot 12 m with a steady signal. After a verdict the drop point is known: the next route concludes again
+ * from it ([rearm]).
+ *
  * Bluetooth link closed during a route ([linkLost]): looser verdict ("probably") if the last readings were already
  * falling while the robot moved away; otherwise a plain Bluetooth loss.
  *
@@ -70,6 +78,8 @@ class GatewayDetachment(
     private var anchor: Point? = null
     private var anchorAt = 0L
     private var weak = 0
+    /** A verdict was reached and no mounted-level reading came since: the drop point is known, never stale. */
+    private var dropKnown = false
     private var lastRssi: Int? = null
     var verdict: Verdict? = null; private set
 
@@ -89,7 +99,7 @@ class GatewayDetachment(
         if (level == null || (rssiDbm >= level - MOUNTED_MARGIN_DB && !tooStrong)) {
             // Consistent with the phone on the robot: learn, and move the drop point candidate to here.
             mounted.addLast(rssiDbm); while (mounted.size > WINDOW) mounted.removeFirst()
-            weak = 0
+            weak = 0; dropKnown = false
             if (robot != null) {
                 anchor = robot; anchorAt = at
                 val origin = learnOrigin ?: robot.also { learnOrigin = it }
@@ -104,11 +114,17 @@ class GatewayDetachment(
             return null
         }
         if (rssiDbm > level - dropDb) { weak = 0; return null }
-        weak++
         val point = anchor ?: return null
+        if (weak == 0 && !dropKnown && at - anchorAt > ANCHOR_FRESH_MS && (robot == null || robot.distance(point) >= minDistanceM / 2)) {
+            // Weaker level found at the start of a streak, far in time and space from the last mounted reading: drop point
+            // unknown, the level is learned again (a phone that shifted on the robot settles there; a fallen one never does).
+            mounted.clear(); mounted.addLast(rssiDbm); confirmed = false; learnOrigin = robot; anchor = robot; anchorAt = at
+            return null
+        }
+        weak++
         val distance = robot?.distance(point) ?: return null
         if (weak < confirmReadings || distance < minDistanceM) return null
-        return Verdict(point, anchorAt, rssiDbm, level, robot, distance, probable = false).also { verdict = it }
+        return Verdict(point, anchorAt, rssiDbm, level, robot, distance, probable = false).also { verdict = it; dropKnown = true }
     }
 
     /**
@@ -122,11 +138,11 @@ class GatewayDetachment(
         val point = anchor ?: return null
         val distance = robot?.distance(point)
         if (last > level - SUSPECT_DB || distance == null || distance < MIN_DISTANCE_M / 2) return null
-        return Verdict(point, anchorAt, null, level, robot, distance, probable = true).also { verdict = it }
+        return Verdict(point, anchorAt, null, level, robot, distance, probable = true).also { verdict = it; dropKnown = true }
     }
 
     /** Other robot, or gateway restarted: everything is learned again. */
-    fun reset() { mounted.clear(); learnOrigin = null; confirmed = false; anchor = null; anchorAt = 0; weak = 0; lastRssi = null; verdict = null }
+    fun reset() { mounted.clear(); learnOrigin = null; confirmed = false; anchor = null; anchorAt = 0; weak = 0; lastRssi = null; verdict = null; dropKnown = false }
 
     /**
      * New route after a verdict: concluded again only if the readings stay weak away from the same drop point (phone
@@ -144,6 +160,8 @@ class GatewayDetachment(
         /** Drop below the mounted level of the last reading before a link loss for a "probable" verdict. */
         const val SUSPECT_DB = 10
         const val MIN_DISTANCE_M = 1.5
+        /** Longest gap between the last mounted reading and the first weak one for the drop point to be trusted. */
+        const val ANCHOR_FRESH_MS = 3000L
         /** Robot displacement with a steady signal needed to confirm the mounted level. */
         const val LEARN_DISTANCE_M = 3.0
         const val CONFIRM_READINGS = 3

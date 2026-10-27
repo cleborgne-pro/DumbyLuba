@@ -102,6 +102,36 @@ To be measured: minimum accepted rate, stop delay after commands cease, availabi
    comes as `toapp_svg_msg` and is echoed with `todev_svg_msg` (`sub_cmd=2`, frames, `dataHash`, `paternalHashA`, no
    content); its last frame ends the element. DumbyLuba reads one element at a time, asks again an element that stops
    answering and leaves it out after a few requests (map then incomplete), see `MapTransfer`.
+6. The content of a drawing (`svg_message_t`: `x_move`, `y_move`, `scale`, `rotate`, `base_width_m`/`base_height_m`,
+   `base_width_pix`/`base_height_pix`, `svg_file_name`, `svg_file_data`, `hide_svg`) is kept apart from the reading
+   progress, which it never changes (`MapTransfer.keepDrawing`, `MapDrawing`, `SvgOutline`). Frames are stored by
+   `dataHash` and `currentFrame` (a repeat is kept once, a series with another `totalFrame` replaces the previous one);
+   the drawing is complete when as many frames as `totalFrame` are stored, or with a single frame when `totalFrame` is
+   0 (PyMammotion `test_svg_routing`: a one-frame SVG has `total_frame = current_frame = 0`). `svg_file_data` is
+   concatenated in `currentFrame` order (PyMammotion sends it in 500-character slices, `data_count = 500`,
+   `current_frame` 1..N); the placement, copied on every frame, is read from the last one as PyMammotion does. A tile
+   whose `dataHash` is not in the element list but whose `paternalHashA` (parent zone) is, pushed by the robot as the
+   Mammotion app may receive it, is kept too. Placement on the map, same frame and meters as the boundary points: tile
+   W × H = `base_width_m`·s × `base_height_m`·s (s = `scale` if > 0, otherwise 1), centered on (`x_move`, `y_move`),
+   turned by `rotate` (radians, counterclockwise positive); the SVG is stretched over the tile (viewBox
+   `[vbx, vby, vbw, vbh]`, aspect ratio not kept), its downward Y axis flipped:
+   `a = ((u − vbx)/vbw − 0.5)·W`, `b = (0.5 − (v − vby)/vbh)·H`, `x = x_move + a·cos θ − b·sin θ`,
+   `y = y_move + a·sin θ + b·cos θ`. Without viewBox: the SVG `width`/`height`, otherwise `base_width_pix`/
+   `base_height_pix` when positive, otherwise the bounding box of the content. `hide_svg = true`: pattern switched off
+   (the robot mows the zone normally); active, the robot spares the grass of the pattern. The only published example is
+   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M10 10H90V90H10Z" fill="#111"/></svg>`;
+   `svg_file_data` may also be the name of a built-in pattern (not XML): then only the tile footprint is drawn.
+   **Confirmed on a real map on 2026-10-27** (a text added in the Mammotion app, read through the cloud and drawn
+   correctly in its zone, "piscine"): one drawing of 719 SVG characters in two frames numbered `current_frame` 1 and 2
+   of `total_frame` 2, sent in that order (message sizes consistent with 500-character slices), joined in frame order;
+   the drawing was in the element list (type 13) with its parent zone; placement with `rotate` ≈ −0.39 rad,
+   `scale` = 1, `base_width_m`/`base_height_m` 11.5 × 4, `base_width_pix`/`base_height_pix` 0, `hide_svg` false. This
+   confirms the centering on `x_move`/`y_move`, the size `base_width_m` × `base_height_m` at scale 1, the
+   counterclockwise direction of `rotate` (radians), the Y flip and the 1..N frame numbering of a multi-frame drawing.
+   **Still to be confirmed on a capture**: the single frame at `total_frame = current_frame = 0`, frames arriving out
+   of order, the meaning of a `scale` other than 1 (and of 0), the meaning of the pixel sizes, the stretching of a
+   viewBox whose aspect ratio differs from the tile, `hide_svg = true`, whether the robot pushes tiles by their parent
+   zone. The drawings are display only: the local planning and the moves ignore them.
 
 [Mammo.FetchMap and MowerMap model](https://github.com/mikeymclellan/mammo/blob/85c93ce6abc87205c75353e47e608e7ce1aa82f8/cmd/maps.go) provide a second implementation: maps retrieved from the robot via MQTT cloud commands; types 0 zone, 1 obstacle, 2 path, other types distinct. Do not assume that every forbidden geometry or every physical obstacle is present in the data.
 

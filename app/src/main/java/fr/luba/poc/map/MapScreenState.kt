@@ -89,6 +89,12 @@ internal class MowingTaskForm(saved: MowingTaskSettings) {
     var noGoPasses by mutableStateOf(saved.noGoPasses)
     var bordersFirst by mutableStateOf(saved.bordersFirst)
     var nearbyNoGo by mutableStateOf(saved.nearbyNoGo)
+    var turnStyle by mutableStateOf(saved.turnStyle)
+    /** Direction of the passes and angle of the manual direction ([OrientationMode]). */
+    var orientation by mutableStateOf(saved.orientation)
+    var manualAngle by mutableStateOf(saved.manualAngleDeg)
+    /** Spiral mode: from the edge or from the centre ([SpiralDirection]). */
+    var spiralDirection by mutableStateOf(saved.spiralDirection)
 
     // Not saved across a configuration change (as before).
     var margin by mutableStateOf(0.6f)
@@ -99,15 +105,19 @@ internal class MowingTaskForm(saved: MowingTaskSettings) {
     var cutWidth by mutableStateOf(Geometry.CUT_WIDTH_M.toFloat())
 
     /** Settings written for the next task ([MowingTaskStore]). */
-    fun settings(): MowingTaskSettings = MowingTaskSettings(mowingHeight, mowingSpeed, mowingMode, spacing, borderPasses, noGoPasses,
-        bordersFirst, nearbyNoGo, chargeLow, chargeHigh, heightPasses, firstPassHeight, returnReserve)
+    fun settings(): MowingTaskSettings = MowingTaskSettings(heightMm = mowingHeight, speedMps = mowingSpeed, mode = mowingMode,
+        spacingM = spacing, borderPasses = borderPasses, noGoPasses = noGoPasses, bordersFirst = bordersFirst, nearbyNoGo = nearbyNoGo,
+        chargeLow = chargeLow, chargeHigh = chargeHigh, heightPasses = heightPasses, firstPassHeightMm = firstPassHeight,
+        returnReserve = returnReserve, turnStyle = turnStyle, orientation = orientation, manualAngleDeg = manualAngle,
+        spiralDirection = spiralDirection)
 
     companion object {
         fun saver(saved: MowingTaskSettings): Saver<MowingTaskForm, List<Any>> = Saver(
             save = {
                 listOf(it.initialProgress, it.initialBattery, it.autonomy, it.chargeTime, it.chargeLow, it.chargeHigh, it.spacing,
                     it.mowingHeight, it.heightPasses, it.firstPassHeight, it.mowingSpeed, it.mowingStep, it.signalGridSpacing,
-                    it.borderPasses, it.noGoPasses, it.bordersFirst, it.nearbyNoGo, it.returnReserve)
+                    it.borderPasses, it.noGoPasses, it.bordersFirst, it.nearbyNoGo, it.returnReserve, it.turnStyle.name,
+                    it.orientation.name, it.manualAngle, it.spiralDirection.name)
             },
             restore = { s ->
                 MowingTaskForm(saved).apply {
@@ -116,7 +126,10 @@ internal class MowingTaskForm(saved: MowingTaskSettings) {
                     mowingHeight = s[7] as Float; heightPasses = s[8] as Int; firstPassHeight = s[9] as Float
                     mowingSpeed = s[10] as Float; mowingStep = s[11] as Int; signalGridSpacing = s[12] as Float
                     borderPasses = s[13] as Int; noGoPasses = s[14] as Int; bordersFirst = s[15] as Boolean; nearbyNoGo = s[16] as Boolean
-                    returnReserve = s[17] as Float
+                    returnReserve = s[17] as Float; turnStyle = TurnStyle.valueOf(s[18] as String)
+                    (s.getOrNull(19) as? String)?.let { name -> runCatching { OrientationMode.valueOf(name) }.getOrNull() }?.let { orientation = it }
+                    (s.getOrNull(20) as? Int)?.let { manualAngle = foldAngle(it) }
+                    (s.getOrNull(21) as? String)?.let { name -> runCatching { SpiralDirection.valueOf(name) }.getOrNull() }?.let { spiralDirection = it }
                 }
             },
         )

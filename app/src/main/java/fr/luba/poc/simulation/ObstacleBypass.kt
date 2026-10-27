@@ -401,6 +401,15 @@ object ObstacleBypass {
      * tracking tolerance ([TrajectoryPlanner.pathTolerant]), pivots included. The optional escape (`escape` edges,
      * physical surface) is not concerned: checked from its end.
      */
+    /**
+     * [link] meets the pass it joins along its axis when the pass lies near the outline
+     * ([TrajectoryPlanner.arrivalAligned]): strict searches prefer an entry further on to a nose-first arrival.
+     */
+    internal fun arrivesAligned(routes: TrajectoryPlanner, link: List<SimEdge>, toHeading: Double): Boolean {
+        val last = link.lastOrNull { !it.escape } ?: return true
+        return routes.arrivalAligned(last.a, last.b, toHeading)
+    }
+
     internal fun followTolerant(routes: TrajectoryPlanner, link: List<SimEdge>, from: Point, fromHeading: Double, toHeading: Double): Boolean {
         val joined = link.filterNot { it.escape }
         val origin = joined.firstOrNull()?.a ?: link.lastOrNull()?.b ?: from
@@ -470,9 +479,11 @@ object ObstacleBypass {
                  fallback: () -> List<SimEdge>): List<SimEdge> {
             val candidates = hugs(base, routes, from, fromHeading, to, toHeading, discovered, difficulty)
             fun take(hug: Hug): List<SimEdge> {
-                val on = bladesOn && insideOneZone(hug.points, zones)
+                // Pass near the outline joined along its axis, not nose first ([TrajectoryPlanner.alignedArrival]).
+                val points = routes.alignedArrival(hug.points, fromHeading, toHeading)
+                val on = bladesOn && insideOneZone(points, zones)
                 if (hug.detour.side != 0 || hug.points.size > 2) detours += hug.detour.copy(bladesOn = on)
-                return edges(hug.points, on)
+                return edges(points, on)
             }
             val preferred = candidates.firstOrNull { it.tolerant && (bladesOn || it.detour.borderClearanceM >= BORDER_CLEARANCE_M) }
             preferred?.let { return take(it) }
@@ -504,7 +515,7 @@ object ObstacleBypass {
                         val exit = tail.last()
                         val bladesOn = exit.bladesOn && entry.bladesOn && !bladesOffLink
                         link(exit.b, exit.heading, entry.a, entry.heading, bladesOn) {
-                            val points = routes.between(exit.b, entry.a, exit.heading, entry.heading)
+                            val points = routes.alignedArrival(routes.between(exit.b, entry.a, exit.heading, entry.heading), exit.heading, entry.heading)
                             routes.requirePath(points, exit.heading, entry.heading)
                             edges(points, bladesOn && insideOneZone(points, zones))
                         }
@@ -513,7 +524,8 @@ object ObstacleBypass {
                     while (detours.size > detoursBefore) detours.removeAt(detours.lastIndex)
                     continue
                 }
-                if (strict && !followTolerant(routes, link, tail?.last()?.b ?: start, tail?.last()?.heading ?: headingDegrees, entry.heading)) {
+                if (strict && !(followTolerant(routes, link, tail?.last()?.b ?: start, tail?.last()?.heading ?: headingDegrees, entry.heading) &&
+                        arrivesAligned(routes, link, entry.heading))) {
                     while (detours.size > detoursBefore) detours.removeAt(detours.lastIndex)
                     continue
                 }

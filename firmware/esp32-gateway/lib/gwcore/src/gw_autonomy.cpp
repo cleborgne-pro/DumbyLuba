@@ -421,7 +421,7 @@ void GatewayAutonomy::prepare(std::function<void()> job) {
     preparing_ = true;
   }
   if (!startWorker) return;
-  const bool started = spawn_("leg-prepare", [this]() {
+  const bool started = spawn_(TASK_PREPARE, [this]() {
     for (;;) {
       std::function<void()> next;
       {
@@ -485,7 +485,7 @@ void GatewayAutonomy::start(const LegSpec &spec) {
   report_("Suivi autonome " + std::to_string(spec.legId) + " : " + std::to_string(path->size() - spec.from) + " arête(s) depuis " +
           std::to_string(spec.from));
   // The body always runs to its end (even when a stop arrives first): it frees the slot.
-  const bool started = spawn_("leg", [this, leg, path, guard, physical]() { run(leg, path, guard, physical); });
+  const bool started = spawn_(TASK_LEG, [this, leg, path, guard, physical]() { run(leg, path, guard, physical); });
   if (!started) {
     {
       std::lock_guard<std::recursive_mutex> g(lock_);
@@ -505,7 +505,7 @@ void GatewayAutonomy::run(std::shared_ptr<Active> leg, std::shared_ptr<const std
   const LegSpec &spec = leg->spec;
   auto lastIndex = [&]() {
     std::lock_guard<std::mutex> g(leg->mtx);
-    return leg->progress ? std::max(0, leg->progress->index - 1) : spec.from;
+    return leg->progress ? std::max<int32_t>(0, leg->progress->index - 1) : spec.from;
   };
   LegResult result;
   result.legId = spec.legId;
@@ -621,7 +621,7 @@ void GatewayAutonomy::sync(int32_t legId, int32_t samplesHave) {
     sink_(frames::LEG_STATE, frames::legState(0, frames::STATE_NONE, 0));
     return;
   }
-  const int32_t have = std::max(0, samplesHave);
+  const int32_t have = std::max<int32_t>(0, samplesHave);
   for (size_t k = (size_t)have; k < samples->size(); k++) sink_(frames::LEG_SAMPLE, frames::sample(id, (int32_t)k, (*samples)[k]));
   if (active_ && active_->spec.legId == legId) {
     std::lock_guard<std::mutex> p(active_->mtx);

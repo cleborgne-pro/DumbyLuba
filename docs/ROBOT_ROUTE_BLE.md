@@ -173,6 +173,23 @@ and the deployment's `dex2oat` check cleared the log after installation, hence t
   `MapScreen` wrapper stays under 120. To locate the widest ranges of a method, `dexdump -d` on the APK lists the
   `invoke-*/range` and their registers.
 
+## Map screen callbacks: latest composition (Oct 27)
+
+"Map changed: recomputation required" appeared on every "Route preview" that followed a change of a task setting.
+The computation is a local function of `MapScreenContent` (`calculateMowingPreview`) reading values of the
+composition (settings, map, obstacles, base…), and it was handed to the task pages as a function reference
+(`onCompute = ::calculateMowingPreview`). Two references to one local function are **equal** whatever the values
+they capture (`FunctionReference.equals` compares the name, the signature and the owner): Compose, which compares
+function parameters and the keys of memoized lambdas with `equals`, kept the reference of an older composition in the
+lambda of the button, so the computation started with the old settings and the check against the current inputs
+refused it. The local functions handed to children (`calculateMowingPreview`, `startMowingSimulation`,
+`startPreparedRoute`, `baseAction`, `resumeMission`, `backOffBeforeResume`, `openResumeSkip`, and the `compute`,
+`prepare`, `restart`, `finish` and `select` of the Service test pages) now go through `latestAction` /
+`latestAction1` (`ui/components/LatestAction.kt`): one stable callback that runs the function of the latest
+composition (holder with referential equality, which `rememberUpdatedState` is not). The check of a map, obstacle or
+setting change *during* the computation is unchanged. Tests: `MapPreviewSettingsTest` (setting changed then preview,
+obstacle learned during the computation, equality of the references).
+
 ## Go-to-point: wrong heading at start (Oct 10, 11:18–11:21)
 
 Fold log: after a pivot, the LUBA 2 published a heading of 139–142° while driving at ≈ 49°

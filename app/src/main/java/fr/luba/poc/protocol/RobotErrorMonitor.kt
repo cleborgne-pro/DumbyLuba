@@ -52,4 +52,19 @@ class RobotErrorMonitor {
 object BumperEvents {
     fun confirmsContact(error: RobotError): Boolean = error.code in setOf(1014,-1014)
     fun latchedFault(error: RobotError): Boolean = error.code in setOf(1207,-1207)
+
+    /** Oldest contact (s) still placed on the map at the robot's current position ([placedLate]). */
+    const val MAP_FRESH_S = 15L
+
+    /**
+     * Contact dated by the robot (Unix seconds) more than [MAP_FRESH_S] before [nowMs]: the robot has moved since, its
+     * current position is not where it hit. 2026-10-25: contacts of the obstacle learning trials on the swing poles
+     * (14:53:13, 14:58:01, 15:00:25) read 20 to 63 s later while driving by hand, logged about 1 m away, then taken
+     * for obstacles by every mowing computation. Robot clock (small values, not a date) or no time: not late.
+     */
+    fun placedLate(error: RobotError, nowMs: Long): Boolean {
+        val at = error.timestamp ?: return false
+        if (at < 1_000_000_000L) return false
+        return nowMs / 1000 - at > MAP_FRESH_S
+    }
 }

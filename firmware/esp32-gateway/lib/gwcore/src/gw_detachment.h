@@ -29,6 +29,8 @@ class GatewayDetachment {
   static constexpr int MOUNTED_MIN_DBM = -50;
   static constexpr int SUSPECT_DB = 10;
   static constexpr double MIN_DISTANCE_M = 1.5;
+  // Longest gap between the last mounted reading and the first weak one for the drop point to be trusted.
+  static constexpr int64_t ANCHOR_FRESH_MS = 3000;
   static constexpr double LEARN_DISTANCE_M = 3.0;
   static constexpr int CONFIRM_READINGS = 3;
   static constexpr int LEARN_READINGS = 5;
@@ -62,6 +64,8 @@ class GatewayDetachment {
   Opt<Point> anchor_;
   int64_t anchorAt_ = 0;
   int weak_ = 0;
+  // A verdict was reached and no mounted-level reading came since: the drop point is known, never stale.
+  bool dropKnown_ = false;
   Opt<int> lastRssi_;
   Opt<Verdict> verdict_;
 };

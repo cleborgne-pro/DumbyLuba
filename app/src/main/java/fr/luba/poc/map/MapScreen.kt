@@ -305,9 +305,13 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
     val surveyOffset by SurveyOffsetSetting.flow.collectAsStateWithLifecycle()
     val planningInputs=listOf(planningMap,localObstacles,frame.selected.toList(),form.mode,
         form.spacing,form.margin,form.cutWidth,minimumCoverage,form.mowingSpeed,form.borders,form.borderPasses,form.noGoPasses,
-        form.bordersFirst,form.nearbyNoGo,form.signalGridSpacing,mapBase,accesses,outerOffset,surveyOffset,
+        form.bordersFirst,form.nearbyNoGo,form.turnStyle,form.signalGridSpacing,mapBase,accesses,outerOffset,surveyOffset,
         // Height passes: route prepared with all the passes, recomputed when they change.
-        passHeights.takeIf { !form.mode.isSurvey })
+        passHeights.takeIf { !form.mode.isSurvey },form.orientation,form.manualAngle,
+        // Spiral direction: only the Spiral mode recomputes when it changes.
+        form.spiralDirection.takeIf { form.mode == CoverageMode.SPIRAL },
+        // Change every session: a mowing that ends updates the directions to move away from.
+        state.zoneOrientations.takeIf { form.orientation == OrientationMode.EACH_SESSION && form.mode.usesOrientation })
     val currentPlanningInputs by androidx.compose.runtime.rememberUpdatedState(planningInputs)
     LaunchedEffect(planningInputs) { preview=null; prep.planningReport=null; prep.estimate=null }
 
@@ -483,7 +487,8 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             .put("cutWidthM", form.cutWidth.toDouble()).put("minimumCoverage", minimumCoverage.toDouble())
             .put("speedMps", form.mowingSpeed.toDouble()).put("mode", form.mode.name)
             .put("borderPasses", form.borderPasses).put("noGoPasses", form.noGoPasses)
-            .put("borders", form.borders).put("bordersFirst", form.bordersFirst).put("nearbyNoGo", form.nearbyNoGo)
+            .put("borders", form.borders).put("bordersFirst", form.bordersFirst).put("nearbyNoGo", form.nearbyNoGo).put("turnStyle", form.turnStyle.name)
+            .put("orientation", form.orientation.name).put("manualAngleDeg", form.manualAngle).put("spiralDirection", form.spiralDirection.name)
             .put("demo", mapView.demo).put("baseX", mapBase?.point?.x).put("baseY", mapBase?.point?.y)
             .put("baseHeading", mapBase?.entryHeadingDegrees).put("startSource", startRequest.source.name).toString()
         Log.i("PathPreparationTiming", JSONObject(prep.preparationTimingInputs).put("event", "BEGIN").toString())
@@ -503,6 +508,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
         val planBordersFirst = form.bordersFirst
         val planNearbyNoGo = form.nearbyNoGo
         val planHeights = if (form.mode.isSurvey) emptyList() else passHeights
+        val planOrientationMemory = if (form.orientation == OrientationMode.EACH_SESSION && planMode.usesOrientation) state.zoneOrientations else emptyMap()
         prep.progress = Triple(0, zones.size, tr("Preparing the zones", "Préparation des zones"))
         prep.computing = true
         prep.error = ""
@@ -512,7 +518,12 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             minimumCoverage=minimumCoverage.toDouble(),speedMps=form.mowingSpeed.toDouble(),borders=planBorders,
             borderPasses=planBorderPasses,noGoPasses=planNoGoPasses,bordersFirst=planBordersFirst,nearbyNoGo=planNearbyNoGo,
             boundary=if(mapView.demo) BoundaryMeaning.PHYSICAL else BoundaryMeaning.RECORDED_TRACE,
-            outerOffsetM=if(planMode.isSurvey) SurveyOffsetSetting.meters else OuterOffsetSetting.meters)
+            outerOffsetM=if(planMode.isSurvey) SurveyOffsetSetting.meters else OuterOffsetSetting.meters,
+            // Zamboni always weighs duration and wear, Spiral has no U-turns between its rings (their toggle is disabled):
+            // the configuration says so too (the zigzag of the Spiral pockets and fallback zones takes the fast U-turns).
+            turnStyle=if(planMode.isSurvey || planMode==CoverageMode.SPIRAL) TurnStyle.FAST else if(planMode==CoverageMode.ZAMBONI) TurnStyle.LAWN else form.turnStyle,
+            orientation=if(planMode.usesOrientation) form.orientation else OrientationMode.AUTOMATIC,manualAngleDeg=foldAngle(form.manualAngle),
+            spiralDirection=if(planMode==CoverageMode.SPIRAL) form.spiralDirection else SpiralDirection.FROM_EDGE)
         form.mowingStep = 2
 
         scope.launch {
@@ -533,7 +544,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
                     // Mission ends at the base: the order does not come back towards the robot's start position.
                     val planned=RoutePlanning.coverage(PlanningRequest(calculationMap,zones.map { it.id },start,config=requestConfig,
                         obstacles=fr.luba.poc.planning.DockClearance.planning(calculationObstacles,planMapBase),
-                        navigation=calculationNavigation,end=planBase?.takeIf { it!=start }),
+                        navigation=calculationNavigation,end=planBase?.takeIf { it!=start },orientationMemory=planOrientationMemory),
                         planMode,checkpoint={ coroutine.ensureActive() },
                         progress={ done,total,name -> scope.launch { prep.progress=Triple(done,total,name) } })
                     withContext(Dispatchers.Main) {
@@ -710,9 +721,9 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
                             !state.navTest.running && !state.bladeTestActive && !state.teach.running && !state.mapLoading && !state.manualActive && !state.silenceTest.running &&
                             !state.backOffPending && !state.unlockPending,
                         skip = if (skipState.skipMode) resumeSkip else null, skipOpen = skipState.skipMode, skipMeters = skipState.skipMeters,
-                        onSkipMeters = { skipState.skipMeters = it }, onOpenSkip = ::openResumeSkip, onCloseSkip = { skipState.skipMode = false; skipState.skipMeters = 0f },
-                        onBackOff = ::backOffBeforeResume, onStopBackOff = args.onStopBackOff,
-                        onDiscard = { sheets.discardConfirm = true }, onResume = ::resumeMission)
+                        onSkipMeters = { skipState.skipMeters = it }, onOpenSkip = latestAction(::openResumeSkip), onCloseSkip = { skipState.skipMode = false; skipState.skipMeters = 0f },
+                        onBackOff = latestAction(::backOffBeforeResume), onStopBackOff = args.onStopBackOff,
+                        onDiscard = { sheets.discardConfirm = true }, onResume = latestAction(::resumeMission))
                 // Interrupted move to a point (stop, link, restart): resume towards the same destination.
                 else if (!state.robotRoute.running && !state.navTest.running && !mapView.demo && !args.cloud && !pointMove.pointMode && !actions.placingAccess && sim.engine == null)
                     state.pointResume?.takeIf { it.robotId == state.selected?.address }?.let { resume ->
@@ -760,14 +771,15 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
         onToggleDemo = { mapView.demo = !mapView.demo; preview = null }, onFetchMap = { mapView.demo = false; args.onFetchMap() }, onOpenAccount = args.onOpenAccount,
         onOpenDrivenRecord = args.onOpenDrivenRecord, onSaveCorrections = args.onSaveCorrections)
     MapSimulationDialog(sheets, form, sim, simulation, preview.takeIf { preparedSimulation != null }, mapBase, map, frame.selected, { frame.selected = it },
-        mapView.demo, zoneSelectionAllowed, prep, state.robotRoute.running, ::startMowingSimulation)
-    // Task pages: named composable reading the state holders (MowingTaskPages.kt).
+        mapView.demo, zoneSelectionAllowed, prep, state.robotRoute.running, latestAction(::startMowingSimulation))
+    // Task pages: named composable reading the state holders (MowingTaskPages.kt). Local functions passed through
+    // latestAction: a bare reference ran on the settings of an old composition (LatestAction.kt).
     MowingTaskPages(sheets, form, prep, state, map, planningMap, preview, frame.selected, localObstacles, mapView.demo, args.cloud, passHeights, cuttingHeight,
         start, zoneStarts, prepared = preparedSimulation != null && mapBase != null, simulateEnabled = simulateEnabled,
-        onCompute = ::calculateMowingPreview, onSimulate = ::startMowingSimulation, onStartRobot = ::startPreparedRoute,
+        onCompute = latestAction(::calculateMowingPreview), onSimulate = latestAction(::startMowingSimulation), onStartRobot = latestAction(::startPreparedRoute),
         onStop = args.onStop, onTrajectorySpeed = args.onTrajectorySpeed)
     MapStationDialogs(sheets, actions, prep, state, cloudStation, args.cloudReturn, args.cloudRobotName, args.onCloudReturn, args.onCancelCloudReturn,
-        stationEnabled = pointIdle && !state.navTest.running && mapBase != null, onBaseAction = ::baseAction,
+        stationEnabled = pointIdle && !state.navTest.running && mapBase != null, onBaseAction = latestAction1(::baseAction),
         onStopMammotionTask = args.onStopMammotionTask, onDiscardMissionCheckpoint = args.onDiscardMissionCheckpoint)
 }
 

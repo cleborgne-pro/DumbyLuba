@@ -79,6 +79,6 @@ object MowingOrder {
             }
             if (!bordersFirst) ordered.addAll(nearest(outer,ordered.lastOrNull()?.last() ?: base))
         }
-        return plan.copy(scheduledPaths=ordered)
+        return plan.copy(scheduledPaths=ordered,pathZoneIds=plan.zonesOf(ordered),outwardPaths=emptyMap())
     }
 }

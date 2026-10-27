@@ -21,14 +21,24 @@ object MultiZonePlanner {
         return Preview(ordered,results.sumOf { it.meters },results.first().angle,
             results.sumOf { it.connectors },mode,orderedBorders,results.sumOf { it.outerLoops },results.sumOf { it.noGoLoops },
             kept.map { it.id },results.map { it.angle },results.flatMap { it.passes }, results.sumOf { it.skippedBorderLoops },borderStart,
-            kinds, scheduledPaths = results.flatMap { it.cuttingPaths },runCellIds=cellIds,borderAnchors=results.flatMap { it.borderAnchors },localOnly=results.any { it.localOnly })
+            kinds, scheduledPaths = results.flatMap { it.cuttingPaths },runCellIds=cellIds,borderAnchors=results.flatMap { it.borderAnchors },localOnly=results.any { it.localOnly },
+            // One phase and one mode per zone result, kept only when every zone has them (aligned with zoneIds).
+            zonePhases=if(results.all { it.zonePhases.size==1 }) results.flatMap { it.zonePhases } else emptyList(),
+            zoneModes=if(results.all { it.zoneModes.size==1 }) results.flatMap { it.zoneModes } else emptyList(),
+            zoneReorderedCells=if(results.all { it.zoneReorderedCells.size==1 }) results.flatMap { it.zoneReorderedCells } else emptyList(),
+            // Zone of each cutting path, by construction: overlapping zones never take each other's paths.
+            pathZoneIds=if(kept.size==results.size) results.flatMapIndexed { i,p -> List(p.cuttingPaths.size) { kept[i].id } } else emptyList(),
+            // Spiral from the centre: order constraints of each zone, shifted to the merged paths.
+            outwardPaths=results.runningFold(0) { offset,p -> offset+p.cuttingPaths.size }.zip(results).flatMap { (offset,p) ->
+                p.outwardPaths.entries.map { (chain,before) -> chain+offset to before.map { it+offset }.toSet() } }.toMap())
     }
     fun plan(zones: List<MapShape>, holes: List<List<Point>>, spacing: Double, margin: Double,
              mode: CoverageMode, borders: Boolean, borderPasses: Int = 1, noGoPasses: Int = 1,
              obstacles: List<fr.luba.poc.obstacles.ObstacleDisc> = emptyList(),
              robot: fr.luba.poc.obstacles.RobotEnvelope = fr.luba.poc.obstacles.RobotEnvelope.LUBA2,
              recordedBoundary: Boolean = false, basePoint: Point? = null, bordersFirst: Boolean? = null, nearbyNoGo: Boolean = false, progress: (Int,Int,String)->Unit = { _,_,_-> }, onLive: (Preview)->Unit = {},
-             outerOffsetM: Double = CoveragePlanner.RECORDED_OUTER_OFFSET_M): Preview {
+             outerOffsetM: Double = CoveragePlanner.RECORDED_OUTER_OFFSET_M,
+             turnStyle: TurnStyle = TurnStyle.FAST, speedMps: Double = 0.3, cutWidthM: Double = spacing): Preview {
         if (mode.isSurvey) return SurveyPlanner.plan(zones,holes,spacing,margin,mode,obstacles,robot,
             recordedBoundary,basePoint,progress,onLive,outerOffsetM)
         require(zones.isNotEmpty()) { tr("Select at least one zone", "Sélectionnez au moins une zone") }
@@ -42,7 +52,8 @@ object MultiZonePlanner {
             val result = try {
                 // On each improvement of a zone (orientation, direction, order), the partial route is published again:
                 // the map is drawn progressively, zone after zone.
-                Geometry.plan(zone.points,holes,spacing,margin,mode,borders,borderPasses,noGoPasses,obstacles,robot,recordedBoundary,entryPoint,outerOffsetM) { partial ->
+                Geometry.plan(zone.points,holes,spacing,margin,mode,borders,borderPasses,noGoPasses,obstacles,robot,recordedBoundary,entryPoint,outerOffsetM,
+                    turnStyle,speedMps,cutWidthM) { partial ->
                     onLive(combine(zones,done+schedule(partial),mode,basePoint))
                 }
             } catch(e:IllegalArgumentException) { throw IllegalArgumentException("${zone.name.ifBlank { "Zone ${index+1}" }} : ${e.message}",e) }

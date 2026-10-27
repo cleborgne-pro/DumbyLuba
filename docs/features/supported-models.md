@@ -7,7 +7,7 @@ the data needed to adapt the app, without the app ever moving the robot or start
 | | |
 |---|---|
 | **Status** | Read-only barrier implemented and covered by JVM tests; LUBA 2 AWD validated on a single robot, X series unlocked on the same platform and firmware (not driven by DumbyLuba yet); model trial covered by JVM tests and the test bench, not yet run on a robot of another model |
-| **Code** | `protocol/ModelSupport.kt` (`ModelSupport`, `ModelTrial`, `ReadOnlyPolicy`), `ui/RobotModel.kt` (model detection), `ui/ModelTrialGroup.kt` (trial card), `ble/RobotBle.kt` (`send`, scan, `armModelTrial`) |
+| **Code** | `protocol/ModelSupport.kt` (`ModelSupport`, `ModelTrial`, `ReadOnlyPolicy`), `ui/RobotModel.kt` (model detection), `auth/CloudRobotFilter.kt` (account devices), `ui/ModelTrialGroup.kt` (trial card), `ble/RobotBle.kt` (`send`, scan, `armModelTrial`) |
 | **References** | [Bluetooth connection](bluetooth-connection.md) · [Safety](safety.md) · [Mammotion protocol](../MAMMOTION_PROTOCOL.md) · [CONTRIBUTING](../../CONTRIBUTING.md) |
 
 > [!WARNING]
@@ -32,6 +32,18 @@ the Mammotion app table reproduced by [PyMammotion](https://github.com/mikey0000
 | Other Mammotion mowers | `Kumar…`, `Maston…` | 🔒 read-only, listed by the scan, no model page yet |
 
 Pool cleaners (`Spino…`) and RTK reference stations are not mowers and are not listed.
+
+**Mammotion account.** The account lists a device as a robot when its name carries a mower prefix
+above **or** its product key is a mower key of that table (`ModelSupport.isMower(name, productKey)`,
+`RobotModel.fromProductKey`): the account name of a LUBA AWD 5000 carried no model prefix and the robot was dropped
+("0 LUBA in the account", [DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3)). The table holds mower
+keys only, no RTK station, pool cleaner or charging pile key. Each device left out is logged as
+`cloud_device_skipped` with its product key, the start of its name (the model part up to the first `-` or `_` and 2
+characters, e.g. `RTK-AB`, otherwise 3 characters, never more than half of the name) and the name length, never the full name, the serial number or the iotId, so the anonymized export keeps
+it. When the account has devices but none is recognized, the status says "N devices in the account, none recognized
+as a Mammotion mower: export the diagnostics (Service → Logs → Export all) and report the model"; an empty account
+says "No device in the account". A robot listed by its product key only gains nothing else: motion stays bound to
+the validated name prefixes, so it stays in read-only mode.
 
 ## What read-only mode allows
 
@@ -159,7 +171,8 @@ Every element type known to PyMammotion (`PathType`, `hash_list.py`, commit c0e5
 | 0 | zone | filled | mowed | allowed inside |
 | 1 | no-go zone | red | hole | avoided |
 | 2 | passage | grey band | link between zones | used |
-| 3, 10, 12, 13, 18, 19, 20 | dock transfer zone, planned lines, dump spot, drawing (SVG), mowing progress, corridor (Yuka mini) | thin dashed line | ignored | ignored |
+| 3, 10, 12, 18, 19, 20 | dock transfer zone, planned lines, dump spot, mowing progress, corridor (Yuka mini) | thin dashed line | ignored | ignored |
+| 13 | drawing (SVG pattern, `toapp_svg_msg`) | purple pattern and dotted tile ([patterns](map.md#loading-a-map)) | ignored | ignored |
 | 21 | virtual wall (line never to cross) | thick red line | refused | refused |
 | 22 | no-go zone variant (meaning not confirmed upstream) | like a no-go zone | refused | avoided |
 | 23 | rectangular no-go zone (drawn in the Mammotion app, LUBA 3) | like a no-go zone | hole | avoided |

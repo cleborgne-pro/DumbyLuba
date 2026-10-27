@@ -57,8 +57,10 @@ object CutPasses {
         val scheduled = heights.indices.flatMap { pass -> if (pass % 2 == 0) paths else reversed }
         val perPath = heights.flatMap { height -> List(paths.size) { height } }
         val links = preview.links?.let { planned -> planned + planned.map { it.asReversed() } }
+        val zones = preview.cuttingPathZones?.filterIndexed { i, _ -> preview.cuttingPaths[i].size >= 2 }
+        val pathZones = zones?.let { z -> heights.indices.flatMap { pass -> if (pass % 2 == 0) z else z.asReversed() } }.orEmpty()
         return preview.copy(scheduledPaths = scheduled, pathHeights = perPath, cutHeights = heights,
-            meters = preview.meters * heights.size, links = links)
+            meters = preview.meters * heights.size, links = links, pathZoneIds = pathZones, outwardPaths = emptyMap())
     }
 
     /** "Pass 2/3 · 55 mm" during a multi-pass task, otherwise "55 mm". */

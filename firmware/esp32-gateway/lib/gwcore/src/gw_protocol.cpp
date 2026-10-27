@@ -107,6 +107,38 @@ Bytes Health::encode() const {
                batteryExempt ? 1 : 0, screenOn ? 1 : 0});
 }
 
+bool healthDue(uint32_t now, uint32_t lastHealth) { return lastHealth == 0 || now - lastHealth >= HEALTH_MS; }
+
+Outgoing gather(uint32_t now, const Bytes *health, const std::deque<Bytes> &outbox, uint32_t &lastHealth,
+                uint32_t &lastTx) {
+  Outgoing o;
+  Bytes healthFrame;
+  if (health) healthFrame = encode(HEALTH, *health);
+  size_t size = healthFrame.size() + 3;  // + PING
+  for (const auto &f : outbox) size += f.size();
+  o.bytes.reserve(size);
+  if (health) {
+    lastHealth = now;
+    o.bytes.insert(o.bytes.end(), healthFrame.begin(), healthFrame.end());
+    o.frames++;
+    o.health = true;
+    lastTx = now;
+  }
+  for (const auto &f : outbox) {
+    o.bytes.insert(o.bytes.end(), f.begin(), f.end());
+    o.frames++;
+    lastTx = now;
+  }
+  if (now - lastTx >= PING_MS) {
+    const Bytes ping = encode(PING);
+    o.bytes.insert(o.bytes.end(), ping.begin(), ping.end());
+    o.frames++;
+    o.ping = true;
+    lastTx = now;
+  }
+  return o;
+}
+
 bool Parser::feed(const uint8_t *data, size_t size) {
   buffer_.insert(buffer_.end(), data, data + size);
   while (buffer_.size() >= 3) {
@@ -141,6 +173,24 @@ bool AttemptLimiter::blocked(uint32_t now) {
 void AttemptLimiter::failed(uint32_t now) {
   purge(now);
   failures_.push_back(now);
+}
+
+void PairingWindow::open(uint32_t now, uint32_t authenticated, uint32_t durationMs) {
+  open_ = true;
+  since_ = now;
+  duration_ = durationMs;
+  authenticated_ = authenticated;
+}
+
+bool PairingWindow::isOpen(uint32_t now, uint32_t authenticated) {
+  if (open_ && (now - since_ >= duration_ || authenticated != authenticated_)) open_ = false;
+  return open_;
+}
+
+uint32_t PairingWindow::remainingMs(uint32_t now) const {
+  if (!open_) return 0;
+  const uint32_t elapsed = now - since_;
+  return elapsed >= duration_ ? 0 : duration_ - elapsed;
 }
 
 Bytes welcome(const std::string &capabilities) {

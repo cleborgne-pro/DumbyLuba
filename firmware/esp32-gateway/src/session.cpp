@@ -193,6 +193,10 @@ void run(void *arg) {
   // "autonomy": the pilot hands the routes over (frames 0x80..0x97) and the robot carries on through a Wi-Fi outage;
   // "dock-exit": the gateway runs the station exit itself; "ota": the pilot sends its setting (CONFIG) and knows an
   // announced restart is not a failure.
+  {
+    Lock l;
+    stats.authenticated++;
+  }
   send(s, P::WELCOME, P::welcome(std::string(P::CAP_AUTONOMY) + "," + P::CAP_DOCK_EXIT + "," + gw::ota::CAPABILITY));
   note("pilot connected: " + s->peer.toString());
 
@@ -272,30 +276,25 @@ void run(void *arg) {
     }
     if (stop) break;
 
-    // Send: robot responses, health, PING.
+    // Send: health, robot responses, PING, in a single write (one TCP segment, one radio frame).
     std::deque<Bytes> out;
     {
       Lock l;
       out.swap(s->outbox);
     }
     const uint32_t t = millis();
+    Bytes health;
+    const bool healthNow = healthProvider && P::healthDue(t, lastHealth);
+    if (healthNow) health = healthProvider().encode();
+    const P::Outgoing batch = P::gather(t, healthNow ? &health : nullptr, out, lastHealth, lastTx);
+    const size_t queued = out.size();
+    out.clear();  // the batch holds a copy: frees the outbox before the write
     bool broken = false;
-    if (healthProvider && (lastHealth == 0 || t - lastHealth >= P::HEALTH_MS)) {
-      lastHealth = t;
-      broken |= !send(s, P::HEALTH, healthProvider().encode());
-      lastTx = t;
-    }
-    for (auto &f : out) {
-      broken |= !sendRaw(s, f);
-      lastTx = t;
-    }
-    if (!out.empty()) {
+    if (!batch.bytes.empty()) {
+      broken = !sendRaw(s, batch.bytes);
+      // As with one write per frame: the robot responses count even if the write fails, HEALTH and PING once sent.
       Lock l;
-      stats.framesOut += out.size();
-    }
-    if (t - lastTx >= P::PING_MS) {
-      broken |= !send(s, P::PING);
-      lastTx = t;
+      stats.framesOut += broken ? queued : batch.frames;
     }
     if (broken || !s->client.connected()) {
       reason = "Wi-Fi connection closed";
@@ -344,7 +343,7 @@ void setCode(const String &c) {
 }
 
 void poll() {
-  WiFiClient incoming = server.available();
+  WiFiClient incoming = server.accept();
   if (!incoming) return;
   Session *s = new Session();
   s->client = incoming;

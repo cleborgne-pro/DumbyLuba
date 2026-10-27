@@ -159,7 +159,7 @@ internal fun BorderDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, 
     val locked = routeStarted || computing
 
     PushedPage(ServicePage.BORDER.title, back, bottomBar = {
-        MowDebugActions(robot, state, mission?.engine, height, supervised, idle, computing, base != null && selected != null && idle, ::compute,
+        MowDebugActions(robot, state, mission?.engine, height, supervised, idle, computing, base != null && selected != null && idle, latestAction(::compute),
             onStart = { BorderDraft.followed = mission; BorderDraft.samples.clear() }, blades = BorderDraft.blades)
     }) {
         header()
@@ -168,7 +168,7 @@ internal fun BorderDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, 
             else tr("The robot follows the chosen border, blades stopped. Clear area, no person or animal, physical stop within reach.",
                 "Le robot suit la bordure choisie, lames arrêtées. Zone dégagée, personne ni animal, arrêt physique accessible."))
         BorderDebugMap(state, choices, validations, selected, mission, BorderDraft.followed.takeIf { route.started }, picker.takeIf { !locked })
-        BorderChoiceGroup(choices, validations, selected, locked, ::select,
+        BorderChoiceGroup(choices, validations, selected, locked, latestAction1(::select),
             onReuse = { BorderDraft.offsetM = it.offsetM.toFloat() },
             onForget = { validations = validationStore.clear(it) })
         // Nothing to track: no empty card.

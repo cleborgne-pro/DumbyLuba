@@ -1,5 +1,6 @@
 package fr.luba.poc.ble
 
+import fr.luba.poc.simulation.PositioningGrace
 import fr.luba.poc.difficulty.DifficultyKind
 import fr.luba.poc.history.MowingOutcome
 import fr.luba.poc.map.Point
@@ -66,7 +67,9 @@ class RobotBleIncidentsTest {
     @Test fun `transient protection while mowing, pause then resume`() {
         bench.mowingUnderway()
         bench.sim.selfCheck = 41
-        bench.until(5000, "pause on protection") { bench.state.events.any { it.contains("attente de sa levée") } }
+        // Positioning loss: first ridden through (PositioningGrace, 20 s / 5 m), then the usual pause.
+        bench.until(5000, "positioning grace") { bench.state.events.any { it.contains("trajet poursuivi quelques secondes") } }
+        bench.until(PositioningGrace.MAX_MS + 5000, "pause on protection") { bench.state.events.any { it.contains("attente de sa levée") } }
         assertFalse(bench.sim.bladesOn)
         bench.advance(2000)
         bench.sim.selfCheck = 0
@@ -80,7 +83,9 @@ class RobotBleIncidentsTest {
     @Test fun `weak satellite signal held two minutes while mowing, wait then resume`() {
         bench.mowingUnderway()
         bench.sim.selfCheck = 41
-        bench.until(5000, "pause on protection") { bench.state.events.any { it.contains("attente de sa levée") } }
+        // Positioning loss: first ridden through (PositioningGrace, 20 s / 5 m), then the usual pause.
+        bench.until(5000, "positioning grace") { bench.state.events.any { it.contains("trajet poursuivi quelques secondes") } }
+        bench.until(PositioningGrace.MAX_MS + 5000, "pause on protection") { bench.state.events.any { it.contains("attente de sa levée") } }
         assertFalse(bench.sim.bladesOn)
         bench.advance(120_000)
         assertTrue(bench.state.robotRoute.status, bench.state.robotRoute.running)

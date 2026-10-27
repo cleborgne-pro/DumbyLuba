@@ -48,7 +48,9 @@ data class BlockageDeferral(val checkpoint: MissionCheckpoint, val target: Point
  * - After a recharge ([afterRecharge]): the robot leaves the base and no longer has to go back to the interrupted point
  *   first. The remainder is rotated at the entry of a block (start of a cell, after a prepared transit, or start of a
  *   deferred portion) when that reduces the total transit base → entry → … → base by at least [MIN_GAIN_M]. Cells are
- *   kept whole; the interrupted cell is finished at the end, starting again at its interrupted point.
+ *   kept whole; the interrupted cell is finished at the end, starting again at its interrupted point. Spiral from the
+ *   centre ([fr.luba.poc.map.Preview.outwardPaths]): an order that would drive an outward chain before a part of its core,
+ *   of the chains inside it or of a path planned before it near its centre end, still to mow, is refused ([outwardRules]).
  * - After a blockage ([deferBlocked]): the problematic segment (from the progress up to [CLEARANCE_M] past the blocked
  *   pose) is deferred to the end of the mowing and tried again there; the rest goes on straight away.
  */
@@ -229,6 +231,57 @@ object SmartResume {
         runCatching { routes.between(a, b, ha, hb).zipWithNext().sumOf { (p, q) -> p.distance(q) } }.getOrNull()
     }
 
+    /**
+     * Cutting path ([fr.luba.poc.map.Preview.cuttingPaths]) of each prepared edge, −1 for a transit: the cutting edges are
+     * the segments of the cutting paths in order ([MowingSimulation]). Null when [edges] do not match [paths].
+     */
+    fun pathOfEdges(edges: List<SimEdge>, paths: List<List<Point>>): IntArray? {
+        val out = IntArray(edges.size) { -1 }
+        var i = 0
+        paths.forEachIndexed { k, path ->
+            for ((a, b) in path.zipWithNext()) {
+                if (a.distance(b) <= 1e-8) continue
+                while (i < edges.size && !edges[i].cutting) i++
+                if (i >= edges.size || edges[i].a.distance(a) > 1e-6 || edges[i].b.distance(b) > 1e-6) return null
+                out[i++] = k
+            }
+        }
+        return if ((i until edges.size).any { edges[it].cutting }) null else out
+    }
+
+    /**
+     * Order constraints of a spiral from the centre on the prepared edges ([fr.luba.poc.map.Preview.outwardPaths]):
+     * (path to mow first, outward chain), with the path of every edge ([pathOfEdges]). Empty when the plan has none;
+     * null when it has some that cannot be placed on [edges] (no reordering then).
+     */
+    fun outwardRules(edges: List<SimEdge>, preview: fr.luba.poc.map.Preview): Pair<IntArray, List<Pair<Int, Int>>>? {
+        if (preview.outwardPaths.isEmpty()) return IntArray(0) to emptyList()
+        val pathOf = pathOfEdges(edges, preview.cuttingPaths.filter { it.size >= 2 }.let { kept ->
+            // Indices of the paths kept by the preparation (a path of fewer than two points is not driven).
+            if (kept.size == preview.cuttingPaths.size) kept else return null }) ?: return null
+        return pathOf to preview.outwardPaths.flatMap { (chain, before) -> before.map { it to chain } }
+    }
+
+    /**
+     * Indices of the [rules] ([outwardRules]) broken by the drive order of [spans]: a part of the path to mow first still
+     * to drive after the first part of its chain still to drive.
+     */
+    fun brokenRules(edges: List<SimEdge>, spans: List<MissionSpan>, pathOf: IntArray, rules: List<Pair<Int, Int>>): Set<Int> {
+        if (rules.isEmpty()) return emptySet()
+        val tracked = rules.flatMap { listOf(it.first, it.second) }.toHashSet()
+        val first = HashMap<Int, Int>(); val last = HashMap<Int, Int>()
+        var rank = 0
+        for (span in spans) for ((i, e) in spanEdges(edges, span, overlap = false)) {
+            val path = pathOf[i]
+            if (e.cutting && path in tracked) { first.putIfAbsent(path, rank); last[path] = rank }
+            rank++
+        }
+        return rules.indices.filter { r ->
+            val before = last[rules[r].first]; val chain = first[rules[r].second]
+            before != null && chain != null && before > chain
+        }.toSet()
+    }
+
     /** Plans with successive passes of different heights keep their order (a lower pass never before a higher one). */
     fun singleHeight(edges: List<SimEdge>): Boolean = edges.filter { it.cutting }.mapNotNull { it.heightMm }.distinct().size <= 1
 
@@ -246,10 +299,15 @@ object SmartResume {
         val cached: (Point, Double?, Point, Double?) -> Double? = { a, ha, b, hb ->
             cache.getOrPut(listOf(a.x, a.y, ha ?: Double.NaN, b.x, b.y, hb ?: Double.NaN)) { if (a.distance(b) < 0.02) 0.0 else link(a, ha, b, hb) }
         }
+        // Spiral from the centre: no order breaking a rule that the current order keeps.
+        val (pathOf, rules) = outwardRules(edges, checkpoint.preview) ?: return null
+        val broken = brokenRules(edges, spans, pathOf, rules)
         val default = transit(edges, spans, start, startHeading, approach, approachHeading, cached)
         val candidates = entries(edges, spans).map { (k, entry) -> rotate(spans, k, entry) }
             .map { it to transit(edges, it, start, startHeading, approach, approachHeading, cached, straight = true) }
-            .filter { it.second < default - MIN_GAIN_M }.sortedBy { it.second }
+            .filter { it.second < default - MIN_GAIN_M }
+            .filter { (order, _) -> rules.isEmpty() || broken.containsAll(brokenRules(edges, order, pathOf, rules)) }
+            .sortedBy { it.second }
         var best: Pair<List<MissionSpan>, Double>? = null
         for ((order, bound) in candidates.take(MAX_EVALUATIONS)) {
             if (bound >= (best?.second ?: (default - MIN_GAIN_M))) break

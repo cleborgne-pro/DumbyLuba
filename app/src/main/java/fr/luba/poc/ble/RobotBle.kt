@@ -160,6 +160,8 @@ fun RobotUi.withMammotionMap(raw: RobotMap, corrections: List<MapCorrection> = m
     val motorWatchdog: MotorWatchdogResult? = null,
     /** History of real mowings (most recent first), mowing currently being measured and report to show. */
     val mowingHistory: List<fr.luba.poc.history.MowingRecord> = emptyList(),
+    /** Directions last mowed per zone ("Change every session", [fr.luba.poc.planning.ZoneOrientationStore]). */
+    val zoneOrientations: Map<Long, fr.luba.poc.planning.ZoneOrientation> = emptyMap(),
     val mowingRecord: fr.luba.poc.history.MowingRecord? = null,
     val mowingReport: fr.luba.poc.history.MowingRecord? = null,
     /** History task opened in detail (track replay), by identifier. */
@@ -843,6 +845,11 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     private var historyTracker: fr.luba.poc.history.MowingTracker? = null
     private var historyJob: Job? = null
     private var historyRechargeBase = 0
+    // "Change every session": directions of the zones actually mowed, written after each real mowing.
+    private val orientationStore = fr.luba.poc.planning.ZoneOrientationStore(app.filesDir)
+    private val orientationWrites = kotlinx.coroutines.channels.Channel<Map<Long, fr.luba.poc.planning.ZoneOrientation>>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    /** Plan of the mowing being measured (preview and map), to record the directions it actually mowed. */
+    private var orientationPlan: Pair<Preview, RobotMap>? = null
     private var historySavedAt = 0L
     // Task tracks: timestamped actual positions, map and prepared route, for replay from the history.
     // Declared before the init block: its write coroutine may start before the constructor finishes.
@@ -861,6 +868,12 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 .sortedByDescending { it.startedAt }) } }
             coverageRestore(loaded)
             for (records in historyWrites) runCatching { historyStore.save(records) }
+        }
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val loaded = orientationStore.read()
+            handler.post { update { ui -> ui.copy(zoneOrientations = loaded + ui.zoneOrientations) } }
+            // Merged with the file: a mowing that ends before the read above has reached the state keeps the other zones.
+            for (memory in orientationWrites) runCatching { orientationStore.merge(memory) }
         }
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             for (write in trackWrites) runCatching {
@@ -1049,6 +1062,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     private var navConfig = NavConfig()
     private var navStart: NavSample? = null
     private var navMapPlan: MapNavPlan? = null
+    /** Heading gap confirmed at the end of the last drive to a point that reached its end ([NavConfig.keepHeading]). */
+    private var navHeadingMemory: NavHeadingMemory? = null
     /** Obstacle bypass in progress: obstacle, opposite point and return. */
     private var navCourse: LocalObstacle? = null
     private var navCourseFar: Point? = null
@@ -1063,6 +1078,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
     private var routePhysicalRoutes: TrajectoryPlanner? = null
     /** Bypass armed while tracking the main edges; contact awaiting processing. */
     private var routeBypassArmed = false
+    /** Short positioning loss ridden through during a route ([PositioningGrace]), kept from one range to the next. */
+    private val routePositioningGrace = PositioningGrace()
+    private var routeRidingPositioning = false
     private var routeContact: RouteContact? = null
     private var navContact: RouteContact? = null
     private var localIncidentPending = false
@@ -2123,7 +2141,13 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 else event("lift_reported", reason, mapOf("code" to error.code, "source" to error.source))
             }
             if(BumperEvents.confirmsContact(error) || BumperEvents.latchedFault(error)) update { it.copy(lastBumperCode = error.code, lastBumperAt = System.currentTimeMillis()) }
-            if(BumperEvents.confirmsContact(error)) { armObstaclePhoto(error.code); if (manualContactContext()) recordManualContact(error.code) else recordContactOnReceipt(error.code) }
+            if(BumperEvents.confirmsContact(error)) {
+                armObstaclePhoto(error.code)
+                // Read long after it happened: the robot moved since, the contact is not placed at its current position.
+                if (BumperEvents.placedLate(error, System.currentTimeMillis())) event("contact_late", tr("Bumper contact read late: not placed on the map", "Contact pare-chocs lu en retard : non placé sur la carte"),
+                    mapOf("code" to error.code, "robotErrorTime" to error.timestamp, "ageS" to System.currentTimeMillis() / 1000 - (error.timestamp ?: 0L)))
+                else if (manualContactContext()) recordManualContact(error.code) else recordContactOnReceipt(error.code)
+            }
             if(BumperEvents.confirmsContact(error) || BumperEvents.latchedFault(error)) alertMonitor.bumper(SystemClock.elapsedRealtime(), BumperEvents.latchedFault(error)) { kind, severity -> alert(kind, severity, tr("Collision / robot fault ${error.code}", "Collision / défaut robot ${error.code}")) }
 
             if (state.value.robotRoute.running && !remoteLegActive) {
@@ -2324,8 +2348,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 // logged as protobuf_decoded). Never during tracking handed over to the gateway (no write from the pilot).
                 if (previousTelemetry.selfCheck != t.selfCheck && StopUnlock.blocked(t.selfCheck) && !remoteLegActive)
                     send(commands.selfCheckInfo(), "SELF_CHECK_INFO")
-                if (previousTelemetry.selfCheck != t.selfCheck && offMapLatchIgnored(t))
-                    event("off_map_latch_ignored", tr("Self-check 25 beyond the mapped zones: ignored for blade-OFF moves", "Self-check 25 hors des zones cartographiées : ignoré pour les déplacements lames arrêtées"),
+                if (previousTelemetry.selfCheck != t.selfCheck && edgeLatchIgnored(t))
+                    event("off_map_latch_ignored", tr("Self-check 25 beyond the mapped zones or at a no-go zone: ignored for blade-OFF moves", "Self-check 25 hors des zones cartographiées ou contre une zone interdite : ignoré pour les déplacements lames arrêtées"),
                         mapOf("x" to t.x, "y" to t.y, "sensorStatus" to t.sensorStatus))
             }
             event("telemetry", tr("State / position received", "État / position reçus"), mapOf("batteryPercent" to t.battery,
@@ -2673,6 +2697,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 doneMeters = checkpoint?.doneMeters ?: 0.0, forecast = forecast, batteryStart = battery, batteryEnd = battery, kind = kind,
                 links = setOf(trackingLink()))
         }
+        orientationPlan = if (kind == fr.luba.poc.history.TaskKind.MOW) engine.preview to engine.map else null
         trackBegin(id, engine, kind == fr.luba.poc.history.TaskKind.MOW)
         taskEvent(if (resumed) fr.luba.poc.history.TaskEventType.RESUME else fr.luba.poc.history.TaskEventType.START,
             "${record.kind.label} · ${record.mode} · ${record.zoneNames.joinToString(", ")}",
@@ -2912,6 +2937,14 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             reason = if (record.kind != fr.luba.poc.history.TaskKind.MOW && reason.startsWith(tr("Mowing finished", "Tonte terminée"))) reason.replaceFirst(tr("Mowing finished", "Tonte terminée"), tr("Route finished", "Trajet terminé")) else reason, endedAt = System.currentTimeMillis(), doneMeters = if (done) record.cuttingMeters else record.doneMeters)
         historyTracker = null
         val mowing = final.kind == fr.luba.poc.history.TaskKind.MOW
+        // Zones mowed at 50 % or more remember their directions for the next "Change every session".
+        orientationPlan?.takeIf { mowing }?.let { (preview, map) ->
+            val current = state.value.zoneOrientations
+            val updated = runCatching { fr.luba.poc.planning.ZoneProgress.update(current, preview, map, final.doneMeters,
+                final.endedAt ?: System.currentTimeMillis(), final.cuttingMeters) }.getOrDefault(current)
+            if (updated != current) { update { it.copy(zoneOrientations = updated) }; orientationWrites.trySend(updated) }
+        }
+        orientationPlan = null
         // Report opened at the end of a mowing only; surveys and routes remain available in the history.
         update { it.copy(mowingRecord = null, mowingReport = if (mowing) final else it.mowingReport) }
         historyPersist(final)
@@ -3248,7 +3281,18 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             fun protectionStop(reason: String): Nothing = if (ProtectionPause.pausable(reason)) throw RouteProtection(follower.index,reason) else error(reason)
                             // Protection waiting for the contact code: cleared, or delay elapsed without contact → stop on the protection.
                             latch?.let { (since, reason) -> if (!protectionUp || now-since >= CollisionLatch.CONTACT_GRACE_MS) protectionStop(reason) }
-                            if (protectionUp) {
+                            // Positioning loss (weak satellite signal) with the robot still driving: ridden through for a few seconds.
+                            val riding = protectionUp && latch == null &&
+                                routePositioningGrace.rides(now,live.robotState,live.selfCheck,live.x?.let { x -> live.y?.let { y -> Point(x,y) } })
+                            if (!protectionUp) routePositioningGrace.reset()
+                            if (riding && !routeRidingPositioning) event(PositioningGrace.EVENT,
+                                tr("Positioning lost (self-check ${live.selfCheck}): route continued for a few seconds", "Positionnement perdu (self-check ${live.selfCheck}) : trajet poursuivi quelques secondes"),
+                                mapOf("selfCheck" to live.selfCheck,"edge" to follower.index,"x" to live.x,"y" to live.y,"maxMs" to PositioningGrace.MAX_MS,"maxM" to PositioningGrace.MAX_M))
+                            if (!riding && routeRidingPositioning && protectionUp) event(PositioningGrace.EVENT+"_spent",
+                                tr("Positioning still lost after the grace: robot stopped", "Positionnement toujours perdu après le délai de grâce : robot arrêté"),
+                                mapOf("selfCheck" to live.selfCheck,"elapsedMs" to routePositioningGrace.elapsedMs(now),"edge" to follower.index))
+                            routeRidingPositioning = riding
+                            if (protectionUp && !riding) {
                                 val reason = ProtectionPause.reason(live.robotState,live.selfCheck)
                                 // Collision lock (25) published before the contact code (10-15, 11:00:06): immediate stop, then the
                                 // contact read from the error history gives the back-off and the bypass ([CollisionLatch]).
@@ -3982,6 +4026,16 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                         // protection by itself (10-15, 17:36: 30 s wait then mowing stopped). Same handling as a contact: back-off,
                         // wait for the lock to clear, estimated obstacle and bypass.
                         val latched=state.value.telemetry
+                        // 25 without a contact code at a no-go zone (2026-10-25, 15:33: rear of the chassis inside it after a
+                        // pivot): the robot left its task area, nothing was hit. No estimated obstacle, no back-off into the
+                        // no-go: stop, the joystick takes it out ([edgeLatchIgnored]), then resume. Elsewhere, unchanged.
+                        if (fr.luba.poc.protocol.OffMapLatch.ignored(latched.selfCheck,latched.sensorStatus,
+                                fr.luba.poc.simulation.PointPlanner.atExclusion(state.value.robotMap,latched.x?.let { x -> latched.y?.let { y -> Point(x,y) } }))) {
+                            event("route_exclusion_latch",tr("Self-check 25 at a no-go zone without a contact code: stop without an obstacle", "Self-check 25 contre une zone interdite sans code de contact : arrêt sans obstacle"),
+                                mapOf("edge" to pause.index,"x" to latched.x,"y" to latched.y,"heading" to latched.heading))
+                            error(tr("Robot outside its task area (self-check 25) against a no-go zone: take it out with the joystick, blades stopped, then resume",
+                                "Robot hors de sa zone de travail (self-check 25) contre une zone interdite : le sortir au joystick, lames arrêtées, puis reprendre"))
+                        }
                         if (CollisionLatch.latched(latched.selfCheck) && latched.x!=null && latched.y!=null && latched.heading!=null) {
                             val heading=routeReckoning.heading(requireNotNull(latched.heading))
                             event("route_latch_contact",tr("Collision lock without a contact code: handled as a contact", "Verrou de collision sans code de contact : traité comme un contact"),
@@ -4820,6 +4874,15 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         fr.luba.poc.protocol.OffMapLatch.ignored(t.selfCheck, t.sensorStatus,
             fr.luba.poc.simulation.PointPlanner.beyondMapped(state.value.robotMap, t.x?.let { x -> t.y?.let { y -> Point(x, y) } }))
 
+    /**
+     * Self-check 25 ignored for the joystick: robot beyond the mapped zones or at a no-go zone, bumper and lift clear
+     * ([fr.luba.poc.protocol.OffMapLatch.atEdge]). 2026-10-25, 15:33: rear of the chassis inside a no-go zone after a
+     * pivot, back-off impossible, joystick refused: the only way out was forward, by hand.
+     */
+    private fun edgeLatchIgnored(t: fr.luba.poc.protocol.Telemetry): Boolean =
+        fr.luba.poc.protocol.OffMapLatch.ignored(t.selfCheck, t.sensorStatus,
+            fr.luba.poc.protocol.OffMapLatch.atEdge(state.value.robotMap, t.x?.let { x -> t.y?.let { y -> Point(x, y) } }))
+
     fun manualInput(linear: Int, angular: Int): Boolean {
         if (state.value.robotRoute.running) return false
         try {
@@ -4838,9 +4901,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
             val failure = TeachSafety.tickFailure(if (devicePrevious == 0L) null else SystemClock.elapsedRealtime()-devicePrevious,
                 t.battery,t.sensorStatus,30)
             check(failure == null) { failure ?: tr("State unavailable", "État indisponible") }
-            // Beyond the mapped zones, 25 does not prevent driving freely ([offMapLatchIgnored]); nor does a positioning
-            // condition (41 weak satellite signal, 2026-10-22): the joystick does not need RTK and brings the robot under open sky.
-            check(fr.luba.poc.protocol.SelfCheck.joystickAllowed(t.selfCheck) || offMapLatchIgnored(t)) { fr.luba.poc.protocol.SelfCheck.refusal(t.selfCheck) }
+            // Beyond the mapped zones or at a no-go zone, 25 does not prevent driving freely ([edgeLatchIgnored]); nor does a
+            // positioning condition (41 weak satellite signal, 2026-10-22): the joystick does not need RTK and brings the robot under open sky.
+            check(fr.luba.poc.protocol.SelfCheck.joystickAllowed(t.selfCheck) || edgeLatchIgnored(t)) { fr.luba.poc.protocol.SelfCheck.refusal(t.selfCheck) }
             check(!TeachSafety.bumperHealthAlert(trialSensors(t.sensorStatus))) { tr("Bumper / lift sensor alert", "Alerte capteur pare-chocs / soulèvement") }
             // Model trial: joystick bounded to the trial ceilings (low speed).
             manualCommand = fr.luba.poc.protocol.ModelTrial.joystick(robotName, linear, angular); manualInputAt = SystemClock.elapsedRealtime()
@@ -4871,7 +4934,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                             // Precise reason in the log: on 10-14, "Protection / incompatible robot state" did not say that
                             // the robot had just published self-check 25.
                             check(guard == null) { guard ?: "" }
-                            check(fr.luba.poc.protocol.SelfCheck.joystickAllowed(currentTelemetry.selfCheck) || offMapLatchIgnored(currentTelemetry)) {
+                            check(fr.luba.poc.protocol.SelfCheck.joystickAllowed(currentTelemetry.selfCheck) || edgeLatchIgnored(currentTelemetry)) {
                                 fr.luba.poc.protocol.SelfCheck.refusal(currentTelemetry.selfCheck) }
                             check(!TeachSafety.bumperHealthAlert(trialSensors(currentTelemetry.sensorStatus))) {
                                 tr("Bumper / lift sensor alert (sensors ${currentTelemetry.sensorStatus})", "Alerte capteur pare-chocs / soulèvement (capteurs ${currentTelemetry.sensorStatus})") }
@@ -6247,6 +6310,18 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         // Navigation test: pose predicted at the moment the command takes effect (BLE + firmware delay).
         val reckoning = DeadReckoning(commandDelayMs = DeadReckoning.NAV_COMMAND_DELAY_MS, calibration = savedCalibration(),
             publishedBehindM = DeadReckoning.PUBLISHED_POINT_BEHIND_M).also { it.slide = slideVelocity() }
+        // Chained drive (sync with the Mammotion app): heading gap of the previous drive taken over when the robot has not
+        // moved since and it was measured over a long enough straight line. Confirmed again over 15 cm of the short link
+        // before the outline, it was off by 10° once in ten draws of the bench (1 cm of RTK noise), and the outline then
+        // drifted into the element ([MapSyncSweepTest]).
+        val remembered = navHeadingMemory.also { navHeadingMemory = null }
+        if (config.keepHeading && remembered != null) {
+            val t = state.value.telemetry
+            val reason = remembered.refusal(SystemClock.elapsedRealtime(), t.x?.let { x -> t.y?.let { y -> Point(x, y) } }, t.heading)
+            if (reason == null) reckoning.inheritHeading(remembered.offset, remembered.supportM)
+            event("nav_heading_kept", if (reason == null) tr("Heading gap of the previous drive kept", "Écart de cap du trajet précédent conservé")
+                else tr("Heading confirmed again: $reason", "Cap reconfirmé : $reason"), mapOf("testId" to navTestId, "offset" to remembered.offset, "supportM" to remembered.supportM, "kept" to (reason == null)))
+        }
         val navSlideMeter = PivotSlideMeter()
         var fixAt = 0L
         var recovery: String? = null
@@ -6561,6 +6636,9 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 purgeQueuedCommands(); send(commands.stop(),"NAV_MAP_END_STOP")
                 if (finished) index = endPoint+1
             }
+            val end = state.value.telemetry
+            navHeadingMemory = if (reckoning.headingConfirmed && end.x != null && end.y != null && end.heading?.isFinite() == true)
+                NavHeadingMemory(reckoning.headingOffset, reckoning.headingSupportM, SystemClock.elapsedRealtime(), Point(end.x, end.y), end.heading) else null
             finishNav("PASS",(if (config.pointDestination) tr("Point reached, blades OFF · %.2f m observed", "Point atteint, lames OFF · %.2f m observés")
                 else if (config.tonte) tr("Cutting test finished · %.2f m observed · blade stop requested", "Essai de coupe terminé · %.2f m observés · arrêt des lames demandé")
                 else tr("Map route finished · %.2f m observed", "Parcours sur carte terminé · %.2f m observés")).format(state.value.navTest.observedMeters))
@@ -7048,7 +7126,7 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
         private fun config(drawState: Int?) = NavConfig(pointDestination = true, linearSpeed = PathFollower.linearFor(state.value.trajectorySpeedPercent)
             .let { if (drawState != null) minOf(it, fr.luba.poc.mapsync.MapSyncPlanner.TRACE_LINEAR) else it },
             angularSpeed = PathFollower.angularLimit(state.value.trajectorySpeedPercent), automatic = true, maxDurationMs = 600_000, maxRadiusM = 200.0,
-            batteryFloor = SYNC_BATTERY_FLOOR - 5, drawState = drawState)
+            batteryFloor = SYNC_BATTERY_FLOOR - 5, drawState = drawState, keepHeading = true)
 
         /**
          * Starts a drive with [start] and waits for its end: null if it reached its end, otherwise its refusal or stop
@@ -7144,7 +7222,8 @@ class RobotBle(app: Application) : AndroidViewModel(app) {
                 catch (e: IllegalStateException) { return e.message ?: e.javaClass.simpleName }
             // Faced along the first edge in place first: the join leaves the robot at up to 25° from the outline, and the
             // arc that corrected it while recording took the chassis 15 cm towards the element (footprint or corridor
-            // check, outline abandoned): 53 failures out of 300 draws of the bench before, 35 after ([MapSyncSweepTest]).
+            // check, outline abandoned): 53 failures out of 300 draws of the bench before, 35 after ([MapSyncSweepTest]; 1 with
+            // the heading kept from the join, [NavHeadingMemory]).
             // A pivot on the spot adds no recorded point.
             return drive(progress) { startMapNavigation(config(kind.drawState), preset = plan.copy(alignAtStart = true)) }
         }

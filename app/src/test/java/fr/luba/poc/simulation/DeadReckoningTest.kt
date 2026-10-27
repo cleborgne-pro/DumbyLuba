@@ -57,6 +57,72 @@ class DeadReckoningTest {
         assertEquals(64.0, r.heading(64.0), 1e-9)
     }
 
+    @Test fun `a heading gap taken over from the previous drive is not replaced by a short noisy line`() {
+        // Previous drive: published heading 1° under the travelled direction. New drive: 16 cm of straight line whose ends
+        // are 3 cm off across it (two RTK draws of 1.5 cm: 10.6° measured off), as on the bench before the outline.
+        val r = DeadReckoning()
+        r.inheritHeading(1.0, 0.8)
+        assertTrue(r.headingConfirmed)
+        assertEquals(0.8, r.headingSupportM, 1e-9)
+        assertEquals(31.0, r.heading(30.0), 1e-9)
+        r.fix(Point(0.0, 0.0), 30.0, 0)
+        r.sent(0, 150, 0)
+        val course = Math.toRadians(31.0)
+        r.fix(Point(0.16 * kotlin.math.cos(course) - 0.03 * kotlin.math.sin(course), 0.16 * kotlin.math.sin(course) + 0.03 * kotlin.math.cos(course)), 30.0, 1000)
+        // Weighted refinement only (≈ 2° of the 10° measured), instead of the whole gap of a first confirmation.
+        assertEquals(31.0, r.heading(30.0), 3.0)
+        val fresh = DeadReckoning()
+        fresh.fix(Point(0.0, 0.0), 30.0, 0)
+        fresh.sent(0, 150, 0)
+        fresh.fix(Point(0.16 * kotlin.math.cos(course) - 0.03 * kotlin.math.sin(course), 0.16 * kotlin.math.sin(course) + 0.03 * kotlin.math.cos(course)), 30.0, 1000)
+        assertTrue(fresh.headingConfirmed)
+        assertTrue("first confirmation adopts the noisy gap: ${fresh.heading(30.0)}", kotlin.math.abs(fresh.heading(30.0) - 31.0) > 5.0)
+    }
+
+    @Test fun `after the first confirmation the gap is measured again over the whole straight line`() {
+        // Published heading 0°, robot driving at 4°; the second position carries 3 cm of RTK noise across the line.
+        val r = DeadReckoning()
+        val course = Math.toRadians(4.0)
+        fun on(m: Double, across: Double = 0.0) = Point(m * kotlin.math.cos(course) - across * kotlin.math.sin(course), m * kotlin.math.sin(course) + across * kotlin.math.cos(course))
+        r.fix(on(0.0), 0.0, 0)
+        r.sent(0, 150, 0)
+        r.fix(on(0.16, 0.03), 0.0, 1000)
+        assertTrue(r.headingConfirmed)
+        assertEquals(14.6, r.headingOffset, 0.5) // 4° + 10.6° of noise, as the first confirmation always did
+        for (second in 2..6) r.fix(on(0.16 * second), 0.0, second * 1000L)
+        // 96 cm of line: the noise of one end weighs 2° no more, the gap is the travelled direction.
+        assertEquals(4.0, r.headingOffset, 0.2)
+        assertEquals(0.96, r.headingSupportM, 0.01)
+        // A pivot ends that line; later lines only refine the gap with the usual weighted gain.
+        r.sent(6000, 0, 200)
+        r.fix(on(0.96), 20.0, 7000)
+        assertEquals(4.0, r.headingOffset, 0.2)
+    }
+
+    @Test fun `a robot pushed sideways during that straight line is not taken for a heading gap`() {
+        val r = DeadReckoning()
+        r.fix(Point(0.0, 0.0), 0.0, 0)
+        r.sent(0, 150, 0)
+        r.fix(Point(0.16, 0.0), 0.0, 1000)
+        r.fix(Point(0.32, 0.0), 0.0, 2000)
+        assertEquals(0.0, r.headingOffset, 1e-6)
+        // Pushed 40 cm to the side between two positions: the whole line would say 34°.
+        r.fix(Point(0.48, 0.4), 0.0, 3000)
+        assertEquals(0.0, r.headingOffset, 1e-6)
+        assertTrue(r.headingConfirmed)
+    }
+
+    @Test fun `a heading gap is only taken over before the first position and a realignment still drops it`() {
+        val r = DeadReckoning()
+        r.inheritHeading(-8.0, 0.8)
+        r.fix(Point(0.0, 0.0), 100.0, 0)
+        assertThrows(IllegalStateException::class.java) { r.inheritHeading(0.0, 0.8) }
+        r.sent(0, 0, 0)
+        r.fix(Point(0.0, 0.0), 30.0, 1000) // 70° without any commanded rotation: robot realignment
+        assertFalse(r.headingConfirmed)
+        assertEquals(0.0, r.headingOffset, 1e-9)
+    }
+
     @Test fun `a commanded pivot is not taken for a realignment`() {
         val r = DeadReckoning()
         r.fix(Point(0.0, 0.0), 0.0, 0)

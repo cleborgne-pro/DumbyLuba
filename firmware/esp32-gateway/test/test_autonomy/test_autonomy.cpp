@@ -6,7 +6,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 
 #include "gw_autonomy.h"
@@ -17,6 +19,7 @@
 #include "gw_follow.h"
 #include "gw_leg_frames.h"
 #include "gw_leg_runner.h"
+#include "gw_worker.h"
 #include "sim_robot.h"
 
 using namespace gw::leg;
@@ -309,14 +312,44 @@ void test_fleeting_protection_still_stops_the_run() {
   int64_t latchedAt = 0;
   env.onTick = [&](SimulatedRobotEnv &e) {
     if (e.elapsedMs() > 15000 && latchedAt == 0) {
-      e.selfCheck = 41;
+      e.selfCheck = 20;
       latchedAt = e.elapsedMs();
     }
     if (latchedAt > 0 && e.elapsedMs() > latchedAt + 1000) e.selfCheck = 10;
   };
   const auto result = run(env, spec());
   TEST_ASSERT_EQUAL((int)LegOutcome::FAILED, (int)result.outcome);
-  TEST_ASSERT_EQUAL_STRING("Protection / état robot changé (état 20, protection 41)", result.text.c_str());
+  TEST_ASSERT_EQUAL_STRING("Protection / état robot changé (état 20, protection 20)", result.text.c_str());
+}
+
+// Raised play house of 2026-10-25: self-check 41 while the robot drives under it (PositioningGrace).
+void test_positioning_loss_ridden_through_then_stopped_after_the_grace() {
+  auto shortLoss = robotAtStart();
+  int64_t lostAt = 0;
+  shortLoss.onTick = [&](SimulatedRobotEnv &e) {
+    if (e.elapsedMs() > 15000 && lostAt == 0) {
+      e.selfCheck = 41;
+      lostAt = e.elapsedMs();
+    }
+    if (lostAt > 0 && e.elapsedMs() > lostAt + 4000) e.selfCheck = 10;
+  };
+  const auto ridden = run(shortLoss, spec());
+  TEST_ASSERT_EQUAL_MESSAGE((int)LegOutcome::DONE, (int)ridden.outcome, ridden.text.c_str());
+  TEST_ASSERT_TRUE(std::find(shortLoss.events.begin(), shortLoss.events.end(), "route_positioning_grace") != shortLoss.events.end());
+  TEST_ASSERT_FALSE(anySent(shortLoss, "ROUTE_LATCH_STOP"));
+  auto lasting = robotAtStart();
+  int64_t since = 0;
+  lasting.onTick = [&](SimulatedRobotEnv &e) {
+    if (e.elapsedMs() > 15000 && since == 0) {
+      e.selfCheck = 41;
+      since = e.elapsedMs();
+    }
+  };
+  const auto stopped = run(lasting, spec());
+  TEST_ASSERT_EQUAL((int)LegOutcome::FAILED, (int)stopped.outcome);
+  TEST_ASSERT_EQUAL_STRING("Protection / état robot changé (état 20, protection 41)", stopped.text.c_str());
+  const int64_t rode = lasting.elapsedMs() - since;
+  TEST_ASSERT_TRUE(rode >= PositioningGrace::MAX_MS && rode <= PositioningGrace::MAX_MS + 3000);
 }
 
 void test_stop_lock_is_not_held_for_a_contact() {
@@ -935,6 +968,97 @@ void test_unconfirmed_stop_is_reported_in_the_outcome() {
   TEST_ASSERT_TRUE_MESSAGE(contains(result.text, " · liaison robot perdue : arrêt non transmis"), result.text.c_str());
 }
 
+// Unexpected exception inside the tracking (not a Leg* one): FAILED, index = edge before the last reported progress
+// (progress indexes are 1-based, the outcome index 0-based), as the clamped lastIndex() of GatewayAutonomy::run.
+void test_internal_error_reports_the_edge_of_the_last_progress() {
+  auto robot = robotAtStart();
+  SimHost host(robot);
+  Pilot pilot;
+  GatewayAutonomy gateway(host, threads(), [](const std::string &) {}, wallNow);
+  gateway.pilotAttached(pilot.sink());
+  upload(gateway, 1, blobs::KIND_ROUTE, blobs::encodeRoute(stripes()));
+  TEST_ASSERT_TRUE(pilot.waitFor(frames::BLOB_OK) >= 0);
+  std::atomic<bool> thrown{false};
+  robot.onTick = [&](SimulatedRobotEnv &e) {
+    if (!thrown && e.elapsedMs() > 8000) {
+      thrown = true;
+      throw std::logic_error("boom");
+    }
+  };
+  gateway.onFrame(frames::LEG_START, spec().encode());
+  const int at = pilot.waitFor(frames::LEG_RESULT);
+  TEST_ASSERT_TRUE(at >= 0);
+  const auto received = pilot.snapshot();
+  const auto result = LegResult::decode(received[at].payload);
+  TEST_ASSERT_TRUE(thrown);
+  TEST_ASSERT_EQUAL_MESSAGE((int)LegOutcome::FAILED, (int)result.outcome, result.text.c_str());
+  TEST_ASSERT_TRUE_MESSAGE(startsWith(result.text, "Erreur interne du suivi : boom"), result.text.c_str());
+  int lastProgress = -1;
+  for (int i = 0; i < at; i++)
+    if (received[i].type == frames::LEG_PROGRESS) lastProgress = frames::intAt(received[i].payload, 1);
+  TEST_ASSERT_TRUE_MESSAGE(lastProgress >= 1, "no progress before the failure");
+  TEST_ASSERT_EQUAL(std::max(0, lastProgress - 1), result.index);
+  TEST_ASSERT_TRUE(host.stops >= 1);
+}
+
+// Same failure on a hidden tracking (no progress at all): the outcome index stays the starting edge.
+void test_internal_error_without_progress_reports_the_starting_edge() {
+  auto robot = robotAtStart();
+  SimHost host(robot);
+  Pilot pilot;
+  GatewayAutonomy gateway(host, threads(), [](const std::string &) {}, wallNow);
+  gateway.pilotAttached(pilot.sink());
+  upload(gateway, 1, blobs::KIND_ROUTE, blobs::encodeRoute(stripes()));
+  TEST_ASSERT_TRUE(pilot.waitFor(frames::BLOB_OK) >= 0);
+  std::atomic<bool> thrown{false};
+  robot.onTick = [&](SimulatedRobotEnv &e) {
+    if (!thrown && e.elapsedMs() > 1000) {
+      thrown = true;
+      throw std::logic_error("boom");
+    }
+  };
+  gateway.onFrame(frames::LEG_START, spec(1, false, false).encode());
+  const auto result = resultOf(pilot);
+  TEST_ASSERT_TRUE(thrown);
+  TEST_ASSERT_EQUAL(0, pilot.count(frames::LEG_PROGRESS));
+  TEST_ASSERT_EQUAL_MESSAGE((int)LegOutcome::FAILED, (int)result.outcome, result.text.c_str());
+  TEST_ASSERT_TRUE_MESSAGE(startsWith(result.text, "Erreur interne du suivi : boom"), result.text.c_str());
+  TEST_ASSERT_EQUAL(1, result.index);
+}
+
+// LEG_SYNC with a negative sample count (clamped to 0 by sync): every sample replayed from 0, as with 0.
+void test_sync_with_a_negative_count_replays_every_sample() {
+  auto robot = robotAtStart();
+  SimHost host(robot);
+  Pilot pilot;
+  GatewayAutonomy gateway(host, threads(), [](const std::string &) {}, wallNow);
+  gateway.pilotAttached(pilot.sink());
+  upload(gateway, 1, blobs::KIND_ROUTE, blobs::encodeRoute(stripes()));
+  TEST_ASSERT_TRUE(pilot.waitFor(frames::BLOB_OK) >= 0);
+  gateway.onFrame(frames::LEG_START, spec(0, false, true, false, true).encode());
+  const auto result = resultOf(pilot);
+  TEST_ASSERT_EQUAL_MESSAGE((int)LegOutcome::DONE, (int)result.outcome, result.text.c_str());
+  waitIdle(gateway);
+  const int total = pilot.count(frames::LEG_SAMPLE);
+  TEST_ASSERT_TRUE(total > 2);
+  for (int32_t have : {-1, -1000, INT32_MIN}) {
+    Pilot back;
+    gateway.pilotAttached(back.sink());
+    gateway.onFrame(frames::LEG_SYNC, frames::ints({7, have}));
+    TEST_ASSERT_TRUE(back.waitFor(frames::LEG_RESULT) >= 0);
+    TEST_ASSERT_EQUAL(total, back.count(frames::LEG_SAMPLE));
+    int expected = 0;
+    for (auto &f : back.snapshot())
+      if (f.type == frames::LEG_SAMPLE) TEST_ASSERT_EQUAL(expected++, frames::intAt(f.payload, 1));
+  }
+  // Beyond the count: nothing replayed, the outcome still sent.
+  Pilot ahead;
+  gateway.pilotAttached(ahead.sink());
+  gateway.onFrame(frames::LEG_SYNC, frames::ints({7, total + 5}));
+  TEST_ASSERT_TRUE(ahead.waitFor(frames::LEG_RESULT) >= 0);
+  TEST_ASSERT_EQUAL(0, ahead.count(frames::LEG_SAMPLE));
+}
+
 void test_upload_short_of_memory_forgets_old_blobs_then_refuses() {
   auto robot = robotAtStart();
   SimHost host(robot);
@@ -956,6 +1080,141 @@ void test_upload_short_of_memory_forgets_old_blobs_then_refuses() {
   gateway.onFrame(frames::LEG_START, spec().encode());
   const int refused = pilot.waitFor(frames::LEG_REFUSED);
   TEST_ASSERT_EQUAL_STRING("Trajet 1 non reçu", frames::text(pilot.snapshot()[refused].payload).c_str());
+}
+
+// --- Long-lived workers (gw_worker.h): a tracking never needs a new task, hence never internal RAM, to start ---
+
+void test_worker_runs_bodies_in_order_and_refuses_beyond_its_capacity() {
+  Worker worker(1);
+  std::vector<int> order;
+  std::mutex m;
+  TEST_ASSERT_TRUE(worker.post([&] { std::lock_guard<std::mutex> g(m); order.push_back(1); }));
+  TEST_ASSERT_FALSE(worker.post([&] { order.push_back(99); }));  // one waiting body at most, none running yet
+  std::thread t([&] { worker.run(); });
+  for (int i = 0; i < 500 && !worker.idle(); i++) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  TEST_ASSERT_TRUE(worker.post([&] { std::lock_guard<std::mutex> g(m); order.push_back(2); }));
+  for (int i = 0; i < 500 && worker.completed() < 2; i++) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  worker.stop();
+  t.join();
+  TEST_ASSERT_EQUAL(2, (int)order.size());
+  TEST_ASSERT_EQUAL(1, order[0]);
+  TEST_ASSERT_EQUAL(2, order[1]);
+  TEST_ASSERT_FALSE(worker.post([] {}));  // stopped
+}
+
+void test_worker_survives_a_throwing_body_and_releases_its_captures() {
+  Worker worker;
+  std::string error;
+  std::thread t([&] { worker.run([&](const char *what) { error = what; }); });
+  auto held = std::make_shared<int>(5);
+  std::weak_ptr<int> watch = held;
+  TEST_ASSERT_TRUE(worker.post([held] { throw std::runtime_error("boom"); }));
+  held.reset();
+  std::atomic<bool> ran{false};
+  TEST_ASSERT_TRUE(worker.post([&] { ran = true; }));
+  for (int i = 0; i < 500 && worker.completed() < 2; i++) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  worker.stop();
+  t.join();
+  TEST_ASSERT_TRUE(ran.load());
+  TEST_ASSERT_EQUAL_STRING("boom", error.c_str());
+  TEST_ASSERT_TRUE(watch.expired());  // the route / surfaces captured by a body do not outlive it
+}
+
+void test_worker_spawner_routes_by_name_and_falls_back_without_a_worker() {
+  Worker leg, prepare;
+  std::vector<std::string> fallback;
+  Spawner spawn = workerSpawner(&leg, nullptr, [&](const char *name, std::function<void()>) {
+    fallback.push_back(name);
+    return true;
+  });
+  TEST_ASSERT_TRUE(spawn(TASK_LEG, [] {}));
+  TEST_ASSERT_TRUE(spawn(TASK_PREPARE, [] {}));  // no prepare worker: a task on demand
+  TEST_ASSERT_TRUE(spawn("other", [] {}));
+  TEST_ASSERT_EQUAL(2, (int)fallback.size());
+  TEST_ASSERT_EQUAL_STRING(TASK_PREPARE, fallback[0].c_str());
+  TEST_ASSERT_FALSE(leg.idle());  // queued on the worker, not on a new task
+  leg.stop();
+  leg.run();  // drains the queued body, then returns (stopped)
+  TEST_ASSERT_EQUAL(1, (int)leg.completed());
+}
+
+// The next tracking may be started by the pilot as soon as the outcome of the previous one arrives, while the
+// previous body has not returned yet: it waits on the worker instead of being refused (field test of 2026-10-25:
+// "Mémoire insuffisante pour lancer le suivi sur la passerelle ESP32" twice in a row).
+void test_consecutive_trackings_on_the_workers_are_never_refused() {
+  auto robot = robotAtStart();
+  SimHost host(robot);
+  Worker legWorker, prepareWorker;
+  std::thread legThread([&] { legWorker.run(); });
+  std::thread prepareThread([&] { prepareWorker.run(); });
+  Pilot pilot;
+  std::unique_ptr<GatewayAutonomy> gateway;
+  std::atomic<int> started{0};
+  const int rounds = 3;
+  // The pilot starts the next tracking from the outcome frame itself: the strictest window (body still running).
+  auto sink = [&](int type, const Bytes &payload) {
+    pilot.frame(type, payload);
+    if (type == frames::LEG_RESULT && started < rounds) {
+      LegSpec next = spec((int)stripes().size() - 1);
+      next.legId = 100 + started++;
+      gateway->onFrame(frames::LEG_START, next.encode());
+    }
+  };
+  gateway.reset(new GatewayAutonomy(host, workerSpawner(&legWorker, &prepareWorker, nullptr), [](const std::string &) {}, wallNow));
+  gateway->pilotAttached(sink);
+  upload(*gateway, 1, blobs::KIND_ROUTE, blobs::encodeRoute(stripes()));
+  TEST_ASSERT_TRUE(pilot.waitFor(frames::BLOB_OK) >= 0);
+  gateway->onFrame(frames::LEG_START, spec().encode());
+  for (int i = 0; i < 1000 && (started < rounds || gateway->running() || !legWorker.idle()); i++)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  TEST_ASSERT_EQUAL(0, pilot.count(frames::LEG_REFUSED));
+  TEST_ASSERT_EQUAL(rounds + 1, pilot.count(frames::LEG_RESULT));
+  TEST_ASSERT_EQUAL(rounds + 1, (int)legWorker.completed());
+  for (auto &f : pilot.snapshot())
+    if (f.type == frames::LEG_RESULT) {
+      const auto r = LegResult::decode(f.payload);
+      TEST_ASSERT_EQUAL_MESSAGE((int)LegOutcome::DONE, (int)r.outcome, r.text.c_str());
+    }
+  gateway.reset();
+  legWorker.stop();
+  prepareWorker.stop();
+  legThread.join();
+  prepareThread.join();
+}
+
+// The pilot keeps the last 4 surfaces of each kind it sent (RemoteLegs.KEPT) and does not send them again: the
+// gateway keeps as many (it kept 2, refusing with "Surface d'enveloppe … non reçue").
+void test_gateway_keeps_the_last_four_surfaces_like_the_pilot() {
+  auto robot = robotAtStart();
+  SimHost host(robot);
+  Pilot pilot;
+  GatewayAutonomy gateway(host, threads(), [](const std::string &) {}, wallNow);
+  gateway.pilotAttached(pilot.sink());
+  upload(gateway, 1, blobs::KIND_ROUTE, blobs::encodeRoute(stripes()));
+  TEST_ASSERT_TRUE(pilot.waitFor(frames::BLOB_OK) >= 0);
+  for (int id = 11; id <= 14; id++) {
+    const Bytes wkb = wkbPolygon({Point(-5 - id, -5), Point(15, -5), Point(15, 5), Point(-5 - id, 5)});
+    const size_t before = pilot.snapshot().size();
+    upload(gateway, id, blobs::KIND_GUARD, wkb);
+    TEST_ASSERT_TRUE(pilot.waitFor(frames::BLOB_OK, before) >= 0);
+  }
+  LegSpec s = spec();
+  s.guardId = 11;  // the oldest of the four
+  gateway.onFrame(frames::LEG_START, s.encode());
+  const auto result = resultOf(pilot);
+  TEST_ASSERT_EQUAL(0, pilot.count(frames::LEG_REFUSED));
+  TEST_ASSERT_EQUAL_MESSAGE((int)LegOutcome::DONE, (int)result.outcome, result.text.c_str());
+  waitIdle(gateway);
+  // A fifth one evicts the oldest.
+  const Bytes wkb = wkbPolygon({Point(-30, -5), Point(15, -5), Point(15, 5), Point(-30, 5)});
+  const size_t before = pilot.snapshot().size();
+  upload(gateway, 15, blobs::KIND_GUARD, wkb);
+  TEST_ASSERT_TRUE(pilot.waitFor(frames::BLOB_OK, before) >= 0);
+  s.legId = 8;
+  gateway.onFrame(frames::LEG_START, s.encode());
+  const int refused = pilot.waitFor(frames::LEG_REFUSED);
+  TEST_ASSERT_TRUE(refused >= 0);
+  TEST_ASSERT_EQUAL_STRING("Surface d'enveloppe 11 non reçue", frames::text(pilot.snapshot()[refused].payload).c_str());
 }
 
 // --- Gateway fallen off the robot (GatewayDetachmentTest.kt, main cases) ---
@@ -987,6 +1246,34 @@ void test_detachment_fixed_relay_is_never_confirmed() {
   TEST_ASSERT_FALSE(d.mountedDbm().has_value());
 }
 
+void test_detachment_stale_drop_point_learns_the_level_again() {
+  // 2026-10-25 at 15:54:58: -19 dBm until a tracking ended, robot moved 1.5 m on between trackings, then -51 dBm from
+  // the next one; the same phone then drove the robot 12 m. No verdict, the level is learned again.
+  GatewayDetachment d;
+  int64_t t = 0;
+  double x = 0;
+  for (int i = 0; i < 12; i++, t += 1000, x += 0.4) d.reading(t, -19, Point(x, 0));
+  TEST_ASSERT_TRUE(d.mountedDbm().has_value());
+  d.rearm();
+  t = 60000;
+  x += 1.1;
+  for (int i = 0; i < 30; i++, t += 1000, x += 0.4) TEST_ASSERT_FALSE(d.reading(t, -45 + i % 3, Point(x, 0)).has_value());
+  TEST_ASSERT_EQUAL_INT(-44, d.mountedDbm().value_or(0));
+  // After a verdict the drop point is known: the next tracking concludes again from it.
+  GatewayDetachment fallen;
+  t = 0;
+  x = 0;
+  for (int i = 0; i < 12; i++, t += 1000, x += 0.4) fallen.reading(t, -24, Point(x, 0));
+  Opt<GatewayDetachment::Verdict> first;
+  for (int i = 0; i < 10 && !first; i++, t += 1000, x += 0.4) first = fallen.reading(t, -60, Point(x, 0));
+  TEST_ASSERT_TRUE(first.has_value());
+  fallen.rearm();
+  Opt<GatewayDetachment::Verdict> again;
+  for (int i = 0; i < 5 && !again; i++) again = fallen.reading(100000 + i * 1000, -65, Point(x + 2 + 0.4 * i, 0));
+  TEST_ASSERT_TRUE(again.has_value());
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, first->point.x, again->point.x);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_crc32_and_modified_utf8);
@@ -1002,6 +1289,7 @@ int main(int, char **) {
   RUN_TEST(test_collision_latch_without_contact_stops_after_the_grace);
   RUN_TEST(test_collision_latch_beyond_the_map_is_ignored_for_a_move_blades_off);
   RUN_TEST(test_fleeting_protection_still_stops_the_run);
+  RUN_TEST(test_positioning_loss_ridden_through_then_stopped_after_the_grace);
   RUN_TEST(test_stop_lock_is_not_held_for_a_contact);
   RUN_TEST(test_pivot_slides_are_measured_and_reported);
   RUN_TEST(test_added_obstacle_on_the_path_stops_the_run);
@@ -1029,8 +1317,17 @@ int main(int, char **) {
   RUN_TEST(test_pilot_absent_too_long_stops_the_tracking);
   RUN_TEST(test_return_without_pilot_asks_for_the_mammotion_docking);
   RUN_TEST(test_unconfirmed_stop_is_reported_in_the_outcome);
+  RUN_TEST(test_internal_error_reports_the_edge_of_the_last_progress);
+  RUN_TEST(test_internal_error_without_progress_reports_the_starting_edge);
+  RUN_TEST(test_sync_with_a_negative_count_replays_every_sample);
   RUN_TEST(test_upload_short_of_memory_forgets_old_blobs_then_refuses);
+  RUN_TEST(test_worker_runs_bodies_in_order_and_refuses_beyond_its_capacity);
+  RUN_TEST(test_worker_survives_a_throwing_body_and_releases_its_captures);
+  RUN_TEST(test_worker_spawner_routes_by_name_and_falls_back_without_a_worker);
+  RUN_TEST(test_consecutive_trackings_on_the_workers_are_never_refused);
+  RUN_TEST(test_gateway_keeps_the_last_four_surfaces_like_the_pilot);
   RUN_TEST(test_detachment_fall_detected_near_the_drop_point);
   RUN_TEST(test_detachment_fixed_relay_is_never_confirmed);
+  RUN_TEST(test_detachment_stale_drop_point_learns_the_level_again);
   return UNITY_END();
 }

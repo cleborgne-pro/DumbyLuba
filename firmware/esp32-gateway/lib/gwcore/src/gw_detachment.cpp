@@ -57,6 +57,7 @@ Opt<GatewayDetachment::Verdict> GatewayDetachment::reading(int64_t at, int rssiD
     mounted_.push_back(rssiDbm);
     while (mounted_.size() > WINDOW) mounted_.pop_front();
     weak_ = 0;
+    dropKnown_ = false;
     if (robot) {
       anchor_ = robot;
       anchorAt_ = at;
@@ -81,11 +82,25 @@ Opt<GatewayDetachment::Verdict> GatewayDetachment::reading(int64_t at, int rssiD
     weak_ = 0;
     return std::nullopt;
   }
+  if (!anchor_) return std::nullopt;
+  if (weak_ == 0 && !dropKnown_ && at - anchorAt_ > ANCHOR_FRESH_MS && (!robot || robot->distance(*anchor_) >= minDistanceM_ / 2)) {
+    // Weaker level found at the start of a streak, far in time and space from the last mounted reading (readings
+    // stopped between two trackings while the robot moved): drop point unknown, the level is learned again. A phone
+    // that shifted on the robot settles there; a fallen one never does (2026-10-25 at 15:54:58, Redmi gateway).
+    mounted_.clear();
+    mounted_.push_back(rssiDbm);
+    confirmed_ = false;
+    learnOrigin_ = robot;
+    anchor_ = robot;
+    anchorAt_ = at;
+    return std::nullopt;
+  }
   weak_++;
-  if (!anchor_ || !robot) return std::nullopt;
+  if (!robot) return std::nullopt;
   const double distance = robot->distance(*anchor_);
   if (weak_ < confirmReadings_ || distance < minDistanceM_) return std::nullopt;
   verdict_ = Verdict{*anchor_, anchorAt_, rssiDbm, *level, robot, distance, false};
+  dropKnown_ = true;
   return verdict_;
 }
 
@@ -97,6 +112,7 @@ Opt<GatewayDetachment::Verdict> GatewayDetachment::linkLost(Opt<Point> robot) {
   if (robot) distance = robot->distance(*anchor_);
   if (*lastRssi_ > *level - SUSPECT_DB || !distance || *distance < MIN_DISTANCE_M / 2) return std::nullopt;
   verdict_ = Verdict{*anchor_, anchorAt_, std::nullopt, *level, robot, distance, true};
+  dropKnown_ = true;
   return verdict_;
 }
 
@@ -109,6 +125,7 @@ void GatewayDetachment::reset() {
   weak_ = 0;
   lastRssi_.reset();
   verdict_.reset();
+  dropKnown_ = false;
 }
 
 }  // namespace leg

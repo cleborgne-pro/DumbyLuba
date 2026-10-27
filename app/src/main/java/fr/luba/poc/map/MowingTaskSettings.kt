@@ -7,7 +7,7 @@ import kotlin.math.roundToInt
 /**
  * Last settings of the mowing task (Map → Mow → Task settings), restored on the next opening and after an app restart:
  * cutting height, passes of decreasing height ([CutPasses]), task speed, route mode, pass spacing, perimeter and
- * no-go zone loops, border order, recharge thresholds. The outer loop offset has its own saved setting
+ * no-go zone loops, border order, U-turns, direction of the passes, direction of the spiral, recharge thresholds. The outer loop offset has its own saved setting
  * ([OuterOffsetSetting]), and so does the travel speed (`RobotBle`).
  * Values read back are clamped to the slider ranges: an old or corrupted file cannot impose anything else.
  */
@@ -27,6 +27,14 @@ data class MowingTaskSettings(
     val firstPassHeightMm: Float = 70f,
     /** Battery left on arrival that the dynamic return aims for ([fr.luba.poc.simulation.ReturnReserve]). */
     val returnReserve: Float = fr.luba.poc.simulation.ReturnReserve.DEFAULT_PERCENT.toFloat(),
+    /** U-turns between the passes: fast pivots or lawn friendly rolling U-turns ([TurnOptimizer]). */
+    val turnStyle: TurnStyle = TurnStyle.FAST,
+    /** Direction of the passes ([OrientationMode]); kept while a mode that does not use it is chosen. */
+    val orientation: OrientationMode = OrientationMode.AUTOMATIC,
+    /** Angle of [OrientationMode.MANUAL], planner convention (counter-clockwise from the map's x axis), 0..179. */
+    val manualAngleDeg: Int = 0,
+    /** Spiral mode: from the edge inwards or from the centre outwards ([SpiralDirection]); kept while another mode is chosen. */
+    val spiralDirection: SpiralDirection = SpiralDirection.FROM_EDGE,
 ) {
     /** Pass heights, from the first to the last ([heightMm]), within the cutting heights of the robot. */
     fun passHeights(range: CutHeightRange = CutHeightRange.STANDARD): List<Int> =
@@ -54,6 +62,7 @@ data class MowingTaskSettings(
             chargeHigh = if (chargeValid) high else default.chargeHigh,
             returnReserve = fr.luba.poc.simulation.ReturnReserve.sanitize(
                 returnReserve.within(0f..100f, default.returnReserve).roundToInt(), (if (chargeValid) low else default.chargeLow).roundToInt()).toFloat(),
+            manualAngleDeg = foldAngle(manualAngleDeg),
         )
     }
 
@@ -68,7 +77,7 @@ data class MowingTaskSettings(
         const val MIN_CHARGE_GAP = 5f
         const val MAX_PASSES = 4
         /** Offered mowing modes; survey routes are not remembered as a mowing mode. */
-        val MOWING_MODES = setOf(CoverageMode.LINES, CoverageMode.OPTIMIZED, CoverageMode.CHECKERBOARD)
+        val MOWING_MODES = setOf(CoverageMode.LINES, CoverageMode.OPTIMIZED, CoverageMode.CHECKERBOARD, CoverageMode.ZAMBONI, CoverageMode.SPIRAL)
     }
 }
 
@@ -92,6 +101,10 @@ class MowingTaskStore(context: Context) {
             heightPasses = prefs.getInt("height_passes", d.heightPasses),
             firstPassHeightMm = prefs.getFloat("first_pass_height_mm", d.firstPassHeightMm),
             returnReserve = prefs.getFloat("return_reserve", d.returnReserve),
+            turnStyle = runCatching { TurnStyle.valueOf(prefs.getString("turn_style", d.turnStyle.name) ?: d.turnStyle.name) }.getOrDefault(d.turnStyle),
+            orientation = runCatching { OrientationMode.valueOf(prefs.getString("orientation_mode", d.orientation.name) ?: d.orientation.name) }.getOrDefault(d.orientation),
+            manualAngleDeg = prefs.getInt("manual_angle_deg", d.manualAngleDeg),
+            spiralDirection = runCatching { SpiralDirection.valueOf(prefs.getString("spiral_direction", d.spiralDirection.name) ?: d.spiralDirection.name) }.getOrDefault(d.spiralDirection),
         ).sanitized()
     }
 
@@ -103,7 +116,9 @@ class MowingTaskStore(context: Context) {
             .putBoolean("borders_first", s.bordersFirst).putBoolean("nearby_no_go", s.nearbyNoGo)
             .putFloat("charge_low", s.chargeLow).putFloat("charge_high", s.chargeHigh)
             .putInt("height_passes", s.heightPasses).putFloat("first_pass_height_mm", s.firstPassHeightMm)
-            .putFloat("return_reserve", s.returnReserve)
+            .putFloat("return_reserve", s.returnReserve).putString("turn_style", s.turnStyle.name)
+            .putString("orientation_mode", s.orientation.name).putInt("manual_angle_deg", s.manualAngleDeg)
+            .putString("spiral_direction", s.spiralDirection.name)
             .apply()
     }
 }

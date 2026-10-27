@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Animation
+import androidx.compose.material.icons.rounded.Brush
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Cloud
@@ -184,6 +185,10 @@ fun MapSettingsContent(
                 subtitle = tr("Reference distance at the top left, follows the zoom", "Distance de référence en haut à gauche, suit le zoom"), icon = Icons.Rounded.Straighten)
             ToggleRow(tr("Planned route animation", "Animation du trajet prévu"), display.routeAnimation, { on -> MapDisplaySettings.update { it.copy(routeAnimation = on) } },
                 subtitle = tr("Comet running along the route in mowing order", "Comète qui parcourt le trajet dans l'ordre de tonte"), icon = Icons.Rounded.Animation)
+            ToggleRow(tr("Patterns", "Motifs"), display.patterns, { on -> MapDisplaySettings.update { it.copy(patterns = on) } },
+                subtitle = tr("Drawings of the Mammotion app, in purple; dotted outline only when switched off. Display only: the mowing computed here ignores them",
+                    "Dessins de l'appli Mammotion, en violet ; contour pointillé seul s'ils sont désactivés. Affichage seulement : la tonte calculée ici les ignore"),
+                icon = Icons.Rounded.Brush)
             ToggleRow(tr("Encountered obstacles", "Obstacles rencontrés"), MapExtraLayer.ENCOUNTERS in extras, { MapExtraLayers.toggle(MapExtraLayer.ENCOUNTERS) },
                 subtitle = tr("Bumper contacts and presumed obstacles; a tap opens their sheet", "Contacts du pare-chocs et obstacles présumés ; un toucher ouvre leur fiche"), icon = Icons.Rounded.WarningAmber)
             ToggleRow(tr("Difficulties", "Difficultés"), MapExtraLayer.DIFFICULTIES in extras, { MapExtraLayers.toggle(MapExtraLayer.DIFFICULTIES) },

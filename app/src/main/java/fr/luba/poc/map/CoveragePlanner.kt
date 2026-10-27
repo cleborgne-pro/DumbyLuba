@@ -15,7 +15,11 @@ enum class CoverageMode(private val en: String, private val fr: String) {
     LINES("Simple", "Simple"), CHECKERBOARD("Checkerboard", "Damier"), TOUR("Full loop", "Grand tour"),
     SURVEY_GRID("Signal grid", "Quadrillage des signaux"),
     /** Zigzag whose orientation may change from one part of the zone to another. */
-    OPTIMIZED("Optimized", "Optimisé");
+    OPTIMIZED("Optimized", "Optimisé"),
+    /** Zigzag passes driven in a front-advancing order with rolling U-turns ([ZamboniOrder]). Appended: persisted by name. */
+    ZAMBONI("Zamboni", "Zamboni"),
+    /** Passes parallel to the contour joined into inward spirals ([SpiralSweep]), zigzag in the pockets. Appended: persisted by name. */
+    SPIRAL("Spiral", "Spirale");
     /** Display label in the interface language. */
     val label: String get() = tr(en, fr)
     val isSurvey: Boolean get() = this == TOUR || this == SURVEY_GRID
@@ -31,6 +35,10 @@ data class SweepOptions(val angles: List<Int>, val phase: Double = 0.5,
 object CoveragePlanner {
     private val factory = GeometryFactory()
     private const val OBSTACLE_SEGMENTS = 64
+    /** Cost of a pass that cannot be joined to the previous one ([TurnPlan.score] units): a transit between two runs. */
+    private const val BREAK_COST = 60.0
+    /** Lawn friendly: equivalent in metres of one degree of wear ([TurnOptimizer.Drive.wear]): 9 m for a U of two pivots. */
+    private const val LAWN_WEAR_COST_M = 0.05
 
     /**
      * Planning hole of a reserve disc: the disc already describes the perimeter of the robot reference point (physical
@@ -89,7 +97,22 @@ object CoveragePlanner {
              /** Called in the order of the orientations, on the calling thread. */
              observeCandidate: ((Preview) -> Unit)? = null,
              /** Recorded boundary: margin between the side of the chassis and the boundary for the outer loop, in meters. */
-             outerOffsetM: Double = RECORDED_OUTER_OFFSET_M): Preview {
+             outerOffsetM: Double = RECORDED_OUTER_OFFSET_M,
+             /** U-turns between passes ([TurnOptimizer]); [TurnStyle.LAWN] also takes the passes of a cell one in two. */
+             turnStyle: TurnStyle = TurnStyle.FAST,
+             /** Mowing speed for the duration of the U-turns compared. */
+             speedMps: Double = 0.3,
+             /** Cut width: what a U-turn sweeps of the pass parts it shortens; the spacing when unknown. */
+             cutWidthM: Double = spacing,
+             /** "Change every session": among the orientations, the cheapest one far enough from the last mowing
+              * ([OrientationRule.pick]); none ⇒ the cheapest orientation with its rows shifted by [OrientationRule.phase]. */
+             orientationRule: OrientationRule? = null,
+             /** Called with the cheapest orientation before [orientationRule] applies. */
+             observeAutomatic: ((Preview) -> Unit)? = null,
+             /** Called at every layer of the Zamboni order (cancellation); may throw. */
+             checkpoint: () -> Unit = {},
+             /** Spiral mode: chains driven from the edge inwards (as built) or from the centre outwards. */
+             spiralDirection: SpiralDirection = SpiralDirection.FROM_EDGE): Preview {
         val tour = mode == CoverageMode.TOUR
         val withBorders = mode.isSurvey || includeBorders
         val outerPasses = if (mode.isSurvey) 1 else borderPasses
@@ -309,6 +332,35 @@ object CoveragePlanner {
             }
         }
         fun valid(run: List<Point>) = run.size >= 2 && run.zipWithNext().all { (a,b) -> safe(a,b) }
+        /** Spiral piece: the checks of [valid] plus the chassis envelope along the whole path (pivots at its vertices
+         * included), the surface read once for the whole line on a recorded boundary (thousands of short segments). */
+        fun validChain(path: List<Point>): Boolean = path.size >= 2 &&
+            (if (!recordedBoundary) path.zipWithNext().all { (a,b) -> safe(a,b) }
+                else navigableCoverage.covers(factory.createLineString(path.map { Coordinate(it.x,it.y) }.toTypedArray()))) &&
+            envelope.pathCollision(path) == null
+        // U-turns: the candidates are checked like the joined passes (safe surface, chassis envelope); "roomy" the same
+        // with the footprint [TurnOptimizer.RISK_MARGIN_M] further from the physical boundary.
+        val roomyEnvelope by lazy { TrajectoryEnvelope(physicalFree.buffer(-TurnOptimizer.RISK_MARGIN_M, 16), robot) }
+        val turnContext = TurnOptimizer.TurnContext(spacing, speedMps.coerceIn(0.05, 1.0),
+            drivable = { path -> valid(path) && envelope.pathCollision(path) == null },
+            roomy = { path -> roomyEnvelope.pathCollision(path) == null }, robot = robot, cutWidthM = max(spacing, cutWidthM))
+        // Zamboni: the Lawn friendly objective (duration plus wear) whatever the toggle says, without the one-in-two order.
+        val zamboni = mode == CoverageMode.ZAMBONI
+        val centreSpiral = mode == CoverageMode.SPIRAL && spiralDirection == SpiralDirection.FROM_CENTRE
+        val style = if (zamboni) TurnStyle.LAWN else turnStyle
+        /** Best possible U-turn for [style] from the pass ending [aFrom] → [aEnd] into [run], checked as a whole with the
+         * pass it leads to (safe surface, chassis envelope); null when none fits. */
+        fun verifiedTurn(aFrom: Point, aEnd: Point, run: List<Point>): TurnPlan? =
+            TurnOptimizer.candidates(aFrom, aEnd, run[0], run[1], turnContext)
+                .filter { it.possible }.sortedBy { it.score(style) }.firstOrNull { plan ->
+                    val joinedPath = listOf(aFrom) + plan.points + run.drop(1)
+                    joinedPath.zipWithNext().all { (a,b) -> a.distance(b) < 1e-9 || safe(a,b) } && envelope.pathCollision(joinedPath) == null
+                }
+        // Zamboni: the same U-turn is asked by the zigzag ranking, the order search and the final join, from orientations
+        // evaluated in parallel (concurrent table; a double computation gives the same result).
+        val turns = java.util.concurrent.ConcurrentHashMap<Triple<Point, Point, List<Point>>, java.util.Optional<TurnPlan>>()
+        fun sharedTurn(aFrom: Point, aEnd: Point, run: List<Point>): TurnPlan? =
+            turns.getOrPut(Triple(aFrom, aEnd, run)) { java.util.Optional.ofNullable(verifiedTurn(aFrom, aEnd, run)) }.orElse(null)
         require((if (recordedBoundary) emptyList() else borders).all(::valid)) { tr("Unsafe border: increase the margin", "Bordure non sûre : augmenter la marge") }
         if (recordedBoundary) borders.forEach { run ->
             run.zipWithNext().forEach { (a,b) ->
@@ -327,7 +379,7 @@ object CoveragePlanner {
                 0, 0, mode, borders, outer, 0, startWithBorders=true, borderKinds=List(outer) { false },borderAnchors=if(recordedBoundary) borders.map { it.first() } else emptyList())
         }
         data class SweepLine(val path: List<Point>, val cell: Int)
-        fun sweep(angle: Int): List<SweepLine> {
+        fun sweep(angle: Int, phase: Double = sweepOptions?.phase ?: 0.5): List<SweepLine> {
             val radians = Math.toRadians(angle.toDouble())
             val rotated = AffineTransformation.rotationInstance(-radians).transform(inset)
             val inverse = AffineTransformation.rotationInstance(radians)
@@ -336,7 +388,7 @@ object CoveragePlanner {
                     val bounds=geometry.envelopeInternal
                     val count=max(1,ceil(bounds.height/spacing).toInt())
                     (0 until count).flatMap { row ->
-                        val y=bounds.minY+(row+sweepOptions.phase)*bounds.height/count
+                        val y=bounds.minY+(row+phase)*bounds.height/count
                         val intersection=clip(geometry,factory.createLineString(arrayOf(Coordinate(bounds.minX-1,y),Coordinate(bounds.maxX+1,y))))
                         parts(intersection).filterIsInstance<LineString>().filter { it.length>0.01 }.sortedBy { it.envelopeInternal.minX }.map { segment ->
                             val path=points(inverse.transform(segment) as LineString).let { if(row%2==0) it else it.reversed() }
@@ -353,7 +405,7 @@ object CoveragePlanner {
             val cells=mutableListOf<MutableList<List<Point>>>()
             var previous=emptyList<Interval>()
             for (row in 0 until rows) {
-                val y=box.minY+(row+(sweepOptions?.phase ?: 0.5))*step
+                val y=box.minY+(row+phase)*step
                 val cut=clip(rotated,factory.createLineString(arrayOf(Coordinate(box.minX-1,y),Coordinate(box.maxX+1,y))))
                 val segments=parts(cut).filterIsInstance<LineString>().filter { it.length>0.01 }.sortedBy { it.envelopeInternal.minX }
                 val matches=segments.map { segment -> previous.indices.filter { k ->
@@ -437,29 +489,161 @@ object CoveragePlanner {
             }
             return lines
         }
-        fun route(lines: List<SweepLine>, angle: Int): Preview {
+        /**
+         * Passes of one cell joined by the U-turns of the Turn Optimizer (the joined path checked again as a whole, as
+         * before); a pass that cannot be joined starts a new run. Cost: U-turn scores of [turnStyle], [BREAK_COST] per run.
+         */
+        fun join(cellLines: List<SweepLine>): Pair<List<MutableList<Point>>, Double> {
+            val runs = mutableListOf<MutableList<Point>>()
+            var cost = 0.0
+            for (line in cellLines) {
+                val run = line.path
+                val last = runs.lastOrNull()
+                val turn = if (last == null || last.size < 2 || run.size < 2) null
+                    else if (zamboni) sharedTurn(last[last.size-2], last.last(), run) else verifiedTurn(last[last.size-2], last.last(), run)
+                if (last != null && turn != null) {
+                    last[last.size-1] = turn.points.first()
+                    last.addAll(turn.points.drop(1)); last.addAll(run.drop(1))
+                    cost += turn.score(style)
+                } else { runs.add(run.toMutableList()); cost += BREAK_COST }
+            }
+            return runs to cost
+        }
+        // Zamboni order of each cell, by its passes in sweep order; the same cell driven from its other end reuses it backwards.
+        val zamboniOrders = java.util.concurrent.ConcurrentHashMap<List<List<Point>>, java.util.Optional<List<List<Point>>>>()
+        fun zamboniOrder(cellLines: List<SweepLine>): List<SweepLine>? {
+            val mirrored = zamboniOrders[cellLines.reversed().map { it.path.reversed() }]
+            if (mirrored != null) return mirrored.orElse(null)?.let { order -> order.reversed().map { cellLines[0].copy(path = it.reversed()) } }
+            val order = ZamboniOrder.order(cellLines, spacing, TurnOptimizer.FOLLOW_RADIUS_M, { it.path }, { l, p -> l.copy(path = p) },
+                { aFrom, aEnd, bStart, bTo -> sharedTurn(aFrom, aEnd, listOf(bStart, bTo))?.score(style) }, BREAK_COST, checkpoint)
+            zamboniOrders[cellLines.map { it.path }] = java.util.Optional.ofNullable(order?.map { it.path })
+            return order
+        }
+        /** [front]: Zamboni order in the regular cells ([ZamboniOrder]), the zigzag elsewhere or when it would cost runs.
+         * [applied]: pattern recorded for the zone ([Preview.zoneModes]); the zigzag passes of the Spiral mode are its fallback. */
+        fun route(lines: List<SweepLine>, angle: Int, phase: Double = sweepOptions?.phase ?: 0.5, front: Boolean = false,
+                  applied: CoverageMode = if (mode == CoverageMode.SPIRAL) CoverageMode.LINES else mode,
+                  /** Runs already checked as a whole with the chassis envelope (spiral chains). */
+                  verified: Set<List<Point>> = emptySet()): Preview {
             // Borders stay separate from the coverage passes: they are counted in the meters (the robot does mow the
             // perimeter) but drawn apart.
             val joined = mutableListOf<MutableList<Point>>()
             val groups=mutableListOf<Int>()
             var connectors = 0
-            for (line in lines) {
-                val run=line.path
-                val last = joined.lastOrNull()
-                val link = if (last == null) emptyList() else listOf(last[last.size-2], last.last()) + run
-                if(last != null && groups.last()==line.cell && safe(last.last(),run.first()) && envelope.pathCollision(link) == null) { last.addAll(run);connectors++ }
-                else { joined.add(run.toMutableList()); groups.add(line.cell) }
+            var reordered = 0
+            var i = 0
+            while (i < lines.size) {
+                var j = i
+                while (j + 1 < lines.size && lines[j + 1].cell == lines[i].cell) j++
+                val cellLines = lines.subList(i, j + 1)
+                // Lawn friendly: passes one in two (wide enough for a rolling U-turn), kept only if it does not cost more
+                // runs and U-turns than the zigzag in this cell (long links refused along curved boundaries).
+                val zigzag = join(cellLines)
+                val skipped = if (turnStyle != TurnStyle.LAWN || zamboni) null
+                    else TurnOrder.skip(cellLines, spacing, TurnOptimizer.FOLLOW_RADIUS_M, { it.path }) { l, p -> l.copy(path = p) }
+                        .takeIf { it != cellLines }?.let(::join)
+                // Zamboni order kept unless it costs more runs or more than the zigzag order (also front-advancing) by the same
+                // objective: the order search estimates its U-turns from untrimmed passes, the join drives the real ones.
+                val ordered = if (!front) null else zamboniOrder(cellLines)?.let(::join)
+                    ?.takeIf { it.first.size <= zigzag.first.size && it.second <= zigzag.second + 1e-9 }
+                if (ordered != null) reordered++
+                val (runs, _) = ordered ?: if (skipped != null && skipped.second < zigzag.second) skipped else zigzag
+                runs.forEach { run -> joined.add(run); groups.add(lines[i].cell) }
+                connectors += cellLines.size - runs.size
+                i = j + 1
             }
-            joined.forEach { envelope.requirePath(it) }
+            joined.forEach { if (it !in verified) envelope.requirePath(it) }
             val rowsMeters = joined.sumOf { it.zipWithNext().sumOf { (a,b)->a.distance(b) } }
             val borderMeters = borders.sumOf { it.zipWithNext().sumOf { (a,b)->a.distance(b) } }
-            return Preview(joined,rowsMeters+borderMeters,angle,connectors,mode,borders,outer,inner,passes=lines.map { it.path },skippedBorderLoops=skippedBorderLoops,borderKinds=List(outer) { false }+List(inner) { true },runCellIds=groups,borderAnchors=if(recordedBoundary) borders.map { it.first() } else emptyList())
+            return Preview(joined,rowsMeters+borderMeters,angle,connectors,mode,borders,outer,inner,passes=lines.map { it.path },skippedBorderLoops=skippedBorderLoops,borderKinds=List(outer) { false }+List(inner) { true },runCellIds=groups,borderAnchors=if(recordedBoundary) borders.map { it.first() } else emptyList(),
+                // One zone: its row phase and the pattern applied, aligned with the zone lists once merged ([MultiZonePlanner.combine]).
+                zonePhases=listOf(phase),zoneModes=listOf(applied),
+                // Zamboni: cells actually driven in their front-advancing order (none: the zone keeps the zigzag order).
+                // Spiral from the centre: chains driven outwards, set by [outward] (0 for the zigzag of a fallback zone).
+                zoneReorderedCells=if (zamboni) listOf(reordered) else if (centreSpiral) listOf(0) else emptyList())
+        }
+        /**
+         * Spiral from the centre: the chains of [built] driven backwards, from their innermost ring out to their outer ring,
+         * the last chain built first. [SpiralSweep.build] starts its first chain at the edge nearest to the base, so that this
+         * chain, now driven last, ends at the edge near the base where the mission ends.
+         *
+         * Every reversed chain is checked again with [validChain] before use: the surface check reads the same segments
+         * both ways, but the chassis envelope is not symmetric in general (a robot whose front and rear overhangs differ
+         * sweeps another footprint when a straight is driven backwards, and its pivots at the vertices too). A chain refused
+         * backwards keeps its inward direction (already checked by the build) and may be entered from either end, as in the
+         * edge direction.
+         *
+         * Order ([Preview.outwardRuns], applied by the local order): a pocket within one cut and one spacing of the first
+         * point of a reversed chain is its core (the centre its innermost ring leaves); the chain waits for its core and for
+         * the chains that continue it inwards ([SpiralSweep.Result.parents]: the rings inside a split), so that every part
+         * is mowed from its centre out. A chain, its core and the chains inside it share one cell (finished before another
+         * block); the U-turns are joined before (a chain stays one run, never joined to a pocket pass). Other pockets
+         * (sharp corners, thin lobes) keep their own cells, as in the edge direction.
+         */
+        fun outward(built: SpiralSweep.Result): Preview {
+            val count = built.chains.size
+            val reach = max(spacing, cutWidthM) + spacing
+            // Chain k of the mission is chain count - 1 - k of the build.
+            val chains = built.chains.asReversed().map { chain -> chain.asReversed().toList().takeIf(::validChain)?.let { it to true } ?: (chain to false) }
+            fun parent(k: Int) = built.parents.getOrNull(count - 1 - k)?.let { count - 1 - it }
+            fun root(k: Int): Int { var r = k; while (true) r = parent(r) ?: return r }
+            val owners = built.pockets.map { pocket ->
+                chains.indices.filter { chains[it].second }.map { k ->
+                    val start = chains[k].first.first()
+                    k to pocket.distance(factory.createPoint(Coordinate(start.x, start.y)))
+                }.filter { it.second <= reach }.minByOrNull { it.second }?.first
+            }
+            val lines = mutableListOf<SweepLine>()
+            val coreOf = HashMap<Int, Int>()
+            var cell = count
+            fun fill(pocket: Int, owner: Int?) {
+                for (passes in SpiralSweep.fill(built.pockets[pocket], spacing, ::valid)) {
+                    val id = cell++
+                    owner?.let { coreOf[id] = it }
+                    passes.forEachIndexed { row, raw -> lines.add(SweepLine(if (row % 2 == 0) raw else raw.reversed(), id)) }
+                }
+            }
+            chains.forEachIndexed { k, (path, _) ->
+                owners.indices.filter { owners[it] == k }.forEach { fill(it, k) }
+                lines.add(SweepLine(path, k))
+            }
+            owners.indices.filter { owners[it] == null }.forEach { fill(it, null) }
+            val routed = route(lines, 0, applied = CoverageMode.SPIRAL, verified = chains.map { it.first }.toHashSet())
+            // Chain of each run: the chain itself or the chain whose core it mows.
+            val chainOf = routed.runCellIds.map { if (it < count) it else coreOf[it] }
+            val outward = routed.runCellIds.indices.filter { routed.runCellIds[it] < count && chains[routed.runCellIds[it]].second }.associateWith { i ->
+                val k = routed.runCellIds[i]
+                routed.runCellIds.indices.filter { j -> j != i && (routed.runCellIds[j] >= count && chainOf[j] == k ||
+                    routed.runCellIds[j] < count && parent(routed.runCellIds[j]) == k) }.toSet()
+            }
+            return routed.copy(runCellIds = routed.runCellIds.indices.map { i -> chainOf[i]?.let(::root) ?: routed.runCellIds[i] },
+                outwardRuns = outward, outwardReachM = reach, zoneReorderedCells = listOf(outward.size))
+        }
+        /**
+         * Spiral: the chains of [SpiralSweep] (one cell each) then the zigzag passes of its pockets (one cell per pocket
+         * part), every chain checked like the passes (safe surface and chassis envelope); null when it cannot be built.
+         */
+        fun spiral(): Pair<SpiralSweep.Result, Preview>? {
+            val built = SpiralSweep.build(inset, spacing, max(spacing, cutWidthM), TurnOptimizer.FOLLOW_RADIUS_M, basePoint,
+                ::validChain, checkpoint) ?: return null
+            if (spiralDirection == SpiralDirection.FROM_CENTRE) return try { built to outward(built) } catch (e: IllegalArgumentException) { null }
+            val lines = built.chains.mapIndexed { cell, path -> SweepLine(path, cell) }.toMutableList()
+            var cell = built.chains.size
+            for (pocket in built.pockets) for (passes in SpiralSweep.fill(pocket, spacing, ::valid)) {
+                val id = cell++
+                passes.forEachIndexed { row, raw -> lines.add(SweepLine(if (row % 2 == 0) raw else raw.reversed(), id)) }
+            }
+            return try { built to route(lines, 0, applied = CoverageMode.SPIRAL, verified = built.chains.toHashSet()) }
+                catch (e: IllegalArgumentException) { null }
         }
         fun List<Point>.distinctConsecutive() = filterIndexed { i,p -> i == 0 || p.distance(this[i-1]) > 1e-8 }
         fun nearBase(preview: Preview): Preview {
             // Production finishes whole blocks: an entry in the middle of a zigzag must not leave its first half for a later
             // return.
             if (continuous) return preview
+            // Spiral from the centre: its chains are entered at their centre end only, after their core; the planned order is
+            // kept rather than entered in the middle of a chain.
+            if (preview.outwardRuns.isNotEmpty()) return preview
             val base = basePoint ?: return preview
             data class Entry(val run: Int, val segment: Int, val point: Point, val distance: Double)
             val entries = (preview.runs+preview.borders).flatMapIndexed { index, run ->
@@ -497,8 +681,10 @@ object CoveragePlanner {
         }
         // Length + section penalty heuristic; not a guaranteed mathematical optimum.
         // Optimized mode without an evaluator: U-turns count, otherwise only length decides.
-        fun cost(p: Preview) = candidateCost?.invoke(p) ?: (p.meters + p.runs.size*10 +
-            if (mode == CoverageMode.OPTIMIZED) p.connectors * MixedSweep.TURN_COST_M else 0.0)
+        // Lawn friendly: the wear of the U-turns weighs on the orientation too (longer passes, rolling U-turns).
+        fun cost(p: Preview) = (candidateCost?.invoke(p) ?: (p.meters + p.runs.size*10 +
+            if (mode == CoverageMode.OPTIMIZED) p.connectors * MixedSweep.TURN_COST_M else 0.0)) +
+            if (style == TurnStyle.LAWN) p.runs.sumOf { TurnOptimizer.drive(it, speedMps).wear } * LAWN_WEAR_COST_M else 0.0
         // Each time a better orientation is found, the preview is published: the interface can draw the route as it is
         // refined instead of waiting for the end of the computation.
         var best: Preview? = null
@@ -508,8 +694,21 @@ object CoveragePlanner {
         // (same ties, same errors, same progress).
         class Evaluated(val candidates: List<Pair<Preview,Double>>, val sweepFailure: IllegalArgumentException?,
                         val routeFailure: IllegalArgumentException? = null)
-        val evaluated = fr.luba.poc.simulation.PreparationPool.map(angles.size, {}, minParallel = 2) { index ->
-            val angle = angles[index]
+        // Candidates of one orientation: its sweep (both families for the checkerboard), both pass orders, both directions.
+        fun candidates(angle: Int, phase: Double = sweepOptions?.phase ?: 0.5): List<Preview> {
+            val first = sweep(angle, phase)
+            val second = if(mode==CoverageMode.CHECKERBOARD || mode==CoverageMode.SURVEY_GRID) sweep(angle+90, phase) else emptyList()
+            val orders = if(second.isEmpty()) listOf(first) else listOf(first+second,second+first)
+            return orders.flatMap { order -> listOf(route(order,angle,phase),route(order.reversed().map { it.copy(path=it.path.reversed()) },angle,phase)) }
+                .filter { it.runs.isNotEmpty() }
+        }
+        // Spiral: computed with the orientations (first task, the longest), they give its zigzag reference and fallback.
+        val spiralMode = mode == CoverageMode.SPIRAL
+        val extra = if (spiralMode) 1 else 0
+        var spiralCandidate: Pair<SpiralSweep.Result, Preview>? = null
+        val evaluated = fr.luba.poc.simulation.PreparationPool.map(angles.size + extra, {}, minParallel = 2) { slot ->
+            if (slot < extra) { spiralCandidate = spiral(); return@map null }
+            val angle = angles[slot - extra]
             val first: List<SweepLine>
             val second: List<SweepLine>
             try {
@@ -522,15 +721,62 @@ object CoveragePlanner {
                     .filter { it.runs.isNotEmpty() }.map { it to cost(it) }, null)
             } catch (e: IllegalArgumentException) { Evaluated(emptyList(), null, e) }
         }
-        for (result in evaluated) {
+        val ranked = mutableListOf<OrientationRule.Candidate<Preview>>()
+        val zigzags = mutableListOf<Pair<Preview, Double>>()
+        for (result in evaluated.filterNotNull()) {
             result.sweepFailure?.let { if(sweepOptions != null) throw it }
             result.routeFailure?.let { throw it }
             for ((candidate, value) in result.candidates) {
                 observeCandidate?.invoke(candidate)
-                if (best==null || value < bestCost) { best = candidate; bestCost=value; onProgress(nearBase(candidate)) }
+                if (zamboni) zigzags.add(candidate to value)
+                if (orientationRule != null) ranked.add(OrientationRule.Candidate(candidate, candidate.angle, mode.orientationPeriod, value))
+                if (best==null || value < bestCost) { best = candidate; bestCost=value; if (!spiralMode) onProgress(nearBase(candidate)) }
             }
         }
+        if (spiralMode) {
+            // The spiral is kept unless it sweeps more than 0.2 point less than the zigzag of reference (same measure as the
+            // mission evaluation: 2 cm raster, blade width), over what the passes are there for (the coverage area widened by
+            // half a cut); otherwise the zigzag, recorded as the pattern of the zone.
+            val spiral = spiralCandidate
+            val zigzag = best
+            val target = try { free.intersection(inset.buffer(max(spacing, cutWidthM) / 2, 8)) } catch (e: org.locationtech.jts.geom.TopologyException) { free }
+            fun covered(p: Preview) = fr.luba.poc.planning.RasterCoverage.measure(p.cuttingPaths.filter { it.size >= 2 }
+                .map { fr.luba.poc.planning.MissionLeg(it, true) }, target, max(spacing, cutWidthM) / 2, 0.02).covered
+            val spiralCovered = spiral?.let { covered(it.second) }
+            val zigzagCovered = zigzag?.let(::covered)
+            val kept = spiralCovered != null && (zigzagCovered == null || spiralCovered >= zigzagCovered - 0.002 * target.area)
+            SpiralSweep.observer?.invoke(SpiralSweep.Decision(spiral?.first, spiralCovered, zigzagCovered, target.area, kept))
+            if (kept) best = spiral!!.second
+            best?.let { onProgress(nearBase(it)) }
+        }
         requireNotNull(best) { tr("No route possible", "Aucun trajet possible") }
+        if (orientationRule != null) {
+            observeAutomatic?.invoke(best!!)
+            // Far enough from the last mowing at a small extra cost; otherwise the same direction, rows shifted (a
+            // sweep refused at the new phase keeps the centred rows).
+            val chosen = orientationRule.pick(ranked)?.value ?: try {
+                candidates(best!!.angle, orientationRule.phase).minByOrNull(::cost)
+            } catch (e: IllegalArgumentException) { null }
+            if (chosen != null && chosen !== best) { best = chosen; onProgress(nearBase(chosen)) }
+        }
+        if (zamboni) {
+            // Zamboni: the orientations are ranked with the zigzag order; the passes of the 3 cheapest ones (the one kept by
+            // "Change every session" or the manual angle alone) are then reordered cell by cell, in both directions, and the
+            // cheapest wins. A failure keeps the zigzag order.
+            val phase = best!!.zonePhases.singleOrNull() ?: sweepOptions?.phase ?: 0.5
+            val tops = if (orientationRule != null) listOf(best!!.angle)
+                else zigzags.sortedBy { it.second }.map { it.first.angle }.distinct().take(3)
+            val fronts = fr.luba.poc.simulation.PreparationPool.map(tops.size, {}, minParallel = 2) { index ->
+                val angle = tops[index]
+                try {
+                    val lines = sweep(angle, phase)
+                    listOf(route(lines, angle, phase, front = true),
+                        route(lines.reversed().map { it.copy(path = it.path.reversed()) }, angle, phase, front = true))
+                        .filter { it.runs.isNotEmpty() }.map { it to cost(it) }
+                } catch (e: IllegalArgumentException) { emptyList() }
+            }
+            fronts.flatten().minByOrNull { it.second }?.let { (candidate, _) -> best = candidate; onProgress(nearBase(candidate)) }
+        }
         if (mode == CoverageMode.OPTIMIZED) {
             // Optimized mode: the kept zigzag, in which only the bands saving at least a few U-turns are reoriented.
             // Deterministic choice, then compared with the simple zigzag on the full mission. A failure keeps the zigzag.

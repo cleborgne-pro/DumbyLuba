@@ -159,7 +159,7 @@ private fun PaintDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, he
     }
 
     PushedPage(ServicePage.MOW_DEBUG.title, back, bottomBar = {
-        MowDebugActions(robot, state, mission?.engine, height, supervised, idle, computing, base != null && (finishing != null || strokes.isNotEmpty()) && idle, ::compute,
+        MowDebugActions(robot, state, mission?.engine, height, supervised, idle, computing, base != null && (finishing != null || strokes.isNotEmpty()) && idle, latestAction(::compute),
             onStart = ::forgetBorderFollow)
     }) {
         header()

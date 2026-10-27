@@ -72,11 +72,18 @@ enum class RobotModel(val label: String, private val photoName: String? = null) 
             listOf("HK8snDC8Kxh", "tBnCA8u2Aps", "jvEDnj42DRK", "z8Pu2TEeNZU", "SNvVHSxfU73").forEach { put(it, LUBA_OTHER) }
         }
 
+        /**
+         * Mower model of a Mammotion account product key, null for an unknown key. The table holds mowers only: RTK
+         * stations, pool cleaners (Spino) and their charging piles are left out, so a known key also means a mower
+         * ([fr.luba.poc.protocol.ModelSupport.isMower]).
+         */
+        fun fromProductKey(productKey: String?): RobotModel? = productKey?.trim()?.let { productKeys[it] }
+
         /** Model from the robot name (Bluetooth or account) and, if known, the Mammotion account product key. */
         fun detect(name: String?, productKey: String? = null): RobotModel {
             val n = name?.trim().orEmpty()
             prefixes.firstOrNull { n.startsWith(it.first, ignoreCase = true) }?.let { return it.second }
-            productKey?.trim()?.let { productKeys[it] }?.let { return it }
+            fromProductKey(productKey)?.let { return it }
             return if (n.startsWith("Luba", ignoreCase = true)) LUBA_1 else UNKNOWN
         }
     }

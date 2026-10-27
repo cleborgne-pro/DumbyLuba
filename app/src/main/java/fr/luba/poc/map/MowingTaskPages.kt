@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -98,13 +99,32 @@ internal fun MowingTaskPages(
             // The signal survey is no longer a mowing mode: it is automatic while moving, and the dedicated route opens
             // from Service → Signal surveys.
             SettingsGroup(if (sheets.surveyTask) tr("Signal survey route", "Parcours de relevé des signaux") else tr("Route mode", "Mode de trajet")) {
-                if (!sheets.surveyTask) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
-                    ChoiceTile(Icons.Rounded.Reorder, "Zigzag", form.mode == CoverageMode.LINES, { form.mode = CoverageMode.LINES }, Modifier.weight(1f), enabled = !prep.computing)
-                    ChoiceTile(Icons.Rounded.AutoAwesome, tr("Optimized", "Optimisé"), form.mode == CoverageMode.OPTIMIZED, { form.mode = CoverageMode.OPTIMIZED }, Modifier.weight(1f), enabled = !prep.computing)
-                    ChoiceTile(Icons.Rounded.GridOn, tr("Checkerboard", "Damier"), form.mode == CoverageMode.CHECKERBOARD, { form.mode = CoverageMode.CHECKERBOARD }, Modifier.weight(1f), enabled = !prep.computing)
+                // Five modes on two rows of three equal tiles (the second row padded): a row of five cut the labels on a
+                // folded Fold.
+                if (!sheets.surveyTask) Column(verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+                        ChoiceTile(Icons.Rounded.Reorder, "Zigzag", form.mode == CoverageMode.LINES, { form.mode = CoverageMode.LINES }, Modifier.weight(1f), enabled = !prep.computing)
+                        ChoiceTile(Icons.Rounded.AutoAwesome, tr("Optimized", "Optimisé"), form.mode == CoverageMode.OPTIMIZED, { form.mode = CoverageMode.OPTIMIZED }, Modifier.weight(1f), enabled = !prep.computing)
+                        ChoiceTile(Icons.Rounded.GridOn, tr("Checkerboard", "Damier"), form.mode == CoverageMode.CHECKERBOARD, { form.mode = CoverageMode.CHECKERBOARD }, Modifier.weight(1f), enabled = !prep.computing)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+                        ChoiceTile(Icons.Rounded.Waves, "Zamboni", form.mode == CoverageMode.ZAMBONI, { form.mode = CoverageMode.ZAMBONI }, Modifier.weight(1f), enabled = !prep.computing)
+                        ChoiceTile(Icons.Rounded.TrackChanges, tr("Spiral", "Spirale"), form.mode == CoverageMode.SPIRAL, { form.mode = CoverageMode.SPIRAL }, Modifier.weight(1f), enabled = !prep.computing)
+                        Spacer(Modifier.weight(1f))
+                    }
                 }
                 if (form.mode == CoverageMode.OPTIMIZED)
                     InfoNote(tr("Zigzag fitted to the shape: each part takes the direction needing the fewest U-turns.", "Zigzag adapté à la forme : chaque partie prend la direction qui demande le moins de demi-tours."))
+                if (form.mode == CoverageMode.ZAMBONI)
+                    InfoNote(zamboniNote())
+                if (form.mode == CoverageMode.SPIRAL) {
+                    // Direction of the spiral, kept while another mode is chosen.
+                    Column(verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+                        Text(tr("Spiral direction", "Sens de la spirale"), style = MaterialTheme.typography.bodyLarge)
+                        Segmented(SpiralDirection.entries.map { it to it.label }, form.spiralDirection, { form.spiralDirection = it }, enabled = !prep.computing)
+                    }
+                    InfoNote(spiralNote(form.spiralDirection))
+                }
                 if (form.mode.isSurvey) {
                     Segmented(listOf(CoverageMode.TOUR to tr("Full loop", "Grand tour"), CoverageMode.SURVEY_GRID to tr("Grid", "Quadrillage")), form.mode, { form.mode = it }, enabled = !prep.computing)
                     InfoNote(if (form.mode == CoverageMode.TOUR) tr("Blades stopped. Adjacent zones merged: only the shared outer boundary is driven.", "Lames arrêtées. Zones adjacentes fusionnées : seul le contour extérieur commun est parcouru.")
@@ -117,6 +137,7 @@ internal fun MowingTaskPages(
                 }
             }
             if (!form.mode.isSurvey) {
+                OrientationGroup(form, planningMap, selected, enabled = !prep.computing)
                 SettingsGroup(tr("Mowing", "Tonte")) {
                     SliderRow(tr("Cutting height", "Hauteur de coupe"), cuttingHeight.toFloat(), { form.mowingHeight = it }, cutHeights.floatRange(),
                         valueLabel = "$cuttingHeight mm", steps = cutHeights.sliderSteps, enabled = !prep.computing)
@@ -160,6 +181,13 @@ internal fun MowingTaskPages(
                         ToggleRow(tr("Perimeter first", "Périmètre d'abord"), form.bordersFirst, { form.bordersFirst = it },
                             subtitle = tr("Mow the borders before the inside of the zones.", "Tondre les bordures avant l'intérieur des zones."),
                             enabled = !prep.computing && form.borders && form.borderPasses + form.noGoPasses > 0)
+                        // Zamboni: always on (its order is built for duration plus wear); Spiral: off (no U-turns between its
+                        // rings). The saved choice is kept for the other modes.
+                        val zamboni = form.mode == CoverageMode.ZAMBONI
+                        val spiral = form.mode == CoverageMode.SPIRAL
+                        ToggleRow(TurnStyle.LAWN.label, zamboni || !spiral && form.turnStyle == TurnStyle.LAWN, { form.turnStyle = if (it) TurnStyle.LAWN else TurnStyle.FAST },
+                            subtitle = if (zamboni) zamboniLawnNote() else if (spiral) spiralLawnNote() else if (form.turnStyle == TurnStyle.LAWN) TurnStyle.LAWN.hint else TurnStyle.FAST.hint,
+                            enabled = !prep.computing && !form.mode.isSurvey && !zamboni && !spiral)
                         ToggleRow(tr("No-go zones on the way", "Zones interdites au passage"), form.nearbyNoGo, { form.nearbyNoGo = it },
                             subtitle = if (form.nearbyNoGo) tr("Their loop is done when the route passes nearby, then mowing resumes.", "Leur tour est fait quand le trajet passe à proximité, puis la tonte reprend.")
                                 else tr("All the no-go zone loops are grouped before the perimeter.", "Tous les tours de zones interdites sont regroupés avant le périmètre."),
@@ -220,7 +248,9 @@ internal fun MowingTaskPages(
             SettingsGroup(tr("Route", "Trajet")) {
                 KeyValueRow("Zones", zoneLine)
                 KeyValueRow(tr("Settings", "Réglages"), if (form.mode.isSurvey) "${form.mode.label}${if (form.mode == CoverageMode.SURVEY_GRID) tr(" · grid ${form.signalGridSpacing.toInt()} m", " · maille ${form.signalGridSpacing.toInt()} m") else ""} · ${tr("blades stopped", "lames arrêtées")} · ${Format.num(form.mowingSpeed.toDouble(), 2)} m/s"
-                    else "${when (form.mode) { CoverageMode.CHECKERBOARD -> tr("Checkerboard", "Damier"); CoverageMode.OPTIMIZED -> tr("Optimized", "Optimisé"); else -> "Zigzag" }} · ${preview?.cutHeights?.takeIf { it.size > 1 }?.let { "${it.size} passes " + CutPasses.label(it) } ?: "$cuttingHeight mm"} · ${(form.spacing * 100).roundToInt()} cm · ${Format.num(form.mowingSpeed.toDouble(), 2)} m/s")
+                    else "${when (form.mode) { CoverageMode.CHECKERBOARD -> tr("Checkerboard", "Damier"); CoverageMode.OPTIMIZED -> tr("Optimized", "Optimisé"); CoverageMode.ZAMBONI -> tr("Zamboni (experimental)", "Zamboni (expérimental)"); CoverageMode.SPIRAL -> spiralSummary(form.spiralDirection); else -> "Zigzag" }} · ${preview?.cutHeights?.takeIf { it.size > 1 }?.let { "${it.size} passes " + CutPasses.label(it) } ?: "$cuttingHeight mm"} · ${(form.spacing * 100).roundToInt()} cm · ${Format.num(form.mowingSpeed.toDouble(), 2)} m/s")
+                preview?.let { p -> directionLine(planningMap, p, form.spacing.toDouble())?.let { KeyValueRow(tr("Direction", "Direction"), it) } }
+                preview?.let { p -> zoneModeWarnings(planningMap, p).forEach { StatusNote(it, NoteTone.WARNING) } }
                 if (prep.estimateError.isNotBlank()) InfoNote(prep.estimateError)
             }
             if (!form.mode.isSurvey) fr.luba.poc.weather.MowingRainWarning(prep.estimate?.totalSeconds)
@@ -240,6 +270,59 @@ internal fun MowingTaskPages(
         }
     }
 }
+
+/**
+ * Direction of the passes ([OrientationMode]): automatic, changed every session or one manual angle (0 to 175° in 5° steps).
+ * Visible but disabled for the modes whose direction follows the shape; the saved choice is kept for the next zigzag.
+ * Manual: the angle is also shown and set on a map of the chosen zones ([OrientationPicker], guide lines only); the
+ * "Route preview" button of the page then computes the route at this angle.
+ */
+@Composable
+private fun OrientationGroup(form: MowingTaskForm, map: RobotMap, selected: Set<Long>, enabled: Boolean) {
+    val applies = form.mode.usesOrientation
+    SettingsGroup(tr("Direction of the passes", "Direction des passes")) {
+        Segmented(OrientationMode.entries.map { it to it.choiceLabel }, form.orientation, { form.orientation = it }, enabled = enabled && applies)
+        if (form.orientation == OrientationMode.MANUAL) {
+            SliderRow(tr("Angle of the passes", "Angle des passes"), form.manualAngle.coerceAtMost(OrientationMode.MANUAL_MAX_DEG).toFloat(),
+                { form.manualAngle = ((it / OrientationMode.MANUAL_STEP_DEG).roundToInt() * OrientationMode.MANUAL_STEP_DEG).coerceIn(0, OrientationMode.MANUAL_MAX_DEG) },
+                0f..OrientationMode.MANUAL_MAX_DEG.toFloat(), valueLabel = "${form.manualAngle}°",
+                steps = OrientationMode.MANUAL_MAX_DEG / OrientationMode.MANUAL_STEP_DEG - 1, enabled = enabled && applies)
+            // Same angle as the one handed to the planner (folded into 0..179).
+            if (applies && selected.isNotEmpty())
+                OrientationPicker(map, selected, form.mode, foldAngle(form.manualAngle), enabled) { form.manualAngle = it }
+        }
+        InfoNote(if (applies) form.orientation.hint else orientationUnusedNote())
+    }
+}
+
+/** Note of the Zamboni mode: what it does, and that its rolling U-turns are not validated on the robot yet. */
+internal fun zamboniNote(): String = tr(
+    "Experimental. Passes taken a few rows apart with rolling U-turns, while the mowed part advances as one block: a stop leaves no isolated stripe. Relies on 0.35 m turns not yet validated on the robot.",
+    "Expérimental. Passes prises à quelques rangs d'écart avec des demi-tours en roulant, la partie tondue avançant d'un seul bloc : un arrêt ne laisse pas de bande isolée. Repose sur des virages de 0,35 m pas encore validés sur le robot.")
+
+/** Note of the Spiral mode in its [direction]: what it does, its zigzag parts and fallback, and that its turns are not
+ * validated on the robot yet. */
+internal fun spiralNote(direction: SpiralDirection = SpiralDirection.FROM_EDGE): String = if (direction == SpiralDirection.FROM_CENTRE) tr(
+    "Experimental. Passes parallel to the boundary, joined into a spiral driven from the centre out to the boundary without U-turns; the centre is mowed in zigzag first, the tight corners in zigzag too. A zone where the spiral would mow less is mowed in zigzag (shown in the preview). Relies on 0.35 m turns not yet validated on the robot.",
+    "Expérimental. Passes parallèles au contour, reliées en spirale parcourue du centre vers le contour sans demi-tour ; le centre est d'abord tondu en zigzag, les coins serrés aussi. Une zone où la spirale tondrait moins est tondue en zigzag (signalé dans l'aperçu). Repose sur des virages de 0,35 m pas encore validés sur le robot.")
+else tr(
+    "Experimental. Passes parallel to the boundary, joined into an inward spiral without U-turns; the centre and the tight corners are finished in zigzag. A zone where the spiral would mow less is mowed in zigzag (shown in the preview). Relies on 0.35 m turns not yet validated on the robot.",
+    "Expérimental. Passes parallèles au contour, reliées en spirale vers l'intérieur sans demi-tour ; le centre et les coins serrés sont finis en zigzag. Une zone où la spirale tondrait moins est tondue en zigzag (signalé dans l'aperçu). Repose sur des virages de 0,35 m pas encore validés sur le robot.")
+
+/** Spiral mode and its [direction] in the summary of the route preview. */
+internal fun spiralSummary(direction: SpiralDirection): String = if (direction == SpiralDirection.FROM_CENTRE)
+    tr("Spiral from the centre (experimental)", "Spirale depuis le centre (expérimental)")
+    else tr("Spiral from the edge (experimental)", "Spirale depuis le bord (expérimental)")
+
+/** Subtitle of the Lawn friendly toggle in Spiral mode, where it does not apply. */
+internal fun spiralLawnNote(): String = tr(
+    "Not used by Spiral: no U-turns between its rings.",
+    "Non utilisé par Spirale : pas de demi-tours entre ses anneaux.")
+
+/** Subtitle of the Lawn friendly toggle in Zamboni mode, where it cannot be turned off. */
+internal fun zamboniLawnNote(): String = tr(
+    "Always on in Zamboni: the order weighs duration and lawn wear.",
+    "Toujours actif en Zamboni : l'ordre tient compte de la durée et de l'usure du gazon.")
 
 private fun durationText(seconds: Double): String {
     val minutes = ceil(seconds / 60).toInt()

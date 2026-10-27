@@ -18,7 +18,19 @@
 #include "gw_nav_safety.h"
 #include "gw_observer.h"
 #include "gw_protocol.h"
+#include "gw_reconnect.h"
 #include "gw_safety.h"
+#include "gw_worker.h"
+
+// ESP-IDF configuration with the Bluetooth controller only (CONFIG_BT_CONTROLLER_ONLY, platformio.ini): NimBLE-Arduino
+// brings its own host. The Arduino core then leaves out the "BLE library in use" flag that NimBLE-Arduino still sets at
+// startup (esp32-hal-alloc-ble-mem.h), so it is defined here; with no Bluedroid or IDF NimBLE host the core releases no
+// Bluetooth memory at boot whatever its value (initArduino).
+#if defined(CONFIG_BT_CONTROLLER_ONLY)
+extern "C" {
+bool _bleLibraryInUse = true;
+}
+#endif
 
 namespace robot {
 namespace {
@@ -26,10 +38,16 @@ namespace {
 constexpr uint32_t KEEPALIVE_MS = 5000;
 constexpr uint32_t ACK_TIMEOUT_MS = 1500;
 constexpr uint32_t RETRY_MS = 10000;
-constexpr uint32_t SCAN_SECONDS = 6;
+constexpr uint32_t SCAN_MS = 6000;
 constexpr uint32_t STOP_REPORT_MS = 30UL * 60UL * 1000UL;
 constexpr int GATT_TIMEOUT = 8;   // code sent to the pilot when the gateway gives up (GATT_CONN_TIMEOUT)
 constexpr int GATT_ERROR = 133;   // write refused by the Bluetooth stack
+// BLE connection parameters (units: 1.25 ms for the intervals, 10 ms for the timeout, 0.625 ms for the scan).
+constexpr uint16_t CONN_INTERVAL_MIN = 12;         // 15 ms
+constexpr uint16_t CONN_INTERVAL_MAX = 24;         // 30 ms
+constexpr uint16_t CONN_SUPERVISION_TIMEOUT = 256;  // 2.56 s (NimBLE default)
+constexpr uint16_t CONNECT_SCAN_INTERVAL = 32;     // 20 ms
+constexpr uint16_t CONNECT_SCAN_WINDOW = 16;       // 10 ms
 const NimBLEUUID SERVICE_UUID((uint16_t)0xFFFF);
 const NimBLEUUID WRITE_UUID((uint16_t)0xFF01);
 const NimBLEUUID NOTIFY_UUID((uint16_t)0xFF02);
@@ -66,6 +84,12 @@ struct Event {
 SemaphoreHandle_t mtx;
 QueueHandle_t events;
 TaskHandle_t task;
+// Notifications and disconnections, handled on their own task (see notifyTask).
+TaskHandle_t notifyTaskHandle;
+// Long-lived workers of the autonomous tracking and their tasks, created at boot (gw_worker.h); never deleted.
+gw::leg::Worker *legWorker = nullptr;
+gw::leg::Worker *prepareWorker = nullptr;
+TaskHandle_t legTaskHandle, prepareTaskHandle;
 // Wakes the robot task. Not a task notification: NimBLE waits for its blocking calls (connect, write with response,
 // RSSI, discovery) on the calling task's notification, so an xTaskNotifyGive from another task during one of them
 // ended the wait early with a success code: on 2026-10-23 a pilot's SCAN during a connection attempt left the client
@@ -87,6 +111,9 @@ bool ready = false;
 bool connecting = false;
 bool connectNow = false;
 uint32_t lastAttemptMs = 0;
+// Automatic attempts only while the gateway is in use and for 10 min after (another gateway may hold the robot).
+gw::ReconnectPolicy reconnect(0);
+bool retryPaused = false;
 int mtu = 23;
 
 gw::Blufi blufi;
@@ -155,8 +182,10 @@ std::string clockText() {
   if (t < 1700000000) return "T+" + std::to_string(millis() / 1000) + " s";
   struct tm local;
   localtime_r(&t, &local);
+  // Not strftime: with the PSRAM cache workaround, IDF 5 links the newlib time functions into IRAM, and strftime alone
+  // (about 3 KB) no longer fit there next to Wi-Fi and Bluetooth.
   char buf[16];
-  strftime(buf, sizeof(buf), "%H:%M:%S", &local);
+  snprintf(buf, sizeof(buf), "%02d:%02d:%02d", local.tm_hour, local.tm_min, local.tm_sec);
   return buf;
 }
 
@@ -354,10 +383,9 @@ void connect(const std::string &addr, const std::string &nm) {
 }
 
 class ClientCallbacks : public NimBLEClientCallbacks {
-  void onDisconnect(NimBLEClient *) override {
+  void onDisconnect(NimBLEClient *, int) override {
     Event e{EV_DISCONNECT, generation, nullptr};
     xQueueSend(events, &e, 0);
-    wake();
   }
 };
 ClientCallbacks clientCallbacks;
@@ -365,7 +393,6 @@ ClientCallbacks clientCallbacks;
 void onNotify(NimBLERemoteCharacteristic *, uint8_t *data, size_t size, bool) {
   Event e{EV_NOTIFY, generation, new gw::Bytes(data, data + size)};
   if (xQueueSend(events, &e, 0) != pdTRUE) delete e.data;
-  else wake();
 }
 
 void handleEvent(const Event &e) {
@@ -416,7 +443,13 @@ void fail(uint32_t gen, const std::string &reason) {
 // Connection, discovery, FF02 subscription; outside the lock (blocking calls).
 void connectRobot(uint32_t gen, std::string addr, uint8_t type) {
   report("Bluetooth connection to " + addr + "…");
-  client->setConnectTimeout(10);
+  client->setConnectTimeout(10000);  // ms (NimBLE 2.x; seconds in 1.x)
+  // Connection interval 15-30 ms (NimBLE default 30-50 ms, kept when the robot asks for an update): a GATT write with
+  // response takes one to two intervals, and Wi-Fi coexistence makes the ESP32 skip some connection events; a short
+  // interval keeps the tracking setpoints (5/s, plus error queries, blade keep-alives and RSSI reads) from queueing.
+  // Supervision timeout unchanged (2.56 s). Initiator scan at half duty (10 ms every 20 ms instead of continuous):
+  // reconnection attempts towards a robot that is off last up to 2 x 10 s every 10 s and starved the Wi-Fi.
+  client->setConnectionParams(CONN_INTERVAL_MIN, CONN_INTERVAL_MAX, 0, CONN_SUPERVISION_TIMEOUT, CONNECT_SCAN_INTERVAL, CONNECT_SCAN_WINDOW);
   bool ok = false;
   uint8_t usedType = type;
   const uint8_t tries[2] = {type == 0xFF ? (uint8_t)BLE_ADDR_PUBLIC : type,
@@ -503,9 +536,9 @@ void doScan() {
   scan->setWindow(80);
   // Non-blocking start so that a refused scan is told to the pilot (FAILURE with the reason, as the Android
   // gateway does) instead of an empty list.
-  const bool started = scan->start(SCAN_SECONDS, nullptr, false);
+  const bool started = scan->start(SCAN_MS, false);
   if (started) {
-    const uint32_t deadline = millis() + SCAN_SECONDS * 1000 + 2000;
+    const uint32_t deadline = millis() + SCAN_MS + 2000;
     while (scan->isScanning() && millis() < deadline) delay(50);
     if (scan->isScanning()) scan->stop();
   }
@@ -516,13 +549,12 @@ void doScan() {
     toPilot(requester, gw::proto::FAILURE, text(gw::proto::wire::SCANNER_UNAVAILABLE));
     return;
   }
-  NimBLEScanResults results = scan->getResults();
-  for (int i = 0; i < results.getCount(); i++) {
-    NimBLEAdvertisedDevice d = results.getDevice(i);
-    if (!d.haveName() || !gw::proto::isMower(d.getName())) continue;
-    const std::string addr = upper(d.getAddress().toString());
-    seenTypes[addr] = d.getAddress().getType();
-    toPilot(requester, gw::proto::SCAN_RESULT, gw::proto::scanResult(d.getName(), addr, d.getRSSI()));
+  const NimBLEScanResults results = scan->getResults();
+  for (const NimBLEAdvertisedDevice *d : results) {
+    if (!d->haveName() || !gw::proto::isMower(d->getName())) continue;
+    const std::string addr = upper(d->getAddress().toString());
+    seenTypes[addr] = d->getAddress().getType();
+    toPilot(requester, gw::proto::SCAN_RESULT, gw::proto::scanResult(d->getName(), addr, d->getRSSI()));
   }
   scan->clearResults();
   scanPending = false;
@@ -555,11 +587,38 @@ void execute(const std::shared_ptr<Op> &op, uint32_t gen) {
   complete(op, ok ? 0 : (op->rssi ? -1 : GATT_ERROR), rssi, (int)(millis() - t0));
 }
 
+// Notifications (robot telemetry) and disconnections, on their own task: the robot task spends most of a route
+// tracking blocked in GATT writes with response (one to two connection intervals each, several per 200 ms tick), and
+// handled there the telemetry reached the tracking up to a few hundred ms late, stamped with the time it was
+// handled: the dead reckoning then predicted from a wrong fix time and the setpoints jerked (field test of
+// 2026-10-25). The Android gateway handles a notification as soon as it arrives, whatever write is in flight.
+void notifyTask(void *) {
+  for (;;) {
+    Event e;
+    if (xQueueReceive(events, &e, portMAX_DELAY) != pdTRUE) continue;
+    // Link being set up (subscription done, link not ready yet): handled once ready, as when the robot task did it
+    // after connectRobot().
+    for (;;) {
+      {
+        Lock l;
+        if (!(connecting && e.generation == generation)) break;
+      }
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    handleEvent(e);
+  }
+}
+
 void loopTask(void *) {
   for (;;) {
-    xSemaphoreTake(wakeSem, pdMS_TO_TICKS(20));
-    Event e;
-    while (xQueueReceive(events, &e, 0) == pdTRUE) handleEvent(e);
+    bool pending;
+    {
+      Lock l;
+      pending = ready && !current && !queue.empty();
+    }
+    // Next write at once when some are queued (the wake-up may have been consumed by the previous one): an idle wait
+    // of up to 20 ms between two queued writes delayed the setpoints.
+    if (!pending) xSemaphoreTake(wakeSem, pdMS_TO_TICKS(20));
 
     bool scanNow;
     {
@@ -568,6 +627,8 @@ void loopTask(void *) {
     }
     if (scanNow) doScan();
 
+    // Outside the robot lock: the autonomy takes its own lock and calls the robot under it.
+    const bool tracking = autonomy && autonomy->running();
     const uint32_t now = millis();
     uint32_t gen = 0;
     std::string addr;
@@ -575,7 +636,12 @@ void loopTask(void *) {
     bool startConnect = false;
     {
       Lock l;
-      if (!address.empty() && !ready && !connecting && !scanPending && (connectNow || now - lastAttemptMs >= RETRY_MS)) {
+      const bool inUse = pilot >= 0 || tracking;
+      const bool retryAllowed = reconnect.mayRetry(now, inUse);
+      if (!address.empty() && !ready && !connecting && reconnect.pausedNow(now, inUse))
+        report("automatic reconnection paused: gateway unused for 10 min (robot left to the device using it; resumes when a pilot connects)");
+      retryPaused = !address.empty() && !ready && !connecting && !retryAllowed;
+      if (!address.empty() && !ready && !connecting && !scanPending && retryAllowed && (connectNow || now - lastAttemptMs >= RETRY_MS)) {
         connectNow = false;
         connecting = true;
         lastAttemptMs = now;
@@ -637,17 +703,34 @@ void begin(PilotSink s, PilotSink leg, std::function<gw::proto::Health()> health
   address = prefs.getString("addr", "").c_str();
   name = prefs.getString("name", "").c_str();
   addressType = prefs.getUChar("type", 0xFF);
+  reconnect.used(millis());
   NimBLEDevice::init("");
   NimBLEDevice::setMTU(517);
   client = NimBLEDevice::createClient();
   client->setClientCallbacks(&clientCallbacks, false);
+  // NimBLE 2.5 retries a failed connection establishment (0x3E) twice by default; the gateway keeps its own pace (other
+  // address type, then a new attempt 10 s later), as with NimBLE 1.4.
+  client->setConnectRetries(0);
   if (!address.empty()) {
     connectNow = true;
     report("retained robot: " + (name.empty() ? address : name) + ", automatic connection");
   }
   observer = newObserver();
   startAutonomy();
+  // Above the robot and tracking tasks (priority 3): a notification is handled within a tick of its arrival.
+  xTaskCreatePinnedToCore(notifyTask, "robot-notify", 8192, nullptr, 4, &notifyTaskHandle, 1);
   xTaskCreatePinnedToCore(loopTask, "robot", 8192, nullptr, 3, &task, 1);
+}
+
+TaskStats taskStats() {
+  TaskStats t;
+  auto freeOf = [](TaskHandle_t h) { return h ? (int)uxTaskGetStackHighWaterMark(h) : -1; };
+  t.robotStackFree = freeOf(task);
+  t.notifyStackFree = freeOf(notifyTaskHandle);
+  t.legStackFree = freeOf(legTaskHandle);
+  t.prepareStackFree = freeOf(prepareTaskHandle);
+  t.legsRun = legWorker ? (uint32_t)legWorker->completed() : 0;
+  return t;
 }
 
 State state() {
@@ -657,6 +740,7 @@ State state() {
   s.name = name;
   s.connecting = connecting;
   s.ready = ready;
+  s.retryPaused = retryPaused;
   s.mtu = mtu;
   s.pilot = pilot;
   s.lastStop = stopOutcome.empty() ? "" : stopOutcome + " (" + stopClock + ")";
@@ -683,6 +767,8 @@ static std::string attachLocked(int session, const std::string &requestedAddress
     return gw::proto::wire::holdsAnotherRobot(name.empty() ? address : name);
   pilot = session;
   pilotSynced = false;
+  reconnect.used(millis());
+  retryPaused = false;
   connect(addr, requestedName);
   // Safety stop written while the pilot was away: tell it (it reported the stop as "not guaranteed").
   if (!stopOutcome.empty()) {
@@ -752,6 +838,7 @@ std::string unplug(int old, bool emergency) {
     Lock l;
     if (pilot != old) return "";
     pilot = -1;
+    reconnect.used(millis());  // 10 min of automatic retries from the pilot's departure
     for (auto it = queue.begin(); it != queue.end();) {
       if ((*it)->owner == old) it = queue.erase(it);
       else ++it;
@@ -932,8 +1019,10 @@ class EspLegHost : public gw::leg::LegHost {
   }
   // No temperature on the board: no overheating stop (the Android gateway stops at thermal level 4).
   gw::leg::Opt<std::string> hostFailure() override { return std::nullopt; }
-  // Board battery at 0-4 % (IP5306 levels: 0 % below 25 %) and no power: blades forbidden, blades-OFF moves allowed.
-  // Same wire text as the Android gateway (translated by the app).
+  // Board battery at 0-4 % and no power: blades forbidden, blades-OFF moves allowed. T-Call: IP5306 levels (0 % below
+  // 25 %); Olimex board: cell voltage on the conservative curve of gw_battery.h (4 % or less below 3.50 V), level
+  // unknown (no rule) while 5 V is present. Same wire text as the Android gateway, which speaks of the phone: the app
+  // matches it to translate it (GatewayProtocol.kt), so it is kept byte for byte.
   gw::leg::Opt<std::string> cuttingFailure() override {
     if (!healthOf) return std::nullopt;
     const auto h = healthOf();
@@ -952,20 +1041,41 @@ bool spawnTask(const char *taskName, std::function<void()> body);
 
 namespace {
 
+// Task of a worker: runs its bodies for good (gw_worker.h).
+void workerTask(void *arg) {
+  static_cast<gw::leg::Worker *>(arg)->run([](const char *what) { Serial.printf("[leg] task body ended by an exception: %s\n", what); });
+  vTaskDelete(nullptr);
+}
+
+// Route tracking on core 1 next to the robot task (same priority, as before); blob decoding on core 0 at low priority.
+constexpr uint32_t LEG_STACK = 20480;
+constexpr uint32_t PREPARE_STACK = 16384;
+
 void startAutonomy() {
   gw::leg::AutonomyLimits limits;
   limits.freeBlock = [] { return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT); };
   limits.freeTotal = [] { return heap_caps_get_free_size(MALLOC_CAP_8BIT); };
+  // Workers created now, internal RAM still unfragmented: starting a tracking never allocates a task stack again.
+  legWorker = new gw::leg::Worker();
+  prepareWorker = new gw::leg::Worker();
+  const bool legOk = xTaskCreatePinnedToCore(workerTask, gw::leg::TASK_LEG, LEG_STACK, legWorker, 3, &legTaskHandle, 1) == pdPASS;
+  const bool prepareOk =
+      xTaskCreatePinnedToCore(workerTask, gw::leg::TASK_PREPARE, PREPARE_STACK, prepareWorker, 1, &prepareTaskHandle, 0) == pdPASS;
+  if (!legOk) legTaskHandle = nullptr;
+  if (!prepareOk) prepareTaskHandle = nullptr;
+  if (!legOk || !prepareOk) report("autonomy workers not created: tasks created on demand");
+  // A worker that could not be created falls back to a task per body (the former behaviour).
+  const gw::leg::Spawner spawner = gw::leg::workerSpawner(legOk ? legWorker : nullptr, prepareOk ? prepareWorker : nullptr, spawnTask);
   autonomy.reset(new gw::leg::GatewayAutonomy(
-      legHost, spawnTask, [](const std::string &text) { Serial.printf("[leg] %s\n", text.c_str()); },
+      legHost, spawner, [](const std::string &text) { Serial.printf("[leg] %s\n", text.c_str()); },
       // Durations only (pilot absent for 20 min): monotonic, never shifted by the NTP synchronisation.
       [] { return monotonicMs(); }, limits));
 }
 
-// Task of a route tracking (stack for the tracking loop and its exceptions) or of a blob decoding.
+// Task created for one body (route tracking or blob decoding), only if its worker could not be created at boot.
 bool spawnTask(const char *taskName, std::function<void()> body) {
   auto *fn = new std::function<void()>(std::move(body));
-  const bool leg = std::string(taskName) == "leg";
+  const bool leg = std::string(taskName) == gw::leg::TASK_LEG;
   const BaseType_t ok = xTaskCreatePinnedToCore(
       [](void *arg) {
         std::unique_ptr<std::function<void()>> f(static_cast<std::function<void()> *>(arg));
@@ -979,7 +1089,7 @@ bool spawnTask(const char *taskName, std::function<void()> body) {
         f.reset();
         vTaskDelete(nullptr);
       },
-      taskName, leg ? 20480 : 16384, fn, leg ? 3 : 1, nullptr, leg ? 1 : 0);
+      taskName, leg ? LEG_STACK : PREPARE_STACK, fn, leg ? 3 : 1, nullptr, leg ? 1 : 0);
   if (ok != pdPASS) {
     delete fn;
     return false;

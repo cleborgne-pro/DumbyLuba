@@ -31,8 +31,9 @@ object SurveyPlanner {
         // Gaps between surrounding zones stay excluded from the grid.
         val exclusions = holes + components.flatMap { polygon -> (0 until polygon.numInteriorRing).map { points(polygon.getInteriorRingN(it)) } }
         val results = mutableListOf<Preview>()
+        // The merged outlines are not map zones: no zone per path ([Preview.pathZoneIds]).
         fun combined(parts: List<Preview>) = MultiZonePlanner.combine(mergedZones,parts,mode,basePoint)
-            .copy(zoneIds=zones.map { it.id })
+            .copy(zoneIds=zones.map { it.id },pathZoneIds=emptyList())
         mergedZones.forEachIndexed { index, zone ->
             progress(index,mergedZones.size,zone.name)
             val plan = Geometry.plan(zone.points,exclusions,spacing,margin,mode,true,1,0,obstacles,robot,recordedBoundary,basePoint,outerOffsetM)

@@ -75,7 +75,7 @@ LubaBrain (editable map) was removed in 0.22.0; it will be rebuilt later.
 1. **Mow**: zones are chosen directly on the map. Each tapped zone gets a number;
    the numbered list under the map lets you remove a zone. The displayed order is the mowing
    order: the computation no longer reorders the zones.
-2. **Task settings**: mode tiles (Zigzag, Optimized, Checkerboard; the signal survey route opens
+2. **Task settings**: mode tiles on two rows (Zigzag, Optimized, Checkerboard; Zamboni, Spiral, both experimental; the signal survey route opens
    from Service → Signal surveys and only shows Full loop / Grid), cutting
    height and speed (values in blue, green sliders), collapsible advanced settings (spacing,
    perimeter and no-go zone laps, perimeter first, recharge thresholds). Fixed bar:

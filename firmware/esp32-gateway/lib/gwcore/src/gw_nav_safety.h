@@ -74,6 +74,43 @@ struct ProtectionPause {
   static bool cleared(Opt<int> robotState, Opt<int64_t> selfCheck);
 };
 
+// fr.luba.poc.simulation.PositioningGrace: a positioning condition (weak satellite signal under a raised play house,
+// 2026-10-25) with the robot still in manual control is ridden through for MAX_MS and MAX_M from where it appeared,
+// every other check unchanged; beyond, the usual protection stop. A nominal self-check clears it.
+class PositioningGrace {
+ public:
+  static constexpr int64_t MAX_MS = 20000;
+  static constexpr double MAX_M = 5.0;
+  static constexpr const char *EVENT = "route_positioning_grace";
+  bool rides(int64_t now, Opt<int> robotState, Opt<int64_t> selfCheck, const Opt<Point> &position) {
+    if (SelfCheck::nominal(selfCheck)) {
+      reset();
+      return false;
+    }
+    if (spent_ || !robotState || *robotState != 20 || !SelfCheck::positioning(selfCheck) || !position) return false;
+    if (!since_) {
+      since_ = now;
+      from_ = position;
+    }
+    if (now - *since_ > MAX_MS || position->distance(*from_) > MAX_M) {
+      spent_ = true;
+      return false;
+    }
+    return true;
+  }
+  int64_t elapsedMs(int64_t now) const { return since_ ? now - *since_ : 0; }
+  void reset() {
+    since_.reset();
+    from_.reset();
+    spent_ = false;
+  }
+
+ private:
+  Opt<int64_t> since_;
+  Opt<Point> from_;
+  bool spent_ = false;
+};
+
 // fr.luba.poc.protocol.OffMapLatch: self-check 25 beyond the mapped zones.
 struct OffMapLatch {
   static constexpr double INSIDE_TOLERANCE_M = 0.35;

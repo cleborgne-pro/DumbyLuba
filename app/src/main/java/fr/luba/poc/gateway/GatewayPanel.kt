@@ -188,6 +188,17 @@ fun GatewayPanel(linkIdle: Boolean, disconnect: () -> Unit = {}) {
                     enabled = linkIdle && !busy, icon = Icons.Rounded.QrCodeScanner)
                 InfoNote(tr("The QR code is on the home screen of the gateway phone. It fills the address and the code, then tests the connection.",
                     "Le QR code est sur l'écran d'accueil du téléphone passerelle. Il remplit l'adresse et le code, puis teste la connexion."))
+                SecondaryPillButton(tr("Pair the ESP32 (PWR button)", "Appairer l'ESP32 (bouton PWR)"), {
+                    busy = true; message = tr("Searching for an ESP32 open for pairing…", "Recherche d'une ESP32 ouverte à l'appairage…")
+                    scope.launch {
+                        val outcome = withContext(Dispatchers.IO) { runCatching { GatewayButtonPairing.pair(context) } }
+                        message = outcome.fold({ tr("ESP32 gateway ${it.host} paired, code saved", "Passerelle ESP32 ${it.host} appairée, code enregistré") },
+                            { tr("Failed: ${it.message ?: it.javaClass.simpleName}", "Échec : ${it.message ?: it.javaClass.simpleName}") })
+                        config = GatewayConfig.read(context); host = config.host; code = config.pilotCode; busy = false
+                    }
+                }, Modifier.fillMaxWidth(), enabled = linkIdle && !busy, icon = Icons.Rounded.Router)
+                InfoNote(tr("ESP32 gateway: briefly press its PWR button; once the LED double-flashes (about 20 s), tap this button within 3 minutes. No code to type.",
+                    "Passerelle ESP32 : appuyez brièvement sur son bouton PWR ; dès que la LED clignote par deux (une vingtaine de secondes), touchez ce bouton dans les 3 minutes. Aucun code à saisir."))
             }
             SettingsGroup(tr("Gateways on this Wi-Fi", "Passerelles sur ce Wi-Fi")) {
                 when {

@@ -278,23 +278,23 @@ AreaIndex::AreaIndex(const Surface &area, double tolerance) : tolerance_(toleran
   rows_ = std::max(1, (int)std::ceil(height / size));
   const int cells = cols_ * rows_;
   // Cells: count then fill (compressed rows).
-  std::vector<uint32_t> counts(cells + 1, 0);
+  ExtVector<uint32_t> counts(cells + 1, 0);
   for (size_t i = 0; i < edges_; i++)
     forCells(ax_[i], ay_[i], bx_[i], by_[i], pad, [&](int c) { counts[c]++; return true; });
   cellStart_.assign(cells + 1, 0);
   for (int c = 0; c < cells; c++) cellStart_[c + 1] = cellStart_[c] + counts[c];
   cellEdges_.resize(cellStart_[cells]);
-  std::vector<uint32_t> fill(cellStart_.begin(), cellStart_.end() - 1);
+  ExtVector<uint32_t> fill(cellStart_.begin(), cellStart_.end() - 1);
   for (size_t i = 0; i < edges_; i++)
     forCells(ax_[i], ay_[i], bx_[i], by_[i], pad, [&](int c) { cellEdges_[fill[c]++] = (uint32_t)i; return true; });
   // Rows (ray casting), sorted by decreasing maximum / increasing minimum abscissa.
-  std::vector<uint32_t> rowCounts(rows_, 0);
+  ExtVector<uint32_t> rowCounts(rows_, 0);
   for (size_t i = 0; i < edges_; i++)
     for (int r = row(std::min(ay_[i], by_[i])); r <= row(std::max(ay_[i], by_[i])); r++) rowCounts[r]++;
   rowStart_.assign(rows_ + 1, 0);
   for (int r = 0; r < rows_; r++) rowStart_[r + 1] = rowStart_[r] + rowCounts[r];
   byMaxX_.resize(rowStart_[rows_]);
-  std::vector<uint32_t> rowFill(rowStart_.begin(), rowStart_.end() - 1);
+  ExtVector<uint32_t> rowFill(rowStart_.begin(), rowStart_.end() - 1);
   for (size_t i = 0; i < edges_; i++)
     for (int r = row(std::min(ay_[i], by_[i])); r <= row(std::max(ay_[i], by_[i])); r++) byMaxX_[rowFill[r]++] = (uint32_t)i;
   byMinX_ = byMaxX_;

@@ -119,11 +119,14 @@ internal fun MapSideBar(
 internal class RobotProtection(state: RobotUi, demo: Boolean, cloud: Boolean) {
     val selfCheck = state.telemetry.selfCheck
     val stopLock = fr.luba.poc.protocol.StopUnlock.locked(selfCheck)
-    // Self-check 25 beyond the mapped zones, bumper clear: not a lock for the blade-OFF moves (2026-10-20,
-    // [fr.luba.poc.protocol.OffMapLatch]); a note replaces the "Robot stuck" panel.
+    // Self-check 25 beyond the mapped zones or at a no-go zone, bumper clear: not a lock for the joystick (2026-10-20 and
+    // 2026-10-25, [fr.luba.poc.protocol.OffMapLatch]); a note replaces the "Robot stuck" panel.
     val offMapLatch = state.ready && !demo && !cloud && !state.mowing.active && !state.robotRoute.running &&
         fr.luba.poc.protocol.OffMapLatch.ignored(selfCheck, state.telemetry.sensorStatus,
-            PointPlanner.beyondMapped(state.robotMap, state.telemetry.x?.let { x -> state.telemetry.y?.let { y -> Point(x, y) } }))
+            fr.luba.poc.protocol.OffMapLatch.atEdge(state.robotMap, state.telemetry.x?.let { x -> state.telemetry.y?.let { y -> Point(x, y) } }))
+    /** At a no-go zone only: the move to a point keeps its stop on 25 there, only the joystick ignores it. */
+    val exclusionLatch = offMapLatch &&
+        !PointPlanner.beyondMapped(state.robotMap, state.telemetry.x?.let { x -> state.telemetry.y?.let { y -> Point(x, y) } })
     val robotBlocked = state.ready && !demo && !cloud && ((fr.luba.poc.protocol.StopUnlock.blocked(selfCheck) && !offMapLatch) || state.unlockPending)
     /** Forbidden time range of the Mammotion app (self-check 23): nothing to unlock. */
     val forbiddenTime = fr.luba.poc.protocol.SelfCheck.forbiddenTime(selfCheck)
@@ -173,8 +176,10 @@ internal fun RobotProtectionPanel(
             NoteTone.WARNING) { positioningHidden = true }
     }
     else if (protection.offMapLatch && !robotBlocked && !offMapHidden && !state.navTest.running && !state.manualActive)
-        MapFloatingNote(tr("Beyond the mapped zones (self-check 25): ignored, joystick and move to a point stay available, blades stopped.",
-            "Hors des zones cartographiées (self-check 25) : ignoré, joystick et déplacement au point restent possibles, lames arrêtées."),
+        MapFloatingNote(if (protection.exclusionLatch) tr("Against a no-go zone (self-check 25): drive the robot out with the joystick, blades stopped.",
+                "Contre une zone interdite (self-check 25) : sortir le robot au joystick, lames arrêtées.")
+            else tr("Beyond the mapped zones (self-check 25): ignored, joystick and move to a point stay available, blades stopped.",
+                "Hors des zones cartographiées (self-check 25) : ignoré, joystick et déplacement au point restent possibles, lames arrêtées."),
             NoteTone.INFO) { offMapHidden = true }
     else if (robotBlocked) {
         val collision = fr.luba.poc.protocol.CollisionLatch.latched(selfCheck)

@@ -16,6 +16,7 @@ struct Info {
   uint32_t framesIn = 0;
   uint32_t framesOut = 0;
   String last;  // last event (connection, refusal, stop)
+  uint32_t authenticated = 0;  // pilots that gave the right code since boot (closes the pairing window)
 };
 
 void begin(const String &code, std::function<gw::proto::Health()> health);

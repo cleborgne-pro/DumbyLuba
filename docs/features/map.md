@@ -34,6 +34,26 @@ flagged by a "Demo map" note above the bottom bar.
 Complete maps are cached on the phone (one per geometry, atomic write) and reloaded at startup. Reading is bounded
 (4096 frames, 100,000 points, 1024 shapes) to reject an abnormal map.
 
+**Patterns (Mammotion drawings).** The drawings placed in a zone with the Mammotion app (SVG patterns, element type
+13) are kept with the map, cached with it, and drawn over the zones, under the no-go zones and the routes ("· 2
+patterns" at the end of the source). An active pattern, where the robot spares the grass, is a light purple fill with
+a thin outline, its tile footprint in fine purple dots; a pattern switched off in the Mammotion app (the robot mows
+the zone normally) only shows its faded dotted footprint; a pattern whose content is not an SVG drawing (a built-in
+pattern name, for instance) or is too large (over 256 KB or 20,000 points) shows its footprint only. Display only:
+the mowing computed by DumbyLuba and the moves ignore the patterns, as before, and mow or cross their grass. The
+**Patterns** switch of the *On the map* group hides them. Placement (tile centered on `x_move`/`y_move`, base size ×
+scale, rotation counterclockwise in radians, SVG stretched over the tile with its Y axis flipped) and frame assembly
+come from community implementations. They were confirmed on a real map on 2026-10-27: a text added in the Mammotion
+app, in two frames, rotated and at scale 1, was drawn correctly in its zone. A scale other than 1, a single-frame
+pattern, a switched-off pattern and a viewBox whose proportions differ from the tile are still to be confirmed on a
+capture ([protocol](../MAMMOTION_PROTOCOL.md#map-and-account--research-for-milestone-5)). At most 64 patterns and 2 MB of SVG
+per map. Tests: `MapDrawingPlacementTest`, `SvgOutlineTest`, `MapTransferDrawingTest`, `MapCacheTest`.
+
+<p align="center">
+  <img src="../images/map-patterns.png" width="200" alt="Real map with a Mammotion pattern drawn in its zone">
+  <br><em>A text pattern added in the Mammotion app, imported and drawn in its zone (purple fill, dotted tile frame); real map, 2026-10-27.</em>
+</p>
+
 **Automatic reading** (1.1.1): when the connected robot (Bluetooth or gateway) has no known map (new installation,
 cleared cache, robot never read), its map is read over BLE by itself as soon as telemetry is received, once per
 connection. It is skipped silently while a route, a mission, manual control or a test is running; **Read the robot
@@ -136,7 +156,7 @@ the displayed source and the map contents ("7 zones · 26 no-go zones").
 | Group | Contents |
 |---|---|
 | *Map background* | three illustrated tiles: **Grid** (default, "Metric grid tied to the map: one line per meter, stronger every 5 m"), **Dots** ("Discreet pattern, fixed on screen"), **Plain** ("Neutral background, no grid") |
-| *On the map* | switches **Zone names** (on by default), **Scale** (on), **Planned route animation** (comet running along the route in mowing order, on), **Encountered obstacles**, **Difficulties**, **Real coverage** (same toggles as the layer bar) |
+| *On the map* | switches **Zone names** (on by default), **Scale** (on), **Planned route animation** (comet running along the route in mowing order, on), **Patterns** (Mammotion drawings, on, [above](#loading-a-map)), **Encountered obstacles**, **Difficulties**, **Real coverage** (same toggles as the layer bar) |
 | *Signal heatmap* | **Show the heatmap** (**Show the simulated heatmap** during a simulated survey) and chips for the measured layers (Wi-Fi, RTK, BLE…), or "No signal survey on this map: open the history to show one."; **Layer bar** (shown or collapsed, like the **Layers** button), **Heatmap history**, **Flat-ground reference** (tilt and orientation of the gateway phone, for the terrain) |
 | *Local corrections* | **Correct the map**: number of active corrections ("2 active"); opens the editor ([below](#correcting-the-map-local-corrections)). **Record by driving**: opens the dedicated page (map following the robot, camera, joysticks) to record a DumbyLuba zone, passage or no-go zone ([below](#mammotion-zones-and-dumbyluba-zones)). **Border types**: number of typed portions ("3 portions"); opens the border types editor ([below](#border-types)) |
 | *Map source* | **Read the robot map**, **Mammotion account map**, **Try the demo** ([above](#loading-a-map)) |
@@ -152,6 +172,7 @@ the displayed source and the map contents ("7 zones · 26 no-go zones").
 | No-go zone | ochre fill, thin darker outline |
 | Map obstacle | grey, outlined |
 | No-Stop zone (LUBA 2 AWD X) | light blue tint, **dashed** blue outline: type 25, the robot does not stop there for what its vision sees; ordinary ground, mowed and crossed ([details](supported-models.md#map-of-a-luba-2-awd-x-vision-module-zones)) |
+| Pattern (Mammotion drawing) | light purple fill with a thin purple outline, tile footprint in fine purple dots; switched off in the Mammotion app: faded dotted footprint only; display only, mowed and crossed ([above](#loading-a-map)) |
 | Vision obstacle zone (LUBA 2 AWD X) | drawn like a map obstacle: type 26, never observed, avoided by moves; mowing computation refused on such a map |
 | Passage | grey stripe dotted with white (path never mowed); **green** stripe for a DumbyLuba passage |
 | Passes to mow | white lines, translucent white band at the cutting width |

@@ -33,6 +33,56 @@ class MissionCheckpointTest {
         assertEquals(p, PreviewJson.decode(org.json.JSONObject(PreviewJson.encode(p).toString())))
     }
 
+    @Test fun zonePhasesAndModesRoundTripAndOlderSavesDecodeWithoutThem() {
+        val p = Preview(listOf(listOf(Point(1.0,2.0),Point(3.5,2.0))),2.5,30,1,CoverageMode.CHECKERBOARD,
+            zoneIds=listOf(7L,9L),zoneAngles=listOf(10,20),zonePhases=listOf(0.5,0.2),zoneModes=listOf(CoverageMode.CHECKERBOARD,CoverageMode.LINES))
+        val decoded = PreviewJson.decode(org.json.JSONObject(PreviewJson.encode(p).toString()))
+        assertEquals(p, decoded)
+        assertEquals(listOf(0.5,0.2), decoded.zonePhases)
+        assertEquals(listOf(CoverageMode.CHECKERBOARD,CoverageMode.LINES), decoded.zoneModes)
+        // Save written before these fields: empty lists (centred rows, requested mode).
+        val old = PreviewJson.encode(p).apply { remove("zonePhases"); remove("zoneModes") }
+        val legacy = PreviewJson.decode(org.json.JSONObject(old.toString()))
+        assertTrue(legacy.zonePhases.isEmpty())
+        assertTrue(legacy.zoneModes.isEmpty())
+        assertEquals(p.copy(zonePhases=emptyList(),zoneModes=emptyList()), legacy)
+    }
+
+    @Test fun spiralModesAndZamboniReorderedCellsRoundTrip() {
+        val p = Preview(listOf(listOf(Point(1.0,2.0),Point(3.5,2.0))),2.5,0,0,CoverageMode.SPIRAL,
+            zoneIds=listOf(7L,9L),zoneAngles=listOf(0,35),zonePhases=listOf(0.5,0.5),zoneModes=listOf(CoverageMode.SPIRAL,CoverageMode.LINES))
+        assertEquals(p, PreviewJson.decode(org.json.JSONObject(PreviewJson.encode(p).toString())))
+        val z = p.copy(mode=CoverageMode.ZAMBONI,zoneModes=listOf(CoverageMode.ZAMBONI,CoverageMode.ZAMBONI),zoneReorderedCells=listOf(3,0))
+        val decoded = PreviewJson.decode(org.json.JSONObject(PreviewJson.encode(z).toString()))
+        assertEquals(z, decoded)
+        assertEquals(listOf(3,0), decoded.zoneReorderedCells)
+        // Save written before this field, or not aligned with the zones: unknown.
+        assertTrue(PreviewJson.decode(org.json.JSONObject(PreviewJson.encode(z).apply { remove("zoneReorderedCells") }.toString())).zoneReorderedCells.isEmpty())
+        assertTrue(PreviewJson.decode(org.json.JSONObject(PreviewJson.encode(z.copy(zoneReorderedCells=listOf(1))).toString())).zoneReorderedCells.isEmpty())
+    }
+
+    @Test fun pathZonesRoundTripAndOlderOrDamagedSavesDecodeWithoutThem() {
+        val p = Preview(listOf(listOf(Point(1.0,2.0),Point(3.5,2.0)),listOf(Point(5.0,2.0),Point(8.0,2.0))),5.5,30,1,
+            zoneIds=listOf(7L,9L),zoneAngles=listOf(10,20),pathZoneIds=listOf(7L,9L))
+        assertEquals(p, PreviewJson.decode(org.json.JSONObject(PreviewJson.encode(p).toString())))
+        // Saves written before the field, or with a list that does not match the paths: unknown (geometry).
+        for (json in listOf(PreviewJson.encode(p).apply { remove("pathZoneIds") },
+                PreviewJson.encode(p).put("pathZoneIds", org.json.JSONArray(listOf(7L))),
+                PreviewJson.encode(p).put("pathZoneIds", org.json.JSONArray(listOf("x", "y")))))
+            assertEquals(p.copy(pathZoneIds=emptyList()), PreviewJson.decode(org.json.JSONObject(json.toString())))
+    }
+
+    @Test fun outwardPathsRoundTripAndOlderOrDamagedSavesDecodeWithoutThem() {
+        val paths = listOf(listOf(Point(1.0,2.0),Point(3.5,2.0)),listOf(Point(5.0,2.0),Point(8.0,2.0)),listOf(Point(8.0,3.0),Point(5.0,3.0)))
+        val p = Preview(paths,8.5,0,0,fr.luba.poc.map.CoverageMode.SPIRAL,scheduledPaths=paths,outwardPaths=mapOf(2 to setOf(0,1)))
+        assertEquals(p, PreviewJson.decode(org.json.JSONObject(PreviewJson.encode(p).toString())))
+        // Saves written before the field (no spiral from the centre then), or with indices outside the paths: none.
+        for (json in listOf(PreviewJson.encode(p).apply { remove("outwardPaths") },
+                PreviewJson.encode(p).put("outwardPaths", org.json.JSONArray().put(org.json.JSONObject().put("chain", 3).put("before", org.json.JSONArray(listOf(0))))),
+                PreviewJson.encode(p).put("outwardPaths", "x")))
+            assertEquals(p.copy(outwardPaths=emptyMap()), PreviewJson.decode(org.json.JSONObject(json.toString())))
+    }
+
     @Test fun fingerprintChangesWithThePlan() {
         val e = engine()
         val moved = e.edges.mapIndexed { i, edge -> if (i == 3) edge.copy(b = Point(edge.b.x + 0.01, edge.b.y)) else edge }

@@ -24,7 +24,8 @@ internal object LocalMowingOrder {
     /** Bars tried: −1 m and +1 m windows, perpendicular then parallel to the passes, in both directions. */
     val SWEEP_BARS = listOf(-WINDOW_M,WINDOW_M).flatMap { window ->
         listOf(90.0,0.0).flatMap { relative -> listOf(SweepBar(relative,1,window),SweepBar(relative,-1,window)) } }
-    private data class Task(val index: Int,val path: List<Point>,val cell: Int?)
+    /** [oneWay]: entered only at the start of [path] (a Zamboni run taken in the order of its cell). */
+    private data class Task(val index: Int,val path: List<Point>,val cell: Int?,val oneWay: Boolean = false)
     /**
      * Orientation of a checkerboard pass: 0 = the computed one, 1 = the perpendicular. The sweep numbers its cells
      * angle × 100,000 + rank ([CoveragePlanner]); without this number, the dominant direction of the pass segments.
@@ -84,8 +85,15 @@ internal object LocalMowingOrder {
         noGoLoopLead: ((List<Point>) -> NoGoLoopLeads.Leaded?)? = null,
         sweepBar: SweepBar? = null,
         /** Checkerboard: direction mowed first (0 = the computed one, 1 = the perpendicular); null = the nearest. */
-        firstLayer: Int? = null): Preview {
-        val rows=preview.runs.mapIndexed { i,path -> Task(i,path,preview.runCellIds.getOrNull(i) ?: i) }.toMutableList()
+        firstLayer: Int? = null,
+        /** Zamboni: false, the runs of a cell are not chained (order of the Zigzag mode), fallback of [AutomaticPlanner]. */
+        chained: Boolean = true): Preview {
+        // Spiral from the centre ([Preview.outwardRuns]): each chain entered at its centre end only, once its core and the
+        // chains inside it are mowed.
+        val outward=preview.outwardRuns
+        val rows=preview.runs.mapIndexed { i,path -> Task(i,path,preview.runCellIds.getOrNull(i) ?: i,oneWay=i in outward) }.toMutableList()
+        fun ready(task: Task)=outward[task.index]?.let { before -> rows.none { it.index in before } } ?: true
+        fun List<Task>.ready()=if(outward.isEmpty()) this else filter(::ready)
         val outer=mutableListOf<Task>(); val holes=mutableListOf<Task>()
         preview.borders.forEachIndexed { i,path ->
             (if(preview.borderKinds.getOrElse(i) { i>=preview.outerLoops }) holes else outer)
@@ -115,8 +123,9 @@ internal object LocalMowingOrder {
             checkpoint()
             val position=previous?.last() ?: from
             val variants=pool.flatMap { task ->
-                (if(task.cell==null && rotateLoops) LoopEntries.entries(task.path,position) else
-                    listOf(LoopEntries.Entry(task.path.first(),task.path) { task.path },
+                (if(task.cell==null && rotateLoops) LoopEntries.entries(task.path,position)
+                    else if(task.oneWay) listOf(LoopEntries.Entry(task.path.first(),task.path) { task.path })
+                    else listOf(LoopEntries.Entry(task.path.first(),task.path) { task.path },
                         LoopEntries.Entry(task.path.last(),task.path.reversed()) { task.path.reversed() }))
                     .map { task to withLead(task,it) }
             }
@@ -192,6 +201,25 @@ internal object LocalMowingOrder {
         val layers=rows.associate { task -> task.index to if(layered) layerOf(preview,preview.runCellIds.getOrNull(task.index),task.path) else 0 }
         var activeCell: Int?=null
         var activeLayer: Int?=null
+        // Zamboni: the runs of a cell are one front-advancing order cut by breaks. The cell is entered at its first run
+        // forwards or at its last run backwards, then driven run after run in that order ([chainStep] +1 or -1); a run
+        // without a safe link falls back to the nearest one of the cell. Without [chained], the order of the Zigzag mode.
+        val chains=if(preview.mode!=CoverageMode.ZAMBONI || !chained) emptyMap() else rows.groupBy { it.cell }.filterValues { it.size>1 }
+        var chainAt=-1; var chainStep=0
+        fun chainEntries(pool: List<Task>): List<Task> = if(chains.isEmpty()) pool else pool.flatMap { task ->
+            val chain=chains[task.cell] ?: return@flatMap listOf(task)
+            listOfNotNull(task.copy(oneWay=true).takeIf { task.index==chain.first().index },
+                task.copy(path=task.path.reversed(),oneWay=true).takeIf { task.index==chain.last().index })
+        }
+        /** Next run of the active Zamboni cell, in its order, or null (no chain, or no safe link to it). */
+        fun chainNext(): Pair<Task,List<Point>>? {
+            val chain=chains[activeCell] ?: return null
+            val next=chain.getOrNull(chainAt+chainStep)?.takeIf { t -> chainStep!=0 && rows.any { it.index==t.index } } ?: return null
+            return try { choose(listOf(next.copy(path=if(chainStep>0) next.path else next.path.reversed(),oneWay=true))) }
+                catch(e: IllegalArgumentException) { null }
+        }
+        fun chosenEntry(pool: List<Task>): Pair<Task,List<Point>> =
+            if(chains.isEmpty()) choose(pool) else try { choose(chainEntries(pool).ifEmpty { pool }) } catch(e: IllegalArgumentException) { choose(pool) }
         var sign=sweepBar?.sign ?: 1
         /** Projection of a block (whole cell or no-go loop) onto the bar's axis of advance. */
         fun span(tasks: List<Task>,axis: Double): Pair<Double,Double> {
@@ -204,7 +232,7 @@ internal object LocalMowingOrder {
             // Started orientation finished before the other; no-go loops stay open to both. Before the
             // first pass, the requested direction, otherwise all: the start stays as close as possible.
             val current=(activeLayer ?: firstLayer)?.takeIf { l -> rows.any { layers[it.index]==l } }
-            val candidates=if(layered && current!=null) rows.filter { layers[it.index]==current } else rows
+            val candidates=(if(layered && current!=null) rows.filter { layers[it.index]==current } else rows).ready()
             val open=candidates+loops
             val bar=sweepBar ?: return open
             // Orientation of the open blocks: single outside checkerboard; in checkerboard, the started one, then the other.
@@ -224,22 +252,40 @@ internal object LocalMowingOrder {
             val position=units.minOf { it.second.second }
             return units.filter { (_,range) -> range.first<position+bar.windowM || range.second<=position+1e-9 }.flatMap { it.first }
         }
+        // Position in [result] of each run scheduled, for the constraints of [outward] once ordered.
+        val placed=HashMap<Int,Int>()
         while(result.size<limit && (rows.isNotEmpty() || nearbyNoGo && holes.isNotEmpty())) {
-            val active=rows.filter { it.cell==activeCell }
-            val (task,path)=if(activeCell!=null && active.isNotEmpty()) choose(active) else {
+            val active=rows.filter { it.cell==activeCell }.ready()
+            val (task,path)=if(activeCell!=null && active.isNotEmpty()) chainNext() ?: choose(active).also { chainStep=0 } else {
                 val pool=open()
-                val all=rows+if(nearbyNoGo) holes else emptyList()
+                val all=rows.ready()+if(nearbyNoGo) holes else emptyList()
                 // Bar or orientation without a safe link: fall back to all remaining blocks rather than refuse.
-                if(pool.size==all.size) choose(pool) else try { choose(pool) } catch(e: IllegalArgumentException) { choose(all) }
+                val entry=if(pool.size==all.size) chosenEntry(pool) else try { chosenEntry(pool) } catch(e: IllegalArgumentException) { chosenEntry(all) }
+                chains[entry.first.cell]?.let { chain -> chainStep=if(!entry.first.oneWay) 0
+                    else if(entry.first.index==chain.first().index && entry.first.path==chain.first().path) 1 else -1 }
+                entry
             }
             if(task.cell==null) { holes.remove(task);activeCell=null }
             else {
-                rows.remove(task);activeCell=task.cell
+                rows.removeAll { it.index==task.index };activeCell=task.cell
+                placed[task.index]=result.size
                 activeLayer=layers.getValue(task.index)
+                chainAt=chains[task.cell]?.indexOfFirst { it.index==task.index } ?: -1
             }
             result.add(path);previous=path
         }
         if(!bordersFirst) { take(holes);take(outer) }
-        return preview.copy(scheduledPaths=result,localOnly=true)
+        // Zones of the paths kept only if every path is still found whole (split or rotated loop: unknown).
+        // Spiral from the centre: each outward chain with the paths to mow before it, as positions in the order: its
+        // constraints, and every path mowed before it within a core's reach of its centre end (pocket passes whichever
+        // chain their pocket was given to, loops), so that a reordered resume keeps them first.
+        val reach=preview.outwardReachM
+        val outwardPaths=outward.entries.mapNotNull { (chain,before) -> placed[chain]?.let { at ->
+            val start=preview.runs[chain].first()
+            val near=if(reach<=0.0) emptyList() else (0 until at).filter { k ->
+                result[k].zipWithNext().any { (a,b) -> Geometry.distance(start,a,b)<=reach+1e-6 } }
+            at to (before.mapNotNull { placed[it] }+near).toSet() }
+        }.filter { it.second.isNotEmpty() }.toMap()
+        return preview.copy(scheduledPaths=result,localOnly=true,pathZoneIds=preview.zonesOf(result),outwardPaths=outwardPaths)
     }
 }

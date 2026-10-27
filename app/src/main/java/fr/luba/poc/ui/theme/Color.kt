@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 /**
  * Semantic palette of the app, in two instances (light / dark): screens read the colours through
@@ -202,6 +203,13 @@ val DarkLubaColors = LubaColors(
     Transit = Color(0xFF8DB4FF),
     MapGrid = Color(0xFF6B7682),
 )
+
+/**
+ * Mammotion drawings (SVG patterns) on the map: purple, apart from the zone green, the no-go ochre, the danger red and
+ * the No-Stop blue; lighter on the dark palette. Kept out of the [LubaColors] constructor: the static initializer of
+ * the two palettes is at the Dalvik register limit (`tools/check-dex-registers.py`: 218 registers, 222 with one more colour, threshold 224).
+ */
+val LubaColors.Drawing: Color get() = if (Background.luminance() < 0.5f) Color(0xFFCE93D8) else Color(0xFF9C27B0)
 
 val LocalLubaColors = staticCompositionLocalOf { LightLubaColors }
 

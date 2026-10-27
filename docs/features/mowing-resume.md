@@ -51,7 +51,8 @@ prepared), **Discard** is a link, and **Unblock** ("Back-off with blades stopped
 further on** ("Skip an obstacle or a difficult passage") and **Stop details** are in the **⋯** menu. While it is shown, the stopped-mowing bar (same
 percentage) and the layers bar are hidden to keep the map visible; the same goes for the "Robot stuck" panel.
 
-- **Resume** re-prepares the route from the saved preview, with the current map, accesses and obstacles and the
+- **Resume** re-prepares the route from the saved preview, with the current map, accesses and obstacles (the presumed
+  obstacles of the start are kept, except those deleted since: their contacts dismissed) and the
   starting base (0.64.2): on re-docking, the station observed while recharging can be a few centimeters or degrees away
   from the starting one (RTK noise, axis taken during docking) and must not change the resumed plan. A station moved by
   more than 25 cm or turned by more than 15° counts as a new base. The mowing then restarts **30 cm before** the point
@@ -94,7 +95,8 @@ stays a plain "from the interrupted point" progress).
   stopped, around the obstacles discovered during the mowing. Status "Smart resume after recharge: 34 m of transit
   saved, interrupted point mowed later". Applies to the recharge cycle of a running mowing and to **Resume** (or the
   automatic resume) of a mowing whose robot is charging on the base. Not applied with height passes (a lower pass
-  never comes before a higher one).
+  never comes before a higher one). Spiral from the centre: never starts with a block that would drive a chain before
+  a part of its centre or of the chains inside it still to mow.
 - **After a blockage** (wheels turning without the robot moving, for 3 s or 15 s without progress), the place is
   memorised: "Blockage" on the map (difficulties) and an estimated obstacle in front of the robot, bypassed like after
   a bumper contact (straight back-off, tight detour, the rest of the route repaired around it). When the bypass is

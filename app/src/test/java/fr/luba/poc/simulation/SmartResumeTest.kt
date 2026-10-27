@@ -70,6 +70,30 @@ class SmartResumeTest {
         assertFalse(choice.checkpoint.linear)
     }
 
+    @Test fun `spiral from the centre, no order drives a chain before its core still to mow`() {
+        // Same plan, Q an outward chain whose core is A ([Preview.outwardPaths]): starting with Q would leave A to the end.
+        fun path(cell: List<SimEdge>) = listOf(cell.first().a) + cell.map { it.b }
+        val paths = listOf(path(a), path(q), path(e))
+        val preview = Preview(paths, 0.0, 0, 0, scheduledPaths = paths, outwardPaths = mapOf(1 to setOf(0)))
+        val interrupted = checkpoint(2, Point(22.0, 0.4)).copy(preview = preview)
+        val (pathOf, rules) = requireNotNull(SmartResume.outwardRules(edges, preview))
+        assertEquals(listOf(0 to 1), rules)
+        assertEquals(List(a.size) { 0 } + -1 + List(q.size) { 1 } + -1 + List(e.size) { 2 }, pathOf.toList())
+        val choice = SmartResume.afterRecharge(edges, interrupted, approach, 0.0, approach, 180.0, straight)
+        if (choice != null) {
+            assertNotEquals(q.first().a, choice.entry)
+            assertTrue(SmartResume.brokenRules(edges, SmartResume.spans(choice.checkpoint), pathOf, rules).isEmpty())
+        }
+        // Core already mowed: the chain may come first again, as without constraints.
+        val coreDone = checkpoint(a.size + 1, null).copy(preview = preview)
+        assertEquals(SmartResume.afterRecharge(edges, checkpoint(a.size + 1, null), approach, 0.0, approach, 180.0, straight)?.entry,
+            SmartResume.afterRecharge(edges, coreDone, approach, 0.0, approach, 180.0, straight)?.entry)
+        // Constraints that do not match the prepared edges: no reordering.
+        val other = interrupted.copy(preview = preview.copy(scheduledPaths = paths.reversed()))
+        assertNull(SmartResume.outwardRules(edges, other.preview))
+        assertNull(SmartResume.afterRecharge(edges, other, approach, 0.0, approach, 180.0, straight))
+    }
+
     @Test fun `no reordering when the interrupted point is already on the way`() {
         // Interrupted in Q (near the base): going back there first is the shortest.
         val start = a.size + 1

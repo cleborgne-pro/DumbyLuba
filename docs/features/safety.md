@@ -137,6 +137,13 @@ the back-off and the new path of the move. Inside the zones, during mowing and f
 collision lock described above. Whether the robot itself accepts the speed commands under 25 remains to be checked
 on the robot: if it refuses them, the progress guard stops the move ("no progress").
 
+**At a no-go zone** (2026-10-25): the robot also raises 25 when part of its chassis enters a no-go zone (pivot at a
+corner of a border pass 18 cm from it). With the robot centre inside a no-go zone or within 35 cm of it, bumper and
+lift clear, and no contact code within the 2 s grace, a route stops without recording an obstacle or backing off into
+the no-go (`route_exclusion_latch`), progress kept for the resume; the joystick ignores 25 there and the map note
+reads "Against a no-go zone (self-check 25): drive the robot out with the joystick". The move to a point keeps its
+stop on 25 at a no-go zone.
+
 Mowing interrupted and robot stuck: a single panel (0.49.1), with progress, **Discard** and **Clear**; the technical
 detail (self-check, stop cause) is behind **Details**. Once the robot is freed, the **Mowing interrupted** panel offers
 to resume.
@@ -168,6 +175,12 @@ the joystick was refused. Now:
 - **joystick** allowed, blades OFF, to drive the robot under open sky (bumper and lift alerts still stop it; the
   robot itself remains free to refuse the commands);
 - mowing, routes, moves and tests stay refused while it lasts (no usable position);
+- **short loss during a route** (2026-10-25, under a raised play house): when the condition appears while the robot
+  drives a route in manual control (state 20), the route **goes on** for up to **20 s** and **5 m** from where it
+  appeared, with every other check unchanged (fresh positions, deviation, corridor and obstacles, bumper, blades).
+  The robot keeps publishing positions (RTK float) and accepts the commands; one-second losses no longer stop the
+  mowing. Beyond these bounds, the usual stop and pause below. Same rule on the Fold, the Android gateway and the ESP32
+  gateway (`simulation/PositioningGrace.kt`, events `route_positioning_grace` and `route_positioning_grace_spent`);
 - during mowing, the pause waits **5 minutes** instead of 30 s for the signal to come back, robot stopped, blades
   OFF, then resumes through the usual link; beyond that, the stop is kept and the interruption reads "Robot
   positioning lost (weak satellite or RTK signal)";
@@ -206,4 +219,4 @@ When controlling through a [gateway](gateway.md), the gateway stops the robot (b
 phone goes silent for more than 2 s, except during autonomous tracking, where it continues the route on its own with
 its own guards. Among them, a gateway phone that has fallen off the robot is detected from its Bluetooth signal and
 stops the robot before it comes back over the phone with its blades
-([gateway fallen off the robot](gateway.md#autonomous-tracking-android-gateway)).
+([gateway fallen off the robot](gateway.md#autonomous-tracking-android-and-esp32-gateways)).

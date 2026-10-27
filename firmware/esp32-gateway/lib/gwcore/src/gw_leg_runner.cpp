@@ -370,7 +370,24 @@ int LegRunner::followPath(int from, int to, Opt<double> lastArrivalM) {
       const bool protectionUp = !(stateOk && (SelfCheck::nominal(live.selfCheck) || offMapLatch));
       // Protection waiting for the contact code: cleared, or delay elapsed without contact -> stop on the protection.
       if (latch && (!protectionUp || now - latch->first >= CollisionLatch::CONTACT_GRACE_MS)) fail(latch->second);
-      if (protectionUp) {
+      // Positioning loss (weak satellite signal) with the robot still driving: ridden through for a few seconds.
+      const bool riding = protectionUp && !latch && positioningGrace_.rides(now, live.robotState, live.selfCheck, livePoint);
+      if (!protectionUp) positioningGrace_.reset();
+      if (riding && !ridingPositioning_)
+        env_.event(PositioningGrace::EVENT,
+                   "Positionnement perdu (self-check " + (live.selfCheck ? std::to_string(*live.selfCheck) : std::string("null")) +
+                       ") : trajet poursuivi quelques secondes",
+                   {{"selfCheck", live.selfCheck ? FieldValue(*live.selfCheck) : FieldValue(nullptr)},
+                    {"edge", num(follower.index())},
+                    {"maxMs", num(PositioningGrace::MAX_MS)},
+                    {"maxM", PositioningGrace::MAX_M}});
+      if (!riding && ridingPositioning_ && protectionUp)
+        env_.event(std::string(PositioningGrace::EVENT) + "_spent", "Positionnement toujours perdu après le délai de grâce : robot arrêté",
+                   {{"selfCheck", live.selfCheck ? FieldValue(*live.selfCheck) : FieldValue(nullptr)},
+                    {"elapsedMs", num(positioningGrace_.elapsedMs(now))},
+                    {"edge", num(follower.index())}});
+      ridingPositioning_ = riding;
+      if (protectionUp && !riding) {
         const std::string reason = ProtectionPause::reason(live.robotState, live.selfCheck);
         if (!latch) {
           if (!CollisionLatch::mayAnnounceContact(live.robotState, live.selfCheck)) fail(reason);

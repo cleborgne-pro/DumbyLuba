@@ -11,6 +11,8 @@ class KeepaliveLossTest {
         assertTrue(KeepaliveLoss.keepalive(false, "sync(2)"))
         assertTrue(KeepaliveLoss.keepalive(false, "RPT_KEEP"))
         assertTrue(KeepaliveLoss.keepalive(true, null))
+        // 2026-10-25, 15:31:31: report subscription of a route start, unconfirmed in 1.5 s through the Redmi.
+        assertTrue(KeepaliveLoss.keepalive(false, "ROUTE_REPORTS"))
         assertFalse(KeepaliveLoss.keepalive(false, "STOP linear=0 angular=0"))
         assertFalse(KeepaliveLoss.keepalive(false, "ROUTE_DOCK_ZERO"))
     }

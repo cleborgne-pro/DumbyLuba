@@ -70,7 +70,7 @@ arrives with a slight delay: keep the speed moderate.
 ## Guards
 
 - LUBA 2 (`Luba-VS…` or X series `Luba-VP…`) ready (state 11) to start; state 11 or 20 accepted while driving. Fresh state (≤ 2 s),
-  battery > 30 %, blades stopped, no protection (self-check 0 or 10; 25 accepted beyond the mapped zones, see
+  battery > 30 %, blades stopped, no protection (self-check 0 or 10; 25 accepted beyond the mapped zones or at a no-go zone, see
   [safety](safety.md#self-check-25-beyond-the-mapped-zones-version-1110)), no bumper or lift alert, no mission, test, map
   reading, height adjustment or Mammotion task cancellation in progress. A refusal reads "Control refused: …".
 - A joystick input not refreshed for 500 ms, a protection, a bumper or lift alert, a robot error, a stale state, a

@@ -101,6 +101,39 @@ class MapCacheTest {
         assertNotNull(cache.read("robot-A"))
     }
 
+    private val drawing = MapDrawing(13, 11, 5.0, 3.0, 4.0, 4.0, Math.PI / 2, false, "heart.svg",
+        "<svg viewBox=\"0 0 100 100\"><path d=\"M10 10H90V90H10Z\"/></svg>", 100, 100)
+
+    @Test fun `drawings read back from the cache, an older cache has none`() {
+        val cache = MapCache(context)
+        val withDrawings = map.copy(drawings = listOf(drawing, drawing.copy(hash = 14, hidden = true, svg = "heart")))
+        cache.save("robot-A", withDrawings)
+        val read = cache.read("robot-A")!!
+        assertEquals(withDrawings.drawings, read.drawings)
+        assertEquals(map.shapes, read.shapes)
+        // Cache written before the drawings: no field, read without error.
+        val file = cacheFiles().single()
+        file.writeText(JSONObject(file.readText()).apply { remove("drawings") }.toString())
+        assertEquals(emptyList<MapDrawing>(), cache.read("robot-A")!!.drawings)
+        // A map without drawing writes no field.
+        cache.save("robot-A", map)
+        assertFalse(JSONObject(cacheFiles().single().readText()).has("drawings"))
+    }
+
+    @Test fun `unusable drawing left out alone, the map is still read`() {
+        val cache = MapCache(context)
+        cache.save("robot-A", map.copy(drawings = listOf(drawing, drawing.copy(hash = 14), drawing.copy(hash = 15))))
+        val file = cacheFiles().single()
+        val json = JSONObject(file.readText())
+        val drawings = json.getJSONArray("drawings")
+        drawings.getJSONObject(0).put("x", "NaN")
+        drawings.getJSONObject(1).put("svg", "x".repeat(SvgOutline.MAX_SVG_CHARS + 1))
+        file.writeText(json.toString())
+        val read = cache.read("robot-A")!!
+        assertEquals(listOf(15L), read.drawings.map { it.hash })
+        assertEquals(map.shapes, read.shapes)
+    }
+
     @Test fun `file larger than 16 MB ignored`() {
         val cache = MapCache(context)
         cache.save("robot-A", map)

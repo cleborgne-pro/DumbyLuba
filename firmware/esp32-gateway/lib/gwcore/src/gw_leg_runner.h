@@ -13,6 +13,7 @@
 #include "gw_commands.h"
 #include "gw_leg_env.h"
 #include "gw_leg_frames.h"
+#include "gw_nav_safety.h"
 
 namespace gw {
 namespace leg {
@@ -62,6 +63,8 @@ class LegRunner {
   std::unique_ptr<PivotSlide> slide_;
   std::shared_ptr<SlideField> slideField_;
   std::unique_ptr<PivotSlideMeter> slideMeter_;
+  PositioningGrace positioningGrace_;
+  bool ridingPositioning_ = false;
   std::deque<Point> trail_;
   int index_ = 0;
   std::mutex movesMtx_;

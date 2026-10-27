@@ -7,8 +7,12 @@ package fr.luba.poc.gateway
  * frame rather than stopping the mission. Any other write (setpoint, STOP, blades) keeps the strict timeout.
  */
 object KeepaliveLoss {
-    /** Labels of the keepalive writes issued by the periodic monitoring of `RobotBle`. */
-    val LABELS = setOf("sync(2)", "RPT_KEEP", "RPT_START")
+    /**
+     * Labels of the keepalive writes issued by the periodic monitoring of `RobotBle`, and the report subscription of a
+     * route start (2026-10-25, 15:31:31: `ROUTE_REPORTS` through the Redmi unconfirmed in 1.5 s, border task stopped
+     * 2 s after its start and link closed; the same task restarted 8 s later without trouble).
+     */
+    val LABELS = setOf("sync(2)", "RPT_KEEP", "RPT_START", "ROUTE_REPORTS")
     /** Time allowed for the confirmation after the reconnection (frame resent by the pilot on resume). */
     const val AFTER_RESUME_MS = 3000L
     /** Strict operation timeout: bound on the delay of a setpoint or of the STOP when this phone drives the motion. */

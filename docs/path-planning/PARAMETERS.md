@@ -10,6 +10,10 @@ Simple mode offers Reference, Optimized (phase 2), Advanced (phase 3) and BCD in
 
 A local obstacle is a disc of physical radius **plus its user margin**, without the robot radius. The adapter adds the envelope only for the historical generator. The validator directly removes the reserved physical disc. No-go outlines and the chassis are handled separately from the cutting tool.
 
+`orientationMemory` (zone id → `ZoneOrientation`: directions 0..179, row phase index, outline key, date) gives the
+directions last mowed per zone for `EACH_SESSION`; the snapshot sorts it by zone id so that the hash stays stable, and an
+entry whose outline key no longer matches the zone is ignored.
+
 Passages without a known width never enlarge the physical domain. Their axis remains available to the existing transit planner, but every link must also pass the independent validator. A single-point passage does not define a measured corridor. Manual accesses and docking are not implicitly turned into allowed areas by the new engine.
 
 ## Configuration
@@ -34,8 +38,11 @@ Passages without a known width never enlarge the physical domain. Their axis rem
 | `localSearchBudget` | 24 | Maximum number of permutations explored, deterministic |
 | `indexedCoverage` | true | Evaluator with STRtree; false keeps the sequential oracle for ablations |
 | `optimizeZoneOrder` | false | Allows permuting blocks of whole zones; the user order remains the default |
+| `orientation` | `AUTOMATIC` | Direction of the passes of Zigzag, Checkerboard and Zamboni: `AUTOMATIC` (cheapest per zone), `EACH_SESSION` (away from `PlanningRequest.orientationMemory`) or `MANUAL`; ignored by Optimized, Spiral and the surveys |
+| `manualAngleDeg` | 0 | Angle of `MANUAL`, degrees 0..179 (refused outside), counter-clockwise from the map's x axis; folded modulo 90 in Checkerboard |
+| `spiralDirection` | `FROM_EDGE` | Spiral only: `FROM_EDGE` (chains as built, inwards) or `FROM_CENTRE` (every chain driven outwards after its core, a zone without a safe order from the centre planned from the edge) |
 
-The domain beyond an admissible slope is forbidden. The cutting target is unchanged: the unreachable part appears in the residual. Missing terrain data is reported. The motion model is **forward, stop, short pivot**. A non-zero minimum turning radius is refused; no arc or coverage reversing is invented.
+The domain beyond an admissible slope is forbidden. The cutting target is unchanged: the unreachable part appears in the residual. Missing terrain data is reported. The motion model is **forward, stop, short pivot**, plus the rolling U-turns of the Turn Optimizer (arcs of `TurnOptimizer.FOLLOW_RADIUS_M` = 0.35 m, 4° per vertex, checked like the passes) between passes at least 0.7 m apart, used by *Lawn friendly* (`turnStyle = LAWN`) and Zamboni; no coverage reversing is invented.
 
 The tool is a disc polygonized with 64 sides. The measured area uses an inner approximation; the exclusion check uses an outer approximation. The maximum radial error of the inner disc is `r × (1 − cos(π/64))`, about 0.24 mm at `r=0.20 m`. This choice does not represent a measurement of the real tool. Areas are in m², positions in double precision; coverage equivalence threshold between candidates: `10⁻⁶ m²`.
 

@@ -65,6 +65,15 @@ class MapSyncBenchTest {
         return bench.ble.mapSync.state.value
     }
 
+    /** LUBA 2 footprint with its centre of rotation at [p], heading [headingDegrees]. */
+    private fun chassis(p: Point, headingDegrees: Double): org.locationtech.jts.geom.Polygon {
+        val robot = fr.luba.poc.obstacles.RobotEnvelope.LUBA2
+        val c = Math.cos(Math.toRadians(headingDegrees)); val s = Math.sin(Math.toRadians(headingDegrees))
+        val corners = listOf(robot.frontM to robot.halfWidthM, robot.frontM to -robot.halfWidthM, -robot.rearM to -robot.halfWidthM, -robot.rearM to robot.halfWidthM)
+            .map { (f, l) -> Coordinate(p.x + f * c - l * s, p.y + f * s + l * c) }
+        return factory.createPolygon((corners + corners.first()).toTypedArray())
+    }
+
     /** Commands received by the robot between the start and the end of each recording. */
     private fun recordingLabels(): List<String> {
         val labels = bench.sim.trace.map { it.second }
@@ -76,8 +85,16 @@ class MapSyncBenchTest {
     @Test fun `a no-go zone drawn on the phone is driven around, recorded by the robot and leaves the phone`() {
         val tree = AddedNoGo(1, 0L, "Tree", rect(7.0, 3.0, 1.0, 1.0), NoGoOrigin.SHAPE)
         ready(tree)
+        // Actual chassis of the simulated robot (not the pose the app believes): it never touches the tree. With the
+        // heading confirmed again over the short link before the outline, it entered the zone on 7 draws of 60.
+        val treeArea = factory.createPolygon((tree.points + tree.points.first()).map { Coordinate(it.x, it.y) }.toTypedArray())
+        var closest = Double.POSITIVE_INFINITY
+        bench.sim.onTick = { sim ->
+            closest = minOf(closest, chassis(sim.position, sim.heading).distance(treeArea))
+        }
         val run = sync()
         assertEquals("${run.message}\n${bench.dump()}", SyncPhase.DONE, run.phase)
+        assertTrue("Chassis %.3f m from the tree".format(closest), closest > 0.0)
         assertEquals(listOf(ItemStatus.DONE), run.items.map { it.status })
         assertEquals(listOf("draw-start 1", "draw-end 1"), bench.sim.mapCommands)
         assertEquals(0, bench.sim.drawsBrokenByManual)

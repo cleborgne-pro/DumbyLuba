@@ -44,7 +44,7 @@ disappears once everything is done, or with **Hide this list**.
 | Setup | What you need | When |
 |---|---|---|
 | **Two Android phones** | your phone (pilot) + an old Android phone lying on the robot (gateway) | everyday use, the whole garden |
-| **Phone + ESP32** | your phone (pilot) + an ESP32 board on the robot | same, without autonomous tracking ([firmware](../../firmware/esp32-gateway/README.md)) |
+| **Phone + ESP32** | your phone (pilot) + an ESP32 board on the robot | same, autonomous tracking since firmware 0.3.0, not tried on the robot yet ([firmware](../../firmware/esp32-gateway/README.md)) |
 | **Direct Bluetooth** | your phone only | first test or setup, a few meters from the robot |
 
 The robot accepts **one** Bluetooth link at a time: close the Mammotion app first.
@@ -81,7 +81,7 @@ point(s) to watch" or "N point(s) to fix, M to watch". Nothing is sent to the ro
   Bluetooth search, without opening the robot link (`GatewayClient.probe`). A robot already linked through the gateway
   is checked from the live link instead: a second session would be refused by the gateway.
 - **Placement**: −50 dBm or better between the gateway and the robot is "well placed" (the level the
-  [fall detection](gateway.md#autonomous-tracking-android-gateway) learns from); down to −70 dBm "lay the phone flat
+  [fall detection](gateway.md#autonomous-tracking-android-and-esp32-gateways) learns from); down to −70 dBm "lay the phone flat
   on top of the robot"; below, the phone is not on the robot or too far.
 - **Wi-Fi at the base**: judged only while the robot charges; −70 dBm or less is orange, as the link may drop during
   docking (incident of 16/10/2026 at −73 dBm): move the access point closer or add a repeater.

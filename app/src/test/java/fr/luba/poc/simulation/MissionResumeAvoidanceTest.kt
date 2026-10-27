@@ -79,6 +79,21 @@ class MissionResumeAvoidanceTest {
             withEarlier)
     }
 
+    @Test fun presumedObstacleDeletedSinceTheStartIsLeftOutOfTheResume() {
+        // Presumed obstacle saved with the start context, then deleted by the user (its contact dismissed).
+        val corner = Point(10.5, 10.5)
+        val atStart = DifficultyUi.derive(DifficultyUi(), listOf(contact("c0", startedAt - 60_000, corner)), emptyList(), startedAt)
+        val saved = checkpoint(MissionAvoidance.of(atStart))
+        assertEquals(1, MissionAvoidance.forResume(saved, atStart, emptyList()).presumed.size)
+        val deleted = DifficultyUi.derive(DifficultyUi(), listOf(contact("c0", startedAt - 60_000, corner).copy(dismissed = true)),
+            emptyList(), startedAt + 660_000)
+        assertTrue(MissionAvoidance.forResume(saved, deleted, emptyList()).presumed.isEmpty())
+        // Not dismissed: kept from one resume to the next even once it no longer shows (4 h single contact).
+        val expired = DifficultyUi.derive(DifficultyUi(), listOf(contact("c0", startedAt - 60_000, corner)), emptyList(), startedAt + 5 * 3_600_000L)
+        assertTrue(expired.presumed.isEmpty())
+        assertEquals(1, MissionAvoidance.forResume(saved, expired, emptyList()).presumed.size)
+    }
+
     @Test fun disabledPresumedObstaclesAreNotSaved() {
         val off = afterContact.copy(avoidPresumed = false, avoidHot = false)
         assertEquals(MissionAvoidance(emptyList(), emptyList()), MissionAvoidance.of(off))

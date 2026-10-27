@@ -51,7 +51,9 @@ interface GatewayPilot : PilotSink {
 }
 
  data class GatewayRobotState(val address: String? = null, val name: String? = null, val connecting: Boolean = false,
-    val ready: Boolean = false, val mtu: Int = 23, val pilot: Boolean = false) {
+    val ready: Boolean = false, val mtu: Int = 23, val pilot: Boolean = false,
+    /** Robot kept but no automatic attempt: gateway unused for [GatewayRobot.IDLE_RETRY_MS], a pilot is awaited. */
+    val retryPaused: Boolean = false) {
     val label: String get() = when {
         address == null -> tr("No robot yet: choose it from the pilot phone (Service → Bluetooth connection)",
             "Pas encore de robot : le choisir depuis le téléphone de pilotage (Service → Connexion Bluetooth)")
@@ -60,6 +62,8 @@ interface GatewayPilot : PilotSink {
         ready -> tr("${name ?: address} connected over Bluetooth · waiting for the pilot phone",
             "${name ?: address} connecté en Bluetooth · en attente du téléphone de pilotage")
         connecting -> tr("Bluetooth connection to ${name ?: address}…", "Connexion Bluetooth à ${name ?: address}…")
+        retryPaused -> tr("${name ?: address} not connected: gateway unused for 10 min, waiting for the pilot phone (the robot stays free for the device using it)",
+            "${name ?: address} non connecté : passerelle inutilisée depuis 10 min, en attente du téléphone de pilotage (le robot reste libre pour l'appareil qui s'en sert)")
         else -> tr("${name ?: address} off or out of range: automatic retry", "${name ?: address} éteint ou hors de portée : nouvel essai automatique")
     }
 }
@@ -67,8 +71,11 @@ interface GatewayPilot : PilotSink {
 /**
  * Robot Bluetooth link held by the gateway, independent of the control sessions.
  *
- * - Connection requested on the gateway (or by the pilot) then maintained: automatic reconnection while the robot is
- *   kept, periodic sync when no pilot is plugged in.
+ * - Connection requested on the gateway (or by the pilot) then maintained, periodic sync when no pilot is plugged in.
+ *   Automatic reconnection to the kept robot while the gateway is in use (pilot plugged in, autonomous tracking) and for
+ *   [IDLE_RETRY_MS] after; beyond, the next pilot reconnects it. A LUBA accepts a single Bluetooth central: on
+ *   2026-10-25 the robot was restarted under the ESP32 gateway in use, and this idle Redmi gateway, still retrying
+ *   every 10 s, took it back first; neither the ESP32 nor the Fold over direct Bluetooth could see it any more.
  * - The gateway alone numbers the BluFi frames (sequence byte rewritten): its own frames (keepalive, safety stop) and
  *   those of successive pilots form a single sequence.
  * - One GATT operation at a time; the answer goes back to its sender.
@@ -95,6 +102,8 @@ class GatewayRobot(
     /** Acceleration of the phone mounted on the robot (fresh reading), attached to signal surveys for slope and terrain. */
     private val tilt: () -> fr.luba.poc.map.PhoneGravity? = { null },
     private val orphanLimitMs: Long = GatewayAutonomy.ORPHAN_LIMIT_MS,
+    /** Automatic retries to the kept robot stop once the gateway has been unused (no pilot, no tracking) this long. */
+    private val idleRetryMs: Long = IDLE_RETRY_MS,
 ) {
     /** Last safety stop written by the gateway, handed to the next pilot. */
     private class StopRecord(val at: Long, val outcome: String)
@@ -115,6 +124,9 @@ class GatewayRobot(
     private var ready = false
     private var mtu = 23
     private var connectingSince = 0L
+    /** Last moment the gateway was in use (start, pilot plugged in or unplugged, tracking running), [System.currentTimeMillis]. */
+    private var usedAt = System.currentTimeMillis()
+    private var retryPaused = false
     private var blufi = Blufi()
     private var safety = GatewaySafety()
     private val commands = Commands()
@@ -146,7 +158,7 @@ class GatewayRobot(
     }
 
     val state: GatewayRobotState get() = synchronized(lock) { snapshot() }
-    private fun snapshot() = GatewayRobotState(address, name, link != null && !ready, ready, mtu, pilot != null)
+    private fun snapshot() = GatewayRobotState(address, name, link != null && !ready, ready, mtu, pilot != null, retryPaused && link == null && address != null)
     private fun publish() { val s = snapshot(); onState(s) }
 
     /** Keeps [address] and connects to it; the link is then maintained. */
@@ -156,6 +168,7 @@ class GatewayRobot(
             val changed = this.address != address || (name != null && name != this.name)
             this.address = address; if (name != null) this.name = name
             if (changed) runCatching { onRemember(address, this.name) }
+            usedAt = System.currentTimeMillis(); retryPaused = false
             if (link == null) open()
             publish()
         }
@@ -207,6 +220,7 @@ class GatewayRobot(
         if (pilot != null) return "Passerelle occupée par un autre pilote"
         if (address != null && address != requested && link != null) return "La passerelle tient déjà un autre robot ($name)"
         pilot = newPilot; pilotSynced = false
+        usedAt = System.currentTimeMillis(); retryPaused = false
         if (address != requested || link == null || (requestedName != null && requestedName != name)) connect(requested, requestedName)
         // Safety stop written while the pilot was away: tell it (it reported it as "not guaranteed").
         lastStop?.let { stop ->
@@ -241,6 +255,7 @@ class GatewayRobot(
         val gen = synchronized(lock) {
             if (pilot !== old) return null
             pilot = null
+            usedAt = System.currentTimeMillis() // automatic retries for [idleRetryMs] from the pilot's departure
             queue.removeAll { it.owner === old }
             publish()
             if (!emergency) return null
@@ -516,12 +531,26 @@ class GatewayRobot(
         urgentStop(verdict.text, null)
     }
 
-    private fun tick() = synchronized(lock) {
-        if (closed) return@synchronized
+    private fun tick() {
+        // Outside the robot lock: the autonomy takes its own lock and calls the robot under it.
+        val tracking = autonomy.running
+        synchronized(lock) { tickLocked(tracking) }
+    }
+
+    private fun tickLocked(tracking: Boolean) {
+        if (closed) return
         val now = System.currentTimeMillis()
-        if (inFlight != null && now - inFlightSince > ackTimeoutMs * 2) { drop("opération GATT sans réponse", now); return@synchronized }
-        if (link != null && !ready && now - connectingSince > connectTimeoutMs) { drop("connexion sans réponse", now); return@synchronized }
-        if (link == null && address != null && now - connectingSince > retryMs) open()
+        if (inFlight != null && now - inFlightSince > ackTimeoutMs * 2) { drop("opération GATT sans réponse", now); return }
+        if (link != null && !ready && now - connectingSince > connectTimeoutMs) { drop("connexion sans réponse", now); return }
+        if (pilot != null || tracking) { usedAt = now; retryPaused = false }
+        val retryAllowed = now - usedAt < idleRetryMs
+        if (link == null && address != null && !retryAllowed && !retryPaused) {
+            retryPaused = true
+            report(tr("Automatic reconnection paused: gateway unused for ${idleRetryMs / 60_000} min (robot left to the device using it; resumes when the pilot phone connects)",
+                "Reconnexion automatique suspendue : passerelle inutilisée depuis ${idleRetryMs / 60_000} min (robot laissé à l'appareil qui s'en sert ; reprise à la connexion du téléphone de pilotage)"))
+            publish()
+        }
+        if (link == null && address != null && retryAllowed && now - connectingSince > retryMs) open()
         // Route tracking: own Bluetooth signal read every second, to notice a gateway fallen off the robot.
         val mono = monotonicMs()
         if (ready && link != null && observer.active && mono - ownRssiAt >= fr.luba.poc.autonomy.GatewayDetachment.READ_PERIOD_MS &&
@@ -610,6 +639,8 @@ class GatewayRobot(
             queued > 4 -> tr("BLE interrupted: write queue saturated ($queued frames pending)", "BLE interrompu : file d'écriture saturée ($queued trames en attente)")
             else -> null
         }
+        /** Automatic retries to the kept robot go on this long after the gateway was last in use (same rule on the ESP32). */
+        const val IDLE_RETRY_MS = 10 * 60 * 1000L
         /** Bluetooth code of a connection timeout (GATT_CONN_TIMEOUT), sent to the pilot when the gateway gives up. */
         private const val GATT_TIMEOUT = 8
         /** Safety stop handed to a pilot returning within this delay; beyond it, the information is stale. */

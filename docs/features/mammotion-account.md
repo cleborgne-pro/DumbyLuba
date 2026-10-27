@@ -8,7 +8,7 @@ always go through Bluetooth (or the [gateway](gateway.md)).
 |---|---|
 | **Access** | Me → profile card (top) → **Mammotion account**; Home → **Read the map via the Mammotion account** (shown when no map and no account) |
 | **Status** | Implemented; real cloud map (43 elements) read and displayed on the test phone. Native return and firmware update covered by JVM tests with a simulated cloud; not verified on the robot (see [Limitations](#limitations)) |
-| **Code** | `auth/` (`AccountScreen.kt`, `AccountRobotPanel.kt`, `AccountRobot.kt`, `MammotionCloud.kt`, `CloudViewModel.kt`, `CloudReadOnly.kt`, `CloudRobotActions.kt`, `FirmwareUpdateUi.kt`, `AccountStore.kt`, `SessionStore.kt`), `map/CloudStationDialog.kt` |
+| **Code** | `auth/` (`AccountScreen.kt`, `AccountRobotPanel.kt`, `AccountRobot.kt`, `MammotionCloud.kt`, `CloudViewModel.kt`, `CloudRobotFilter.kt`, `CloudReadOnly.kt`, `CloudRobotActions.kt`, `FirmwareUpdateUi.kt`, `AccountStore.kt`, `SessionStore.kt`), `map/CloudStationDialog.kt` |
 | **Tests** | `MammotionCloudTest`, `CloudViewModelTest`, `CloudRobotActionsTest`, `AccountRobotTest`, `AccountEncodingTest`, `SecureStoresTest`, `OAuthTest`, `AuthorizedRequestTest` (local fake server) |
 | **Reference** | [Account inventory: what can be read and done](../MAMMOTION_ACCOUNT.md) |
 
@@ -33,7 +33,10 @@ reading" or "Not signed in · sign in"; tapping it opens the **Mammotion account
    saved credentials and replays the request (camera, robot list, MQTT). Without saved credentials, after an explicit
    **Sign out**, or if the saved credentials are refused ("Mammotion: session expired and saved account refused, sign
    in again"), it asks to sign in again; a network failure during this sign-in keeps the session for a later attempt.
-4. **Account robots** lists the account's `Luba…` devices (other products are ignored). The followed robot is the
+4. **Account robots** lists the account's mowers, recognized by their name (`Luba…`, `Yuka…`…) or their product key
+   (other products are ignored and logged anonymously, see [supported models](supported-models.md#models)); devices
+   none of which is recognized give "N devices in the account, none recognized as a Mammotion mower…", an empty
+   account "No device in the account". The followed robot is the
    last one read, otherwise the first of the list. Tapping a robot (**Read the map**) reads its map through the cloud
    (an element that stops answering is asked again then left out, the message then gives how many were not read;
    4 min at most overall); **Open the map** shows the

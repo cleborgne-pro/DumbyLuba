@@ -17,6 +17,8 @@ mowing; before 0.61.0, only mowing with blades running), the app saves in its pr
 - the **height passes** (0.45.0): `Preview.cutHeights` and the height of each cutting path (`pathHeights`),
   carried into the prepared edges (`SimEdge.heightMm`) and into the fingerprint; an older checkpoint is read back
   as a single pass and keeps its fingerprint;
+- the **zone of each cutting path** (`Preview.pathZoneIds`, Unreleased), used to record the direction of the zones
+  mowed at 50 % or more; an older checkpoint without it reads back with the zones found from the geometry;
 - the **presumed obstacles and difficult areas** counted by the plan preparation (0.40.2);
 - the **start base** (`MissionCheckpoint.base`, 0.64.2): station, docking axis and approach distance used
   for the plan, saved only if they exactly match the prepared route. `RoutePlanning.resume`
@@ -109,7 +111,11 @@ deferred retry (`activeBlocked`). Without them the progress is linear, as before
 - **After a recharge** (`afterRecharge`): candidates = rotations of the remainder at a block start (cutting edge after
   a prepared transit) or at the start of a deferred portion; cost = transits kept inside the portions + links start →
   … → approach point computed by the navigation, straight-line lower bound to prune (40 evaluations at most). Chosen
-  if it saves at least `MIN_GAIN_M` (2 m); plans with several heights are not reordered. Used by `RobotBle.startRoute`
+  if it saves at least `MIN_GAIN_M` (2 m); plans with several heights are not reordered. Spiral from the centre: the
+  order constraints saved with the plan (`Preview.outwardPaths`, placed on the edges by `outwardRules`) drop every
+  candidate that drives a chain before a part of its core, of its inner chains or of a path planned before it near its
+  centre end still to mow, unless the current order already does (`brokenRules`); constraints that do not match the
+  edges: no reordering. Used by `RobotBle.startRoute`
   when the robot starts docked (manual or automatic resume, event `route_smart_resume`) and by the in-mission recharge
   cycle after the base exit (`replanMission`: same building, then `ObstacleBypass.repair` around the obstacles
   discovered during the mission; failure ⇒ usual resume at the interrupted point, event `route_replan_failed`).

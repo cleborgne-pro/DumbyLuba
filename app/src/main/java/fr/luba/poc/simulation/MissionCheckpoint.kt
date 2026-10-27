@@ -125,8 +125,18 @@ data class MissionAvoidance(val presumed: List<LocalObstacle>, val avoidAreas: L
          * sûre", stripe crossing its reserve) or gave another plan: the resume was impossible.
          */
         fun forResume(checkpoint: MissionCheckpoint, difficulties: DifficultyUi, registered: List<LocalObstacle>): MissionAvoidance =
-            checkpoint.avoidance ?: of(DifficultyUi.derive(difficulties, difficulties.events.filter { it.atMs <= checkpoint.startedAt },
-                registered, checkpoint.startedAt))
+            (checkpoint.avoidance ?: of(DifficultyUi.derive(difficulties, difficulties.events.filter { it.atMs <= checkpoint.startedAt },
+                registered, checkpoint.startedAt))).withoutDismissed(difficulties.events)
+    }
+
+    /**
+     * Presumed obstacles of the start whose contacts the user has dismissed since (obstacle deleted from its sheet,
+     * false contact) left out: the resume kept bypassing obstacles the user had deleted (reported on 2026-10-25). A presumed obstacle
+     * is named after its first contact ([fr.luba.poc.difficulty.PresumedObstacles.id]); an unknown contact is kept.
+     */
+    fun withoutDismissed(events: List<fr.luba.poc.difficulty.DifficultyEvent>): MissionAvoidance {
+        val dismissed = events.filter { it.dismissed }.map { fr.luba.poc.difficulty.PresumedObstacles.ID_PREFIX + it.id }.toSet()
+        return if (presumed.none { it.id in dismissed }) this else copy(presumed = presumed.filterNot { it.id in dismissed })
     }
 }
 
@@ -328,6 +338,10 @@ object PreviewJson {
         .put("runCellIds", JSONArray(p.runCellIds)).put("borderAnchors", points(p.borderAnchors)).put("localOnly", p.localOnly)
         .put("plannerLabel", p.plannerLabel).put("links", p.links?.let(::paths) ?: JSONObject.NULL)
         .put("pathHeights", JSONArray(p.pathHeights)).put("cutHeights", JSONArray(p.cutHeights))
+        .put("zonePhases", JSONArray().also { a -> p.zonePhases.forEach { a.put(it) } }).put("zoneModes", JSONArray(p.zoneModes.map { it.name }))
+        .put("pathZoneIds", JSONArray(p.pathZoneIds)).put("zoneReorderedCells", JSONArray(p.zoneReorderedCells))
+        .put("outwardPaths", JSONArray().also { a -> p.outwardPaths.toSortedMap().forEach { (chain, before) ->
+            a.put(JSONObject().put("chain", chain).put("before", JSONArray(before.sorted()))) } })
 
     fun decode(j: JSONObject): Preview {
         fun longs(key: String) = j.getJSONArray(key).let { a -> (0 until a.length()).map { a.getLong(it) } }
@@ -335,12 +349,31 @@ object PreviewJson {
         fun nullablePaths(key: String) = if (j.isNull(key)) null else readPaths(j.getJSONArray(key))
         // Height passes missing from an older save: a single pass.
         fun optionalHeights(key: String) = j.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getInt(it).also { h -> require(h in fr.luba.poc.protocol.CutHeightRange.ANY) } } }.orEmpty()
+        // Row phases and applied modes missing from an older save: unknown (centred rows, requested mode).
+        val zonePhases = j.optJSONArray("zonePhases")?.let { a -> (0 until a.length()).map { a.getDouble(it).also { v -> require(v.isFinite() && v in 0.0..1.0) } } }.orEmpty()
+        val zoneModes = j.optJSONArray("zoneModes")?.let { a -> (0 until a.length()).map { CoverageMode.valueOf(a.getString(it)) } }.orEmpty()
         return Preview(readPaths(j.getJSONArray("runs")), j.getDouble("meters"), j.getInt("angle"), j.getInt("connectors"),
             CoverageMode.valueOf(j.getString("mode")), readPaths(j.getJSONArray("borders")), j.getInt("outerLoops"), j.getInt("noGoLoops"),
             longs("zoneIds"), ints("zoneAngles"), readPaths(j.getJSONArray("passes")), j.getInt("skippedBorderLoops"),
             j.getBoolean("startWithBorders"), j.getJSONArray("borderKinds").let { a -> (0 until a.length()).map { a.getBoolean(it) } },
             nullablePaths("scheduledPaths"), ints("runCellIds"), readPoints(j.getJSONArray("borderAnchors")), j.getBoolean("localOnly"),
-            j.getString("plannerLabel"), nullablePaths("links"), optionalHeights("pathHeights"), optionalHeights("cutHeights"))
+            j.getString("plannerLabel"), nullablePaths("links"), optionalHeights("pathHeights"), optionalHeights("cutHeights"),
+            zonePhases, zoneModes).let { p ->
+            // Zone of each cutting path, missing from an older save or not matching the paths: unknown (found from the
+            // geometry), the resume itself does not depend on it.
+            val pathZoneIds = runCatching { j.optJSONArray("pathZoneIds")?.let { a -> (0 until a.length()).map { a.getLong(it) } } }.getOrNull().orEmpty()
+            // Zamboni cells reordered per zone (aligned with the applied modes), missing from an older save: unknown (no warning).
+            val reordered = runCatching { j.optJSONArray("zoneReorderedCells")?.let { a -> (0 until a.length()).map { a.getInt(it) } } }.getOrNull().orEmpty()
+            // Order constraints of a spiral from the centre, missing from an older save (none then: no such plan) or not
+            // matching the paths: none.
+            val count = p.cuttingPaths.size
+            val outward = runCatching { j.optJSONArray("outwardPaths")?.let { a -> (0 until a.length()).associate { i ->
+                val o = a.getJSONObject(i); val before = o.getJSONArray("before")
+                o.getInt("chain") to (0 until before.length()).map { before.getInt(it) }.toSet() } } }.getOrNull().orEmpty()
+            p.copy(pathZoneIds = pathZoneIds.takeIf { it.size == p.cuttingPaths.size }.orEmpty(),
+                zoneReorderedCells = reordered.takeIf { it.size == p.zoneModes.size }.orEmpty(),
+                outwardPaths = outward.takeIf { o -> o.all { (chain, before) -> chain in 0 until count && before.all { it in 0 until count } } }.orEmpty())
+        }
     }
 }
 

@@ -13,8 +13,9 @@ import kotlin.math.atan2
 /** Real map kept: each configuration runs on each of the seven zones. */
 @RunWith(Parameterized::class)
 class ReferenceMapPlannerTest(private val zoneName: String, private val zone: MapShape, private val config: Settings) {
+    /** [angle]: single pass direction (manual orientation), [phase]: row phase (shifted rows of "Change every session"). */
     data class Settings(val spacing: Double, val mode: CoverageMode, val margin: Double = 0.6,
-        val outer: Int = 1, val noGo: Int = 1, val borders: Boolean = true)
+        val outer: Int = 1, val noGo: Int = 1, val borders: Boolean = true, val angle: Int? = null, val phase: Double? = null)
 
     @Test fun coverageAndBorderManeuversStayInsideTheRecordedFreeSurface() {
         val holes = shapes.filter { it.kind == ShapeKind.NO_GO }.map { it.points }
@@ -31,8 +32,14 @@ class ReferenceMapPlannerTest(private val zoneName: String, private val zone: Ma
             val exclusion = polygon(hole)
             zoneArea.covers(exclusion) && !zoneArea.covers(exclusion.buffer(RecordedBoundary.noGoLoopOffsetM(robot),16).boundary)
         }
-        val preview = Geometry.plan(zone.points,holes,config.spacing,config.margin,config.mode,
+        val preview = if (config.angle == null && config.phase == null) Geometry.plan(zone.points,holes,config.spacing,config.margin,config.mode,
             config.borders,config.outer,config.noGo,robot=robot,recordedBoundary=true,basePoint=base)
+            else CoveragePlanner.plan(zone.points,holes,config.spacing,config.margin,config.mode,config.borders,config.outer,config.noGo,
+                robot=robot,recordedBoundary=true,basePoint=base,
+                sweepOptions=SweepOptions(listOfNotNull(config.angle?.let { foldAngle(it,config.mode.orientationPeriod) }).ifEmpty {
+                    (0 until config.mode.orientationPeriod step 15).toList() },config.phase ?: 0.5))
+        config.angle?.let { assertEquals("Requested direction kept",foldAngle(it,config.mode.orientationPeriod),preview.angle) }
+        if (config.mode != CoverageMode.TOUR) assertEquals(listOf(config.phase ?: 0.5),preview.zonePhases)
         if (config.mode.isSurvey) assertEquals(0,preview.noGoLoops)
         if (tour) {
             assertTrue(preview.runs.isEmpty())
@@ -115,10 +122,14 @@ class ReferenceMapPlannerTest(private val zoneName: String, private val zone: Ma
             val tourSettings = listOf(0.05,0.25,0.35).flatMap { spacing ->
                 listOf(0.3,0.6,1.0).map { margin -> Settings(spacing,CoverageMode.TOUR,margin,outer=4,noGo=4,borders=false) }
             }
+            // Direction of the passes: manual angles and shifted rows, on the modes that use them.
+            val orientationSettings = CoverageMode.entries.filter { it.usesOrientation }.flatMap { mode ->
+                listOf(0,37,90,143).map { Settings(0.25,mode,angle=it) } + listOf(0.2,0.8).map { Settings(0.25,mode,phase=it) }
+            }
             val gridSettings = listOf(1.0,3.0,8.0).flatMap { spacing ->
                 listOf(0.3,0.6,1.0).map { margin -> Settings(spacing,CoverageMode.SURVEY_GRID,margin,outer=4,noGo=4,borders=false) }
             }
-            return zones.flatMap { zone -> (settings+tourSettings+gridSettings).map { arrayOf(zone.name,zone,it) } }
+            return zones.flatMap { zone -> (settings+orientationSettings+tourSettings+gridSettings).map { arrayOf(zone.name,zone,it) } }
         }
     }
 }

@@ -374,7 +374,7 @@ before it comes back over the phone with its blades. The pilot raises a critical
 with the position where the phone most likely lies and shows a **Gateway** marker on the map. A Bluetooth loss
 while the signal was already falling gives the same alert marked "probably". The usual level is only learned while
 the robot drives 3 m with a steady signal of −50 dBm or better, so a phone left on the ground on purpose is never
-taken for a fall. See [gateway](docs/features/gateway.md#autonomous-tracking-android-gateway) and
+taken for a fall. See [gateway](docs/features/gateway.md#autonomous-tracking-android-and-esp32-gateways) and
 [technical detail](docs/AUTONOMOUS_GATEWAY.md#gateway-fallen-off-the-robot-130).
 
 Version 1.4.0 (169): **zones recorded by driving, beyond the Mammotion map**. Manual control → **Record by driving** (also Map
@@ -862,3 +862,371 @@ keeps this value as the robot's resting value: the command cutoff test, the low-
 ignore it, and an error/obstacle bumper value (2–7) or the collision protection still refuses or stops them.
 The arming dialog and the armed trial say so; the LUBA 2 is unchanged. Not tried on a LUBA 3 yet. See
 [Model trial](docs/features/supported-models.md#model-trial).
+
+Version 1.16.0 (186): **LUBA of the account recognized by its product key**. A LUBA AWD 5000 (LUBA 1, firmware
+1.10.5.246) working in the Mammotion app gave "0 LUBA in the account" once signed in
+([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3), app 1.15.2): the account list kept only the
+devices whose name starts with a mower prefix (`Luba`, `Yuka`, `Ezy-`, `Kumar`, `Maston`), and the account name of this
+robot carries none. A device is now kept when its name **or** its product key is a mower of the Mammotion table already
+used for the model detection (13 LUBA 1 keys, `ModelSupport.isMower(name, productKey)`, `RobotModel.fromProductKey`);
+that table holds no RTK station, pool cleaner or charging pile key. Each device left out is logged as
+`cloud_device_skipped` with its product key, the start of its name (the model part up to the first `-` or `_` and 2
+characters, otherwise 3 characters, never more than half of the name) and its length, never the full name, serial
+number or iotId, so the anonymized ZIP export keeps it. An account with devices none of which is recognized now says
+"N devices in the account, none recognized as a Mammotion mower: export the diagnostics (Service → Logs → Export all)
+and report the model"; an empty account says "No device in the account".
+Read-only mode is unchanged: motion stays bound to the validated name prefixes (`Luba-VS`, `Luba-VP`), so a robot listed
+by its product key moves no more than before. The Bluetooth scan, which found no robot either (the Mammotion app
+probably holds the link), is not changed. See [supported models](docs/features/supported-models.md#models). Not tried
+on that robot yet.
+
+**Sync with the Mammotion app: outline no longer driven askew.** On the bench, 35 outline recordings out
+of 300 draws of the position noise were abandoned (11.7 %) and the actual chassis of the simulated robot entered the
+no-go zone being recorded on 7 draws out of 60: each drive confirmed its heading again over its first 15 cm of straight
+line, that is over the short link before the outline, where 1 cm of RTK noise put it up to 10° off, and the robot then
+drove the outline that much askew. Two changes of the Fold tracking (`DeadReckoning`): after the first confirmation,
+the heading gap is measured again over the whole straight line as long as the robot keeps driving straight (up to 1 m,
+≈ 1.4° of noise over 60 cm instead of ≈ 5° over 15 cm); the drives chained by the sync (move, join, outline) keep the
+gap of the previous drive when it was measured over at least 40 cm of line and the robot has not moved since
+(`NavHeadingMemory`: 30 cm, 5°, 1 min; logged as `nav_heading_kept`). Bench: 1 outline abandoned out of 300 draws
+(0.3 %), no contact over 60 draws; `MapSyncBenchTest` now checks the actual chassis never touches the zone. The
+measurement over the whole line applies to every drive tracked by the phone (moves, routes, mowing) and by the Redmi
+gateway (same code); the ESP32 gateway is unchanged. See [map sync](docs/features/map-sync.md). Not tried on a robot yet.
+
+**Turn Optimizer: lawn friendly U-turns.** Each U-turn between two passes now compares the pivots in place, a rolling
+U-turn (Dubins arcs of 0.35 m, 4° per vertex, followed without stopping), a rounded loop and a multi-point turn (never
+possible: the tracking does not reverse), each checked on the safe surface and the chassis envelope, and keeps the one
+that costs least in duration, lawn wear (degrees pivoted in place) and risk (chassis within 5 cm of the boundary). New
+task setting *Advanced settings* · **Lawn friendly** (off by default, routes unchanged): passes taken one in two or
+three in each cell so that the rolling U-turn fits, kept only where it costs no more runs and U-turns than the zigzag,
+wear weighed in the orientation. Reference map (25 cm): degrees pivoted in place on the passes −53 %, same surface
+within 0.1 %; tracking bench: Potager 33 to 36 % less time pivoting in place, whole mission 2 to 5 % longer, Aire de
+jeux 5 to 8 % less, same duration within 1 %, deviation ≤ 21 cm. See [U-turns](docs/features/mowing-preparation.md#u-turns-turn-optimizer).
+Not tried on a robot yet.
+
+**ESP32 gateway paired with its PWR button (firmware 0.3.1).** Until now the ESP32's code was only shown on the
+serial console: with the Fold still holding the Redmi's code, the ESP32 refused it and there was no way to find the
+code without a USB cable. A short press on the board's PWR button (it restarts the ESP32) now opens a 3 min pairing
+window, shown by an LED double flash: Service → Wi-Fi gateway → **Pair the ESP32 (PWR button)** finds it on the Wi-Fi,
+reads its pairing link (`GET /pair`, the same link as the QR code), checks the code with a real session and saves
+it. The status page also shows the code and the link during the window. The window opens only after a press or a
+power-up (not after a software restart, an update or a crash), closes as soon as a pilot authenticates, and `/pair`
+answers 403 outside it. Installing 0.3.1 still needs the USB cable once (an update over Wi-Fi asks for the code). Tried
+on the board (2026-10-25, over USB then Wi-Fi): window opened after a power-on reset (USB reset, same EN pin as PWR),
+`/pair` 200 with the link and `/status` without the code, code taken from `/pair` accepted by `tools/gateway_client.py`,
+window closed right after (`/pair` 403), not opened after a software restart (`reboot`). Opening the serial console
+also resets the board and opens the window. App button not tried on the Fold yet.
+
+**ESP32 gateway: route tracking no longer refused for memory, steadier setpoints (firmware 0.4.0).** On 2026-10-25 the ESP32 refused
+a 231-edge mowing route twice in a row ("Mémoire insuffisante pour lancer le suivi") after a 1498-edge route: each
+tracking created its own task, whose 20 KB stack needs one contiguous block of internal RAM, fragmented by the uploads
+and the decoded surfaces. The tracking and the route decoding now run on two workers created at boot, fed through a
+queue; envelope surface indexes are kept in PSRAM, and the gateway keeps the last 4 routes and surfaces of each kind
+like the Android gateway (it kept 2, while the pilot assumes 4 and does not send them again: "Surface d'enveloppe …
+non reçue"). Jerky tracking on the ESP32: the robot notifications were handled by the task that also waits for each
+GATT write confirmation, so the telemetry reached the tracking late and stamped late, and the dead reckoning predicted
+from a wrong fix time; they now have their own task, as on Android. Queued writes now go out back to back (an idle
+wait of up to 20 ms separated them), and the Bluetooth link asks for a 15-30 ms connection interval (default 30-50 ms;
+Wi-Fi coexistence makes the ESP32 skip connection events) with reconnection scanning at half duty. Wi-Fi joins the
+strongest access point of the network at full transmit power; `/status` adds the largest internal RAM block, the free
+stack of each task, the Wi-Fi channel and the last disconnect reason. Native tests added for the workers and the kept
+surfaces. Not tried on the board or the robot yet.
+
+**ESP32 gateway: less airtime on Wi-Fi, outages measured (firmware 0.4.0).** The pilot session sent each frame (HEALTH, every robot
+response, PING) in its own write; with Nagle off each became a TCP segment and a radio frame, airtime shared with
+Bluetooth. Each pass now gathers them into a single write (`gw::proto::gather`, native test), same frames, same order
+and same PING rule. The station uses a 20 MHz channel (HT20), sturdier with the weak signal under the shell and
+alongside Bluetooth; modem sleep stays at its minimum level. `/status` adds `last_outage_ms` and `max_outage_ms` to its
+`wifi` block (from the loss to the new IP address) to tell whether a reconnection exceeds the pilot's 2 s silence
+limit. Console output gets a 1 KB transmit buffer so that the robot, notify and pilot tasks no longer wait on the UART.
+Not tried on the board yet.
+
+**Border passes joined along their axis, not nose first.** Border mowing of 2026-10-25 (Aire de jeux, swing poles):
+after a stop, the link back to a border pass arrived square to it (74° on the replayed case), so the front of the
+robot, 35 cm ahead of its centre, went over the border and the tracking stopped again ("Enveloppe robot hors du
+couloir sûr"), on each resume further on. A link meeting a pass that lies closer to the outline than the comfort
+distance now ends along the pass axis (last segment within 25°, from an approach point inside the zone, at most 3 m
+longer), for the drift resume, the link after a contact bypass, the mission start or resume and the other links built
+from the robot's pose; the resume searches prefer the nearest entry where this fits to a closer entry met nose first.
+`AlignedBorderArrivalTest` replays the field pose on the reference map. See
+[real mowing](docs/features/real-mowing.md). Not tried on a robot yet.
+
+**Gateway fall detector: no stop on a stale drop point.** On 2026-10-25 at 15:54:58 the Redmi gateway stopped the
+robot with "Passerelle tombée du robot" at a point 1.5 m back left a minute earlier: its signal read −19 dBm until the
+end of a tracking and −51 dBm from the start of the next one, and the same phone then drove the robot 12 m with a
+steady −24 dBm. The drop point is now only trusted when the first weak reading comes at most 3 s after the last normal
+one, or with the robot still within 75 cm of it; otherwise the usual level is learned again. After a real verdict, the
+next tracking still concludes from the known drop point. Same rule on the ESP32 gateway (gwcore, firmware 0.4.0). See
+[gateway](docs/features/gateway.md). Not tried on a robot yet.
+
+**Short positioning losses ridden through during a route.** Under the raised play house of the Aire de jeux
+(2026-10-25), the robot raised self-check 41 "weak satellite signal" (RTK float) for one second at 15:38:21 and
+15:51:26, then for two minutes at 15:38:40; the route stopped at once each time, while the robot kept publishing
+moving positions and accepted the commands (driven out with the joystick, protection still raised). A positioning
+condition (40, 41, 42, 99) with the robot still in manual control is now ridden through for up to 20 s and 5 m from
+where it appeared, every other check unchanged; beyond, the usual stop and 5 min pause. Same rule on the Fold, the
+Android gateway and the ESP32 gateway (`PositioningGrace`, gwcore, firmware 0.4.0). See [safety](docs/features/safety.md#positioning-lost-self-check-41).
+Not tried on a robot yet.
+
+**Deleted obstacles no longer come back.** Contacts the robot dates more than 15 s before they are read are no longer
+placed at the robot's current position: on 2026-10-25 the contacts of the obstacle learning trials on the swing poles,
+read 20 to 63 s later while driving by hand, were logged about 1 m away and every mowing computation then avoided them
+as presumed obstacles. The resume of an interrupted task also leaves out the presumed obstacles of its start that were
+deleted since (contacts dismissed). See [obstacles](docs/features/obstacles.md) and [resume](docs/features/mowing-resume.md).
+
+**Self-check 25 against a no-go zone: no phantom obstacle, joystick allowed.** Border mowing of 2026-10-25 at
+15:33:37 (Aire de jeux): pivoting at a corner of the border pass, the robot stopped with its centre 18 cm from a no-go
+zone and the rear of its chassis inside it, and raised self-check 25 ("outside the task area") without any contact
+code. Taken for a collision lock, it left an estimated obstacle in front of the robot, a back-off was refused (the
+no-go is right behind), the joystick was refused and ten **Unlock** attempts failed until the robot was pushed by hand.
+With the robot centre inside a no-go zone or within 35 cm of it, bumper and lift clear, a route now stops on 25
+without a contact code, without recording an obstacle or backing off, and keeps its progress for the resume; the
+joystick ignores 25 there as beyond the map, and the map shows "Against a no-go zone (self-check 25): drive the robot
+out with the joystick" instead of the **Robot stuck** panel. The move to a point keeps its stop there. Elsewhere 25 is
+handled as before. `OffMapLatchTest` replays the pose on the reference map. See
+[safety](docs/features/safety.md#self-check-25-beyond-the-mapped-zones-version-1110). Not tried on a robot yet.
+
+**Route start through a gateway: report subscription no longer stops the task.** On 2026-10-25 at 15:31:31 a border
+task through the Redmi stopped 2 s after its start ("timeout GATT (ROUTE_REPORTS sans confirmation en 1,5 s)") and the
+link closed; the same task restarted 8 s later without trouble. The report subscription of a route start is now
+handled like the other link keepalives through the gateway (5 s, awaited across a Wi-Fi cut, then dropped); setpoints,
+STOP and blades keep the strict 1.5 s.
+
+**A gateway left on no longer takes the robot back from the one in use.** On 2026-10-25 at 15:23 the robot was
+restarted under the ESP32 gateway in use: the ESP32 then saw no advertisement for five minutes and the Fold found no
+LUBA over direct Bluetooth either, because the Redmi gateway, idle but still retaining the same robot and retrying
+every 10 s, had reconnected first (a LUBA accepts a single Bluetooth connection and stops advertising while held). Both
+gateways (Android and ESP32, `gw::ReconnectPolicy`) now retry on their own only while in use (pilot connected,
+autonomous tracking) and for 10 min after; beyond, a link that is up is kept, but once lost the robot is left to the
+device using it and reconnected as soon as a pilot asks for it. The gateway page shows "not connected: gateway unused
+for 10 min", the ESP32 `/status` gives `retry_paused`. See [gateway](docs/features/gateway.md). Not tried on a robot
+yet; the ESP32 needs firmware 0.4.0 and the Redmi the new app.
+
+**ESP32 gateway: Wi-Fi without power save next to Bluetooth (firmware 0.4.0).** The gateway firmware moves to version
+0.4.0 (`gateway-0.4.0` in `/status` and on the console, after 0.3.1), which gathers the ESP32 changes of this entry,
+and from arduino-esp32 2.0.17
+(ESP-IDF 4.4.7) and NimBLE-Arduino 1.4.3 to arduino-esp32 3.3.12 (ESP-IDF 5.5.5, pioarduino platform 55.03.312-1,
+PlatformIO Core 6.2.0 or later) and NimBLE-Arduino 2.5.2. IDF 4.4 refused Wi-Fi without modem sleep while Bluetooth
+runs, so the station only woke at the router's DTIM beacons, the main cause of receive latency from the pilot; IDF 5
+accepts it. The station now runs with `WIFI_PS_NONE` by default; the console command `wifi-ps none|min` (stored)
+switches back to modem sleep to compare both on the board, a refused `none` is logged and falls back to `min`, and
+`/status` gives the mode in force (`wifi.ps`). The radio is still shared with Bluetooth, the gain is to be measured.
+Protocol, safety stop, PWR pairing, Bluetooth parameters, OTA with rollback and saved settings are unchanged. A board
+in 0.3.1 takes the image over Wi-Fi with its old IDF 4.4.7 bootloader: tried on the test board on 2026-10-27, with
+0.3.1 rebuilt from 596660fd and written over USB with its own bootloader, partition table and `boot_app0` (flash not
+erased, NVS kept). A reset before the 60 s confirmation brought 0.3.1 back ("the new version did not start (app1)");
+the next update (1,642,352 bytes sent and written in 15.2 s) restarted on `app1` in `pending_verify` and was
+confirmed after 60 s; `/status` then gave `gateway-0.4.0`, `wifi.ps: none`, `heap_internal_free` 74,392 and
+`heap_internal_min` 72,096 bytes, with the Wi-Fi network, the code and the retained robot kept. The bootloader read
+back afterwards is still the IDF 4.4.7 one, as on the boards in service (OTA never writes it). Image 95.4 % of the
+OTA slot (78.1 % before), 83.5 % with the ESP-IDF configuration below. See
+[ESP32 hardware](docs/features/esp32-hardware.md) and the
+[firmware README](firmware/esp32-gateway/README.md#toolchain-arduino-esp32-3x-esp-idf-55). Latency gain not measured
+with the robot yet.
+
+**ESP32 gateway: internal RAM freed with an ESP-IDF configuration of its own (firmware 0.4.0).** With the precompiled libraries of
+arduino-esp32 3.3.12, a trial of three 990 KB routes and three 2,000-vertex surfaces uploaded back to back left as
+little as 548 bytes of internal RAM (the RAM of the task stacks, Wi-Fi and Bluetooth). `platformio.ini` now has
+pioarduino rebuild the Arduino IDF libraries (`custom_sdkconfig`, about 3 min on the first build): Wi-Fi and lwIP
+buffers in PSRAM (`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP`, 6 static TX buffers), `malloc` blocks over 256 bytes in
+PSRAM (`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`, 4,096 in the core), `esp_timer` and timer service stacks back to 4 KB
+and 2 KB, Bluetooth controller in BLE-only mode for one link without the Bluedroid host, NimBLE host memory in PSRAM;
+Zigbee, RainMaker, Insights, provisioning and other unused components are left out, and `tools/drop_unused_libs.py`
+keeps the Matter and modem libraries off the link line (13.4 KB of static RAM). Flash and PSRAM keep the 80 MHz of
+the precompiled libraries (`custom_sdkconfig` sets it back: the rebuild would derive 40 MHz from the board). Same
+trial on 2026-10-26: lowest internal RAM 61,256 bytes (74 KB free at rest instead of about 22 KB, largest block never
+under 61 KB), static RAM 63,339 bytes (78,000), IRAM left 13,121 bytes (2,653), image 83.5 % of the OTA slot
+(95.4 %), all blobs accepted, no Wi-Fi outage, no restart. `/status` adds `heap_internal_free` and `heap_internal_min`, the console state line the
+same two values. Task stacks in PSRAM were rejected: the board's ESP32 is a revision 1.0, whose PSRAM cache bug
+rules out ROM, Wi-Fi and Bluetooth code and flash writes on such a stack. Bootloader (byte for byte), image header
+(DIO, 40 MHz, 4 MB), flash and PSRAM speeds, partition table, rollback, Wi-Fi power save, protocol, safety stop and
+PWR pairing are unchanged; 199 native tests pass. **The robot
+was not connected during the trial** (the LUBA was not advertising: gateway attempts timed out, scans from the gateway
+and a Mac found nothing, the Redmi held no link), so its share of the memory is still to be measured; the update
+from 0.3.1 through an IDF 4.4.7 bootloader was tried on 2026-10-27 (above). See the
+[firmware README](firmware/esp32-gateway/README.md#esp-idf-configuration-of-the-gateway-internal-ram) and
+[ESP32 hardware](docs/features/esp32-hardware.md).
+
+**Robot trial plan for the three NOW roadmap items.** [docs/ROBOT_TRIAL_PLAN.md](docs/ROBOT_TRIAL_PLAN.md) gathers
+in one field session the autonomous tracking by the Redmi gateway, the motor watchdog with the recharge/resume cycle
+and the map sync with the Mammotion app: order of the day (blocks B0 to B9, about 8 h), preparation, safety rules,
+steps with the app labels, measurements, proposed thresholds to agree on, gaps that the app cannot measure yet, and a
+report template (`docs/ROBOT_TRIAL_<date>.md`). It notes that with the gateway the return-reserve threshold is fixed
+when each tracking job is handed over, so the reserve is judged on a tracking started far from the base. The
+documentation no longer says the ESP32 gateway lacks autonomous tracking (announced since firmware 0.3.0; gateway page
+section renamed "Autonomous tracking (Android and ESP32 gateways)"), and the docs index and milestone M8 of
+FEATURES.md no longer describe the autonomous gateway as never tried on the robot (used from Oct 14 to 16, full
+checklist still to run). No code change.
+
+**Mammotion patterns drawn on the map.** The drawings placed in a zone with the Mammotion app (SVG patterns, map
+element type 13) were acknowledged and their content dropped: the map reading now keeps each `svg_message_t` by
+`dataHash` and `currentFrame` (repeats kept once, a series with another frame count replacing the previous one, a
+single frame when `totalFrame` is 0), joins `svg_file_data` in frame order and places the tile from the last frame:
+centered on `x_move`/`y_move`, base size × scale (0 meaning 1), turned counterclockwise by `rotate` radians, SVG
+stretched over the tile with its Y axis flipped. A tile pushed by the robot into a zone of the list (its parent
+`paternalHashA`) is kept too. A minimal SVG reader written for it (`SvgOutline`, no new library, never throws) reads
+paths (M L H V C S Q T A Z, absolute and relative), rectangles, circles, ellipses, polygons, polylines, lines, groups,
+transforms, `fill="none"` and `fill-rule`, flattening curves to 2 cm on the map; a text that is not SVG (built-in
+pattern name) or over 256 KB or 20,000 points keeps the tile footprint only. Active patterns are drawn as a light
+purple fill with a thin outline and a dotted tile, switched-off ones (`hide_svg`) as a faded dotted tile only, over
+the zones and under the no-go zones and routes; new **Patterns** switch in Map sheet · *On the map* (on by default,
+older saved settings keep it on), "· N patterns" at the end of the map source, at most 64 patterns and 2 MB of SVG
+per map, `map_drawing` log entry with length, file name, placement, hidden flag and parent zone (never the SVG). The
+patterns are cached with the map (an older cache without them is read as before, an unusable pattern is left out
+alone). Reading progress, acknowledgements and retries are unchanged; the mowing computation and the moves ignore the
+patterns as before. Placement and assembly come from two community implementations and the only published example.
+First real check on 2026-10-27: a text added to the map in the Mammotion app (two frames numbered 1 and 2, rotated
+about −0.39 rad, scale 1) was imported and drawn correctly in its zone, which confirms the centering, the base size,
+the counterclockwise rotation, the Y flip and the frame numbering; a scale other than 1, a single frame at 0, a
+switched-off pattern, a viewBox with other proportions and pushed tiles are still to be confirmed on a capture. See [map](docs/features/map.md#loading-a-map)
+and [protocol](docs/MAMMOTION_PROTOCOL.md#map-and-account--research-for-milestone-5).
+The map page now shows a capture of that real map with the pattern drawn in its zone (`docs/images/map-patterns.png`).
+
+**Direction of the passes: manual angle.** Task settings get a *Direction of the passes* group under *Route mode*:
+**Automatic** (default, the cheapest direction of each zone, plan unchanged: same `planHash` on the seven zones of the
+reference map in Zigzag, Checkerboard and Optimized) or **Manual**, one angle for the whole task from 0 to 175° in 5°
+steps, counter-clockwise from the map's x axis (both families angle and angle + 90° in Checkerboard). The manual angle
+is the only candidate of every zone and is never replaced: a zone that cannot be mowed at this angle leaves the route
+not validated, with "Use Automatic." in the check. The preview gives the direction of each zone ("Piscine 59° ·
+Figuier 99°"). Optimized ignores the setting (disabled group, with a note); the choice is kept with the other task
+settings. Reference map at 25 cm: mission duration −6.8 to +9.3 % against Automatic in Zigzag, −1.2 to +5.5 % in
+Checkerboard, every plan valid, computation about half of Automatic (×0.46 to ×0.53). `Preview` carries the row phase and the
+pattern applied per zone (`zonePhases`, `zoneModes`), saved in the mission checkpoint (older saves still read). See
+[direction of the passes](docs/features/mowing-preparation.md#direction-of-the-passes) and the
+[design note](docs/path-planning/PATTERNS.md).
+
+**Direction of the passes: change every session.** A third choice, **Each session**, moves each zone at least 45° away
+from the direction of its last real mowing (both families in Checkerboard) when that costs at most 5 % more in the
+ranking of the directions, otherwise keeps the automatic direction and shifts the rows by 0.3 spacing (centred, then to
+one side, then to the other), so that the same direction and rows never come twice in a row. The direction, row phase
+and outline of each zone mowed at 50 % or more (interrupted and resumed mowings included) are kept on the phone
+(`zone-orientations.json`, each write merged with the file, so a mowing that ends before the app has read it keeps
+the other zones); survey routes, computed on merged outlines, give no zone to their paths; each cutting path counts for the zone it was planned for (`Preview.pathZoneIds`, saved in
+the mission checkpoint, older saves read with the zones found from the geometry), so a border loop along an overlapping
+neighbour counts for its own zone; a retraced zone and a first mowing find nothing to use, Optimized neither uses nor
+changes it, and simulations read it for their preview but do not update it. The
+preview shows "(shifted by 8 cm)" after the angle of a zone whose rows are shifted. Reference map, four sessions after
+an automatic one on each zone in Zigzag and Checkerboard: 40 of 56 sessions change direction by 45 to 78°, 16 shift
+the rows, mission duration −7.0 to +6.2 % against Automatic, coverage within 0.17 point, computation time ×0.96 to
+×1.10 of Automatic. See
+[direction of the passes](docs/features/mowing-preparation.md#direction-of-the-passes).
+
+**Zamboni mode (experimental).** A fourth route mode, **Zamboni**, keeps the passes of Zigzag (same direction, rows
+and surface) and changes their order inside each regular cell: two passes in a row are at least three rows apart at
+25 cm (room for a rolling U-turn of 0.35 m) and a pass is taken only once every pass more than 8 rows behind it is
+mowed, so the mowed part advances as one block and a stop leaves no isolated stripe in the cell. The order is found
+exactly per cell by a sliding-window dynamic programme (`map/ZamboniOrder.kt`, at most 4,096 states per layer,
+cancellable) on the duration-plus-wear objective of *Lawn friendly*, with every U-turn checked like the zigzag ones
+(safe surface, chassis envelope); a U-turn that does not fit becomes a link, cells under 8 passes (at 25 cm), spacings
+under 7 cm and cells where the order would cost more keep the zigzag, and the runs of a cell are mowed in their order.
+The direction of the passes applies; *Lawn friendly* is shown on and disabled ("Always on in Zamboni: the order
+weighs duration and lawn wear."); the tile note and the preview say "experimental" until the 0.35 m radius is
+validated on the robot. Reference map at 25 cm: pivots in place ×0.81 of Zigzag, wear ×0.94, pass duration ×1.037,
+mission −10.4 to +2.9 %, coverage within 0.11 point, computation ×1.24, front at most 8 rows; only 38 % of the U-turns
+of the regular cells roll, because most pass ends of this map lie along slanted borders where a rolling U-turn would
+leave unmowed ends (square to the border, a rectangle: pivots 7020° → 0°, wear ×0.41); these values replace the first
+targets of the design note. Tracking bench: largest deviation 0.20 m, no pivot in a pass. Zigzag (fast and Lawn
+friendly), Checkerboard and Optimized plans are unchanged (same `planHash`). See
+[Zamboni](docs/features/mowing-preparation.md#zamboni-experimental) and
+[Zamboni order](docs/path-planning/ENGINE.md#zamboni-order). Not tried on a robot yet.
+
+**Spiral mode (experimental).** A fifth route mode, **Spiral**, mows each zone with passes parallel to its boundary,
+joined into inward spirals without U-turns (`map/SpiralSweep.kt`): rings offset by the spacing from the area where the
+zigzag passes stop, convex corners rounded to the 0.35 m follow radius, a gentle slant from one ring to the next placed
+on a long straight stretch, slits to go round no-go zones and obstacles, one spiral per part where the rings split, and
+the centre, thin parts and gaps merged into a few pockets mowed in zigzag. Every ring is checked on the safe surface and
+the chassis envelope; a spiral can be entered at either end. The spiral is computed together with the zigzag of the
+zone and kept unless it mows more than 0.2 point less; otherwise the zone is mowed in that zigzag and the preview says
+"Spiral not possible on Figuier: zigzag used". The direction of the passes and *Lawn friendly* are disabled in Spiral;
+the tile note and the preview say "experimental". The five mode tiles now sit on two rows of three equal tiles so that
+their labels stay whole on a folded Fold. Reference map at 25 cm: spiral kept on 6 of 7 zones (Figuier in zigzag),
+coverage within 0.10 point, cutting length ×1.006 to ×1.142, mission +5.5 to +21.6 % and pass duration ×1.26 to ×2.5
+(the rings follow every bend of the recorded boundaries; the pockets are short zigzags), computation ×1.24 (target
+×1.0: the zigzag is computed anyway for the comparison and the fallback); rectangle 16 × 11 m: same surface, length
+×1.003, 2 U-turns instead of 39. Tracking bench: largest deviation 0.20 m, no pivot in a stripe. Zamboni: a zone none of
+whose cells could be reordered now gets "Zamboni on <zone>: no regular cell, zigzag order" in the preview
+(`Preview.zoneReorderedCells`, saved in checkpoints). Zigzag (fast and Lawn friendly), Checkerboard, Optimized and
+Zamboni plans are unchanged (same `planHash`). See [Spiral](docs/features/mowing-preparation.md#spiral-experimental)
+and [Spiral](docs/path-planning/ENGINE.md#spiral). Not tried on a robot yet.
+
+**Zamboni: a dead end in the order no longer refuses the route.** The runs of a Zamboni cell are chained (entered at
+one end, then driven in their order); on Aire de jeux at a manual 0°, 115° or 155°, this order left no safe link to the
+rest of the zone and the route was refused ("No safe link to the remaining blocks") although Zigzag mows these angles.
+Such a plan is now computed once more with that zone ordered as in Zigzag (same runs, no chain) and kept if it is
+validated; the preview says "Zamboni on <zone>: no safe link in the Zamboni order, zigzag order"
+(`Preview.zoneReorderedCells` −1). Plans validated today, in every mode, are unchanged (same `planHash`). See
+[Zamboni order](docs/path-planning/ENGINE.md#zamboni-order).
+
+**Route preview after a settings change.** Changing a task setting (mode, spacing, direction, height, borders…) and
+then tapping *Route preview* failed with "Map changed: recomputation required": the button kept the computation of an
+older screen state, because two references to one local function compare equal whatever values they capture, and
+Compose reused the first one. The map screen callbacks (route preview, simulation, start, station actions, resume) and
+those of the Service test pages now always run on the latest state, through one stable callback
+(`ui/components/LatestAction.kt`). A map or obstacle change during the computation still refuses the route. Route
+plans are unchanged (no planner change). See [map screen callbacks](docs/ROBOT_ROUTE_BLE.md#map-screen-callbacks-latest-composition-oct-27).
+
+**Manual direction chosen on the map.** In *Direction of the passes* → **Manual** (Zigzag, Checkerboard, Zamboni), a map
+of the chosen zones now sits under the *Angle of the passes* slider: zone outlines and no-go zones crossed by light
+guide lines at the chosen angle (both families in Checkerboard), with the angle in its corner, redrawn on every 5° step.
+Drawing a finger across the map along the wanted direction sets the angle; two fingers move, zoom and turn the view.
+Nothing is computed while the angle is chosen: the guide lines are straight lines clipped to the zones minus their
+no-go zones (`map/OrientationGuide.kt`), with a readable spacing rather than the real one, drawn in the map frame of the
+route preview; *Route preview* then computes the route at that angle, as before. Automatic and Each session are
+unchanged, and so are the plans of every mode (no planner change). See
+[direction of the passes](docs/features/mowing-preparation.md#direction-of-the-passes).
+
+**Spiral from the edge or from the centre.** In *Route mode* → **Spiral**, a *Spiral direction* setting now sits under
+the tiles: **From the edge** (default) or **From the centre**, kept with the other task settings (`spiral_direction`;
+an unknown value reads back as From the edge) and while another mode is chosen. The route preview shows "Spiral from the
+edge (experimental)" or "Spiral from the centre (experimental)", and the Spiral note follows the choice. From the edge
+is the spiral as before (same `planHash` on the seven zones of the reference map in Spiral, Zigzag, Zamboni and
+Checkerboard). From the centre keeps the same rings and pockets and drives every chain backwards, from its innermost ring
+out to its outer ring, the chain built nearest to the base last (it ends at the boundary near the base). Each reversed
+chain is checked again (safe surface, chassis envelope with the pivots at its vertices: the check is not symmetric for a
+chassis whose front and rear overhangs differ); one refused backwards keeps its inward direction. The zigzag of the
+centre a chain starts from is mowed first, then the chain is entered at its centre end only, and where the rings split
+the chains of the inner parts come before the one around them (`SpiralSweep.Result.parents`, `Preview.outwardRuns`,
+applied by `LocalMowingOrder`); other modes and the edge direction order as before. When this order finds no safe link
+to the remaining blocks on a zone, the zone is planned from the edge and the preview says "Spiral from the centre not
+possible on <zone>: spiral from the edge used" (`Preview.zoneReorderedCells` −1). A resume drives the saved route, so it
+keeps its direction; the order of the cores and inner chains, and of every path mowed before a chain near its centre
+end, is saved with it (`Preview.outwardPaths`, mission checkpoint), and the smart resume after a recharge refuses an order that would drive a chain before a part of its core
+or of the chains inside it still to mow (`SmartResume.outwardRules`; on Enfer it moved the core passes to the end to save
+about 7 m of transit). Reference map, 25 cm: from the centre on 5 of the 6 spiral zones (Aire de jeux from the edge),
+coverage unchanged, mission −0.0 to +4.8 %, transit up to +52 m (Piscine); 12 × 8 m rectangle: same chain and coverage,
+core first, mission +0.2 %. See [spiral direction](docs/features/mowing-preparation.md#spiral-direction) and
+[Spiral](docs/path-planning/ENGINE.md#spiral). Not tried on a robot yet.
+
+**ESP32 gateway on the Olimex ESP32-S3-DevKit-Lipo (firmware 0.5.0).** The gateway firmware moves to version 0.5.0
+(`gateway-0.5.0`) and builds for a second board, the Olimex ESP32-S3-DevKit-Lipo (EA variant: ESP32-S3-WROOM-1(U)-N8R8,
+8 MB flash, 8 MB octal PSRAM, u.FL antenna), now the default environment: `pio run -e s3lipo -t upload` through its
+USB-UART port, `pio run -e ota-s3lipo -t upload` over Wi-Fi. The T-Call V1.3 boards in service keep `tcall` and `ota`.
+What depends on the board sits in `src/board.h`: on the T-Call, 2G modem off, LED on GPIO 13 and IP5306 power manager
+as before (same ESP-IDF configuration, partition table and bootloader byte for byte, same static RAM; the code only
+moved); on the Olimex board, LED on GPIO 38 (active low), cell voltage on BAT_SENS (GPIO 6, 16 ADC samples averaged)
+and 5 V presence (USB or Qi receiver) on PWR_SENS (GPIO 5). Its level comes from a conservative Li-ion curve read under
+the board's load (`gw_battery`, gwcore, 7 new native tests: 0 % at 3.40 V, 4 % or less below 3.50 V), so the gateway's
+cutting rule (board battery at 4 % or less with no power: blades forbidden) comes well before the cut-off of a
+protected cell; while 5 V is present the level is unknown (the pin reads the charger, 4.2 V even with no cell fitted)
+and charge full is never known (CHRG not wired to the ESP32). `/status` adds `board` (`tcall` or `s3lipo`) and
+`power.battery_mv` (−1 on the T-Call); the IP5306 fields stay on the T-Call only. The refusal text sent to the pilot is
+unchanged (the Android gateway's, which the app translates). Olimex build: partition table `ota_8mb.csv` with two OTA
+slots of 4,128,768 bytes (2.1 times the T-Call's, rollback and core dump kept; image 1,606,976 bytes, 38.9 %; T-Call
+image 1,641,776 bytes, 83.5 %), and the T-Call's ESP-IDF configuration carried over to the ESP32-S3 keys
+(controller only without the IDF NimBLE host, no BLE mesh, PSRAM malloc threshold and timer stacks; no
+`-mfix-esp32-psram-cache-issue`, which only concerns the T-Call's ESP32). Building one board after the other rebuilds
+the Arduino IDF libraries (142 s and 108 s measured instead of 35-37 s). The board needs a **protected 18650** (no cell
+protection on the board), its polarity checked with a multimeter, and charges at about 100 mA (about 34 h for an empty
+3,400 mAh cell). The diagnostics firmware stays T-Call only. **Nothing was tried on the Olimex board**: not received
+yet. 206 native tests (199 before). See [ESP32 hardware](docs/features/esp32-hardware.md) and the
+[firmware README](firmware/esp32-gateway/README.md#boards).
+
+**Qi enclosure for the Olimex ESP32-S3-DevKit-Lipo-EA.** The Qi enclosure (`hardware/luba-esp32-qi`) is adapted to the
+Olimex ESP32-S3-DevKit-Lipo-EA instead of the LILYGO T-Energy S3, the board the gateway firmware targets with `s3lipo`.
+The board clips into a printed cradle without soldering; a protected 18650 sits in a separate holder with a JST plug
+(polarity to check with a multimeter); a flexible u.FL antenna is bonded inside the end wall, away from the Qi coil and
+the cell; the Qi receiver takes the native USB socket and the USB-UART one is left free for flashing. The inside is
+6 mm wider (enclosure 82.2 × 136.2 × 32.2 mm) and the transmitter mount is unchanged. The generator checks the new
+parts, cables and antenna distances. README, STL files, 3D viewer and images are updated. Not mounted on the robot yet.
+See [ESP32 hardware](docs/features/esp32-hardware.md#inductively-charged-enclosure) and the
+[enclosure README](hardware/luba-esp32-qi/README.md).

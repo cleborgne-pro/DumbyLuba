@@ -19,6 +19,11 @@ data class NavConfig(
      * and any recovery, bypass or replanning stops the drive instead (it would draw a detour into the element).
      */
     val drawState: Int? = null,
+    /**
+     * Drives chained by the sync with the Mammotion app (move, join, outline): the heading gap confirmed at the end of
+     * the previous drive is taken over when the robot has stayed still since ([fr.luba.poc.simulation.DeadReckoning.inheritHeading]).
+     */
+    val keepHeading: Boolean = false,
 ) {
     val tracing: Boolean get() = drawState != null
     init {

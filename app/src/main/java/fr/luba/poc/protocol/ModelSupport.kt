@@ -7,6 +7,7 @@ import fr.luba.poc.proto.LubaMulProto.SocMul
 import fr.luba.poc.proto.MctrlDriverProto.MctlDriver
 import fr.luba.poc.proto.MctrlNavProto.MctlNav
 import fr.luba.poc.proto.MctrlSysProto.MctlSys
+import fr.luba.poc.ui.RobotModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +31,13 @@ object ModelSupport {
     val MOWER_PREFIXES = listOf("Luba", "Yuka", "Ezy-", "Kumar", "Maston")
 
     fun isMower(name: String?): Boolean = name?.trim()?.let { n -> MOWER_PREFIXES.any { n.startsWith(it, ignoreCase = true) } } == true
+
+    /**
+     * Mammotion mower of the account: name prefix as on Bluetooth, or a mower product key of the Mammotion table
+     * ([RobotModel.fromProductKey]). The account name of a LUBA 1 may not carry a model prefix (DumbyLuba#3). Being
+     * listed grants nothing: motion stays bound to the name through [motionValidated].
+     */
+    fun isMower(name: String?, productKey: String?): Boolean = isMower(name) || RobotModel.fromProductKey(productKey) != null
 
     /** True when [name] is a validated model: motion and blade commands may be sent. */
     fun motionValidated(name: String?): Boolean =

@@ -43,6 +43,15 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
          * the safe surface stopped it ("Enveloppe robot hors du couloir sûr", 2026-10-14 at 14:17, 14 cm deviation).
          */
         const val FOLLOW_TOLERANCE_M = 0.15
+        /** Largest angle between the last segment of a link and the pass it joins near the outline ([alignedArrival]). */
+        const val ALIGNED_ARRIVAL_DEGREES = 25.0
+        /** Extra length allowed for an aligned arrival ([alignedArrival]). */
+        const val ALIGNED_ARRIVAL_EXTRA_M = 3.0
+        /** Approach points of an aligned arrival: distance behind the target and angle to the pass axis. */
+        private val ALIGNED_APPROACH_M = listOf(0.8, 1.2, 1.8)
+        private val ALIGNED_APPROACH_ANGLES = listOf(0.0, 10.0, -10.0, 20.0, -20.0)
+        /** Shorter last edge of a link before its approach point: dropped ([alignedArrival]). */
+        private const val SHORT_TAIL_M = 0.15
         /** Detour accepted to avoid difficult areas: length ≤ factor × preferred path + [AVOID_DETOUR_M]. */
         const val AVOID_DETOUR_FACTOR = 1.5
         const val AVOID_DETOUR_M = 4.0
@@ -805,6 +814,59 @@ class TrajectoryPlanner(private val map: RobotMap, private val margin: Double, p
         }
         return best ?: path
     }
+
+    /**
+     * Arrival on a pass near the drawn outline along its axis. A link whose last segment meets the target more than
+     * [ALIGNED_ARRIVAL_DEGREES] off [finalHeading], with the target closer to the outline than the comfort distance,
+     * arrives nose first: the front (35 cm ahead of the reference point) ends up over the border and the entry pivot
+     * is made right at the edge. 2026-10-25 at 15:42:36, Aire de jeux: link after a contact bypass meeting the border
+     * pass at 74°, robot nose into the border, footprint outside the safe corridor ("Enveloppe robot hors du couloir
+     * sûr"), same on the following resumes further on. The last segment is replaced by an approach point behind the
+     * target, never closer to the outline than the target, from which the robot meets the pass within
+     * [ALIGNED_ARRIVAL_DEGREES]: the shortest candidate keeping the tracking tolerance ([pathTolerant]), otherwise the
+     * shortest one passing the usual checks, at most [ALIGNED_ARRIVAL_EXTRA_M] longer; the link is unchanged otherwise.
+     */
+    fun alignedArrival(path: List<Point>, initialHeading: Double?, finalHeading: Double?): List<Point> {
+        if (finalHeading == null || path.size < 2) return path
+        val end = path.last()
+        val previous = path[path.size - 2]
+        if (headingGap(Math.toDegrees(atan2(end.y - previous.y, end.x - previous.x)), finalHeading) <= ALIGNED_ARRIVAL_DEGREES) return path
+        val comfort = surfaces.comfort ?: return path
+        val endDeficit = comfort.deficit(end)
+        if (endDeficit <= 1e-6) return path
+        val limit = path.length() + ALIGNED_ARRIVAL_EXTRA_M
+        var tolerant: List<Point>? = null
+        var safeOnly: List<Point>? = null
+        for (distance in ALIGNED_APPROACH_M) {
+            for (angle in ALIGNED_APPROACH_ANGLES) {
+                val rad = Math.toRadians(finalHeading + angle)
+                val approach = Point(end.x - distance * cos(rad), end.y - distance * sin(rad))
+                if (!safe(approach, end) || comfort.deficit(approach) > endDeficit + 0.01) continue
+                // From the last vertex before the end first (keeps the start of the link), then from the start.
+                for (from in listOf(path.size - 2, 0).distinct()) {
+                    val head = try { between(path[from], approach) } catch (_: IllegalArgumentException) { continue }
+                    val candidate = (path.take(from) + head.withoutShortTail() + end).withoutAlignedVertices()
+                    val length = candidate.length()
+                    if (length > limit || candidate.size < 2) continue
+                    if ((tolerant?.length() ?: Double.POSITIVE_INFINITY) <= length) continue
+                    if (!pathSafe(candidate, initialHeading, finalHeading)) continue
+                    if (pathTolerant(candidate, initialHeading, finalHeading)) tolerant = candidate
+                    else if (length < (safeOnly?.length() ?: Double.POSITIVE_INFINITY)) safeOnly = candidate
+                }
+            }
+            // Searches bounded (a drift resume tries many entries): the nearest ring with a tolerant arrival wins.
+            if (tolerant != null) break
+        }
+        return tolerant ?: safeOnly ?: path
+    }
+    /** Last segment [from] → [end] meets [finalHeading] within [ALIGNED_ARRIVAL_DEGREES], or [end] lies in the comfort surface. */
+    fun arrivalAligned(from: Point, end: Point, finalHeading: Double): Boolean =
+        from.distance(end) < 1e-6 || headingGap(Math.toDegrees(atan2(end.y - from.y, end.x - from.x)), finalHeading) <= ALIGNED_ARRIVAL_DEGREES ||
+            (surfaces.comfort?.deficit(end) ?: 0.0) <= 1e-6
+    private fun headingGap(a: Double, b: Double) = abs(((b - a) % 360 + 540) % 360 - 180)
+    /** Vertex a few cm before the approach point dropped when the shortcut is safe: no stop and pivot on a stub edge. */
+    private fun List<Point>.withoutShortTail(): List<Point> =
+        if (size >= 3 && this[size - 2].distance(last()) < SHORT_TAIL_M && safe(this[size - 3], last())) dropLast(2) + last() else this
 
     /** Aligned vertices removed (exit along the route axis, intermediate support): no needless stop. */
     private fun List<Point>.withoutAlignedVertices(): List<Point> = distinctConsecutive().fold(mutableListOf()) { result, p ->

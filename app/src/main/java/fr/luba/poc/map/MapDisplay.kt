@@ -57,16 +57,19 @@ enum class MapBackdrop(private val labelEn: String, private val labelFr: String,
 }
 
 /**
- * Display settings of the full-screen map: background, zone names, scale and planned route animation.
- * The Obstacles and Difficulties layers stay in [MapExtraLayers], the heatmap in [MapLayerSettings].
+ * Display settings of the full-screen map: background, zone names, scale, planned route animation and Mammotion
+ * drawings ([patterns], read with every map drawing). The Obstacles and Difficulties layers stay in [MapExtraLayers],
+ * the heatmap in [MapLayerSettings].
  */
 data class MapDisplay(
     val backdrop: MapBackdrop = MapBackdrop.GRID,
     val zoneNames: Boolean = true,
     val scaleBar: Boolean = true,
     val routeAnimation: Boolean = true,
+    val patterns: Boolean = true,
 ) {
-    fun encode(): String = listOf(backdrop.name, zoneNames, scaleBar, routeAnimation).joinToString(";")
+    /** Fields added at the end: an older value decodes with the default of the new ones. */
+    fun encode(): String = listOf(backdrop.name, zoneNames, scaleBar, routeAnimation, patterns).joinToString(";")
 
     companion object {
         /** Missing or unreadable value: default setting field by field. */
@@ -79,6 +82,7 @@ data class MapDisplay(
                 zoneNames = flag(1, default.zoneNames),
                 scaleBar = flag(2, default.scaleBar),
                 routeAnimation = flag(3, default.routeAnimation),
+                patterns = flag(4, default.patterns),
             )
         }
     }

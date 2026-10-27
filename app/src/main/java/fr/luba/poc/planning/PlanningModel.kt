@@ -29,7 +29,15 @@ data class PlanningConfig(val spacingM: Double = 0.25, val marginM: Double = 0.6
     /** Cell of the mowed-surface measurement; 0 = exact vector oracle (tests, ablations). */
     val coverageCellM: Double = 0.02,
     /** Margin between the robot side and the recorded outline (outer side of the chassis) for the outer loop. */
-    val outerOffsetM: Double = fr.luba.poc.map.CoveragePlanner.RECORDED_OUTER_OFFSET_M) {
+    val outerOffsetM: Double = fr.luba.poc.map.CoveragePlanner.RECORDED_OUTER_OFFSET_M,
+    /** U-turns between the passes ([fr.luba.poc.map.TurnOptimizer]). */
+    val turnStyle: fr.luba.poc.map.TurnStyle = fr.luba.poc.map.TurnStyle.FAST,
+    /** Direction of the passes of the straight-row modes ([fr.luba.poc.map.usesOrientation]). */
+    val orientation: OrientationMode = OrientationMode.AUTOMATIC,
+    /** Angle of [OrientationMode.MANUAL]: direction of the passes, counter-clockwise from the map's x axis. */
+    val manualAngleDeg: Int = 0,
+    /** Spiral mode: chains driven from the edge inwards or from the centre outwards ([fr.luba.poc.map.SpiralDirection]). */
+    val spiralDirection: fr.luba.poc.map.SpiralDirection = fr.luba.poc.map.SpiralDirection.FROM_EDGE) {
     init {
         require(listOf(spacingM,marginM,cutWidthM,speedMps,turnDegreesPerSecond).all { it.isFinite() && it > 0 })
         require(spacingM >= 0.05 && marginM >= 0.3 && cutWidthM <= 2)
@@ -39,6 +47,7 @@ data class PlanningConfig(val spacingM: Double = 0.25, val marginM: Double = 0.6
         require(coverageCellM.isFinite() && coverageCellM in 0.0..0.1)
         require(outerOffsetM.isFinite() && outerOffsetM in 0.0..fr.luba.poc.map.CoveragePlanner.MAX_OUTER_OFFSET_M) { tr("Outer loop inset out of range 0–1 m", "Retrait du tour extérieur hors plage 0–1 m") }
         require(verifiedMaxSlopeDegrees == null || verifiedMaxSlopeDegrees.isFinite() && verifiedMaxSlopeDegrees in 0.0..89.0)
+        require(manualAngleDeg in 0..179) { tr("Manual angle out of range 0–179°", "Angle manuel hors plage 0–179°") }
     }
 }
 /** Physical radius + user reserve, WITHOUT inflation by the chassis. */
@@ -61,7 +70,9 @@ data class PlanningRequest(val map: RobotMap, val zoneIds: List<Long>, val start
      * applied by [RoutePlanning.coverage] (empty once applied). */
     val borders: List<BorderPortion>? = null,
     /** Recorded map for the transits when [map] carries the outlines moved by the border strategy. */
-    val navigationMap: RobotMap? = null) {
+    val navigationMap: RobotMap? = null,
+    /** Directions last mowed per zone id, for [OrientationMode.EACH_SESSION] ([ZoneOrientationStore]). */
+    val orientationMemory: Map<Long, ZoneOrientation> = emptyMap()) {
     /** Evaluated mission end point: the base, or the start if there is no distinct arrival. */
     val finish: Point get() = end ?: start
     /** Heading on arrival: the start one for a round trip, free for a distinct arrival. */
@@ -71,7 +82,8 @@ data class PlanningRequest(val map: RobotMap, val zoneIds: List<Long>, val start
         zoneIds=zoneIds.toList(), obstacles=obstacles.toList(), corridorWidthsM=corridorWidthsM.toSortedMap(),
         slopes=slopes.map { it.copy(polygon=it.polygon.toList()) },
         navigation=navigation?.copy(accesses=navigation.accesses.map { it.toList() }),
-        dangerLines=dangerLines?.map { it.toList() })
+        dangerLines=dangerLines?.map { it.toList() },
+        orientationMemory=orientationMemory.mapValues { (_,z) -> z.copy(directions=z.directions.toList()) }.toSortedMap())
     val hash: String get() = stableHash(toString())
 }
 internal fun stableHash(value: String): String = MessageDigest.getInstance("SHA-256")
