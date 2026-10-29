@@ -29,7 +29,7 @@
 #include "robot.h"
 #include "session.h"
 
-static const char *FW_VERSION = "gateway-0.5.0";
+static const char *FW_VERSION = "gateway-0.5.1";
 static const char *HOSTNAME = "dumbyluba-esp32";
 // mDNS instance name shown by the app, same naming as the phone gateway service (kept unchanged).
 static const char *INSTANCE = "DumbyLuba passerelle ESP32";
@@ -653,7 +653,7 @@ void loop() {
     lastLog = millis();
     const robot::State r = robot::state();
     const session::Info p = session::info();
-    // power=usb: external 5 V present (USB, or the Qi receiver on the Olimex board); mV only where the board measures it.
+    // power=usb: external 5 V present (USB, or the dock contacts on the Olimex board); mV only where the board measures it.
     char batteryMv[24] = "";
     if (power.batteryMv >= 0) snprintf(batteryMv, sizeof(batteryMv), " battery=%dmV", power.batteryMv);
     Serial.printf("[state] %lus wifi=%s rssi=%d | robot=%s%s | pilot=%s | power=%s level=%d%%%s | heap=%u internal=%u min=%u\n",

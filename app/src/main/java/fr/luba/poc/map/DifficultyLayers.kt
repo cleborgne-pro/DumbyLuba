@@ -129,6 +129,7 @@ object MapExtraLayers {
         DifficultyKind.LIFT -> Color(0xFFDB2777)
         DifficultyKind.NO_PROGRESS -> Color(0xFF2563EB)
         DifficultyKind.DEVIATION -> Color(0xFF0D9488)
+        DifficultyKind.EDGE -> Color(0xFFEA580C)
     }
 }
 

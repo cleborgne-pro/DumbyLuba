@@ -32,9 +32,10 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
             if(token.isNotEmpty() && u.host != "id.mammotion.com") c.setRequestProperty("Authorization","Bearer $token")
             headers.forEach { (k,v)->c.setRequestProperty(k,v) }
             if(body!=null) { c.doOutput=true;c.setRequestProperty("Content-Type","application/json");c.outputStream.use{it.write(body.toString().toByteArray())} }
-            val code=c.responseCode;if(code!=200) throw CloudResponseException(code)
+            // Path and domain only in the error: the query of the sign-in carries the credentials.
+            val code=c.responseCode;if(code!=200) throw CloudResponseException(code,u.path,u.host)
             val bytes=c.inputStream.use{it.readBytesLimited(4*1024*1024)}
-            val json=JSONObject(String(bytes));val result=json.optInt("code",-1);if(result !in listOf(0,200)) throw CloudResponseException(result)
+            val json=JSONObject(String(bytes));val result=json.optInt("code",-1);if(result !in listOf(0,200)) throw CloudResponseException(result,u.path,u.host,http=false)
             return json
         } finally {c.disconnect()}
     }
@@ -107,7 +108,25 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
         val claims=JSONObject(String(Base64.decode(token.split('.')[1],Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)))
         val url=claims.optString("iot");trusted(url);return url.trimEnd('/')
     }
-    fun devices()=request(iot()+"/v1/user/device/page","POST",JSONObject().put("iotId","").put("pageNumber",1).put("pageSize",100)).getJSONObject("data").getJSONArray("records")
+    /**
+     * Account devices of the Mammotion IoT cloud (`/v1/user/device/page`, PyMammotion `get_user_device_page`), with what
+     * the diagnostics log: IoT domain ([DevicePage.host], from the JWT), API code and `total`. This page does not list
+     * the robots still bound to the older Aliyun cloud ([ownedDevices]).
+     */
+    fun devicePage():DevicePage {
+        val url=iot()+DEVICE_PAGE
+        val json=request(url,"POST",JSONObject().put("iotId","").put("pageNumber",1).put("pageSize",100))
+        val data=json.getJSONObject("data")
+        return DevicePage(URL(url).host,json.optInt("code",-1),if(data.has("total")) data.optInt("total") else null,data.getJSONArray("records"))
+    }
+    fun devices()=devicePage().records
+    /**
+     * Devices owned by the account, read-only (PyMammotion `get_user_device_list`: GET
+     * `{MAMMOTION_API_DOMAIN}/device-server/v1/device/list`, same Bearer token, `Client-Id` and `Client-Type: 1`,
+     * reply `data` = list of `DeviceInfo`). Unlike [devicePage], it also lists the robots bound to the older Aliyun
+     * cloud. Shared devices are not returned.
+     */
+    fun ownedDevices():JSONObject=request("$API_DOMAIN$DEVICE_LIST","GET",headers=mapOf("Content-Type" to "application/json"))
     fun mqtt()=request(iot()+"/v1/mqtt/auth/jwt","POST").getJSONObject("data")
     /** Account mowing history (read-only, `work-report/page`). */
     fun workReports(deviceName:String,pageSize:Int=10)=request("$API_DOMAIN/device-server/v1/device/work-report/page","POST",
@@ -132,12 +151,22 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
     /** Wake-up from standby (state 48): the only way once the robot has left the broker. `true` = request accepted. */
     fun wakeUp(deviceName:String):Boolean =
         request("$API_DOMAIN/device-server/v1/device/wakeup","POST",JSONObject().put("deviceName",deviceName)).optBoolean("data",false)
-    /** [nativeReturn]: explicit "native return to base" choice of the user, see [CloudReadOnly]. */
-    fun invoke(payload:ByteArray,name:String,id:String,nativeReturn:Boolean=false):JSONObject {
-        CloudReadOnly.requireAllowed(payload,nativeReturn)
+    /**
+     * [nativeReturn]: explicit "native return to base" choice of the user, see [CloudReadOnly]. [navReceiver]: navigation
+     * receiver of the robot model, the one of the [fr.luba.poc.protocol.Commands] that built [payload].
+     */
+    fun invoke(payload:ByteArray,name:String,id:String,nativeReturn:Boolean=false,
+               navReceiver:fr.luba.poc.proto.LubaMsgProto.MsgDevice=fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_NAVIGATION):JSONObject {
+        CloudReadOnly.requireAllowed(payload,nativeReturn,navReceiver)
         return request(iot()+"/v1/mqtt/rpc/thing/service/invoke","POST",JSONObject().put("args",JSONObject().put("content",Base64.encodeToString(payload,Base64.NO_WRAP))).put("deviceName",name).put("identifier","device_protobuf_sync_service").put("iotId",id).put("productKey",""))
     }
+    /** Reply of [devicePage]: IoT domain (host name only), API `code`, `total` (null if absent) and the records. */
+    data class DevicePage(val host:String,val apiCode:Int,val total:Int?,val records:org.json.JSONArray) {
+        val fields:Map<String,Any?> get() = mapOf("host" to host,"endpoint" to DEVICE_PAGE,"httpCode" to 200,"apiCode" to apiCode,"total" to total,"records" to records.length())
+    }
     companion object {
+        const val DEVICE_PAGE="/v1/user/device/page"
+        const val DEVICE_LIST="/device-server/v1/device/list"
         /** Mammotion application API (PyMammotion const.MAMMOTION_API_DOMAIN), same Bearer token. */
         private const val API_DOMAIN="https://domestic.mammotion.com"
         // Upstream client distributed with PyMammotion 0.10.8; no user account secret.

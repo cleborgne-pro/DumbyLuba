@@ -50,7 +50,7 @@ class RobotBleIncidentsTest {
         val afterContact = bench.labelsAfter(contactAt)
         assertTrue(afterContact.toString(), afterContact.indexOf("blades-off") in 0 until afterContact.indexOfFirst { it.startsWith("move -") })
         val seen = linkedSetOf<String>()
-        bench.sim.onTick = { bench.state.events.takeLast(40).forEach { e -> if (e.contains("Protection levée par le robot après le recul")) seen += "levée" } }
+        bench.sim.onTick = { bench.newEvents().forEach { e -> if (e.contains("Protection levée par le robot après le recul")) seen += "levée" } }
         bench.until(5 * 60_000, "bypass") { bench.state.events.any { it.contains("Trajet restant réparé autour de l'obstacle") } }
         bench.until(60_000, "waiting for the lock to clear") { seen.isNotEmpty() }
         assertTrue(bench.state.robotRoute.running)

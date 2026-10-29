@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#eef1f4">
 <meta name="mobile-web-app-capable" content="yes">
-<title>LUBA 2 — ESP32 enclosure + Qi charging</title>
+<title>LUBA 2 — ESP32 enclosure charged by contacts</title>
 <style>
   :root {
     --bg: #eef1f4; --ink: #1d2329; --muted: #5b6670; --line: #d5dce2; --panel: #fff;
@@ -146,7 +146,7 @@
         <div class="seg" id="modes">
           <button data-mode="ensemble">On the robot</button>
           <button data-mode="boitier">Enclosure</button>
-          <button data-mode="support">+ Qi mount</button>
+          <button data-mode="support">+ Blade mount</button>
         </div>
         <div id="tools">
           <button class="round" id="fit" title="Fit to view" aria-label="Fit to view">⤢</button>
@@ -223,7 +223,7 @@
       <h2>Remaining back-off before the base</h2>
       <div class="slider"><input id="pos" type="range" min="0" max="900" step="1" value="0" aria-label="Remaining back-off"><output id="posV">0 mm</output></div>
       <div id="status"></div>
-      <p class="foot">The LUBA 2 docks in reverse: the lid passes under the fixed transmitter mount, the camera stays in front.</p>
+      <p class="foot">The LUBA 2 docks in reverse: the ramp lifts the blades onto the lid, which passes under the fixed blade holder; the camera stays in front. The blades are drawn in their docked pose (their flexion is not animated yet).</p>
     </div>
 
     <div class="tab" data-tab="cotes">
@@ -254,13 +254,14 @@ const GLB = "__GLB_BASE64__";
 
 const $ = id => document.getElementById(id);
 const stage = $("stage"), panel = $("panel");
-const CAT_ORDER = [["boitier", "Printed enclosure"], ["quincaillerie", "Seal, screws and bonding"], ["electronique", "Electronics"],
-  ["support", "Transmitter mount (under the roof)"], ["robot", "Landmarks on the robot"]];
+const CAT_ORDER = [["boitier", "Printed enclosure"], ["quincaillerie", "Plates, seal, screws and bonding"], ["electronique", "Electronics"],
+  ["support", "Blade mount (under the roof)"], ["robot", "Landmarks on the robot"]];
 const BOX_CATS = new Set(["boitier", "quincaillerie", "electronique"]);
 // part that must be visible for the annotation to be shown
-const NEED = { window: "lid", cord: "cord", groove: "base", lip: "lid", screw: "screw", nut: "nut_m3", vent: "vent", vhb: "vhb",
-  battery: "battery", esp: "esp_module", usb: "usb_c", antenna: "antenna", cradle: "base", rx: "rx_pad", foam: "foam", coilgap: "mount_body", air: "mount_body",
-  tx: "tx_coil", chamfer: "mount_body", rod: "rod", gland: "gland", camera: "camera", rain: "rain_sensor", sole: "sole" };
+const NEED = { plate: "ct_plate", ramp: "ramp", oring: "oring", cord: "cord", groove: "base", lip: "lid", screw: "screw", nut: "nut_m3",
+  vent: "vent", vhb: "vhb", battery: "battery", esp: "esp_module", usb: "usb_c", adapter: "adapter", tvs: "tvs", antenna: "antenna",
+  cradle: "base", blade: "blade", sgap: "blade_holder", chamfer: "blade_holder", rod: "rod", gland: "gland", ptc: "cable",
+  camera: "camera", rain: "rain_sensor", sole: "sole" };
 
 // ---------------------------------------------------------------- rendering
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -396,11 +397,12 @@ function placeAll() {
   for (const { obj, a } of Object.values(anchors)) obj.position.set(a.p[0], a.p[1], a.p[2] + a.dz * state.explode);
   $("pos").value = Math.round(state.pos); $("posV").textContent = Math.round(state.pos) + " mm";
   $("explode").value = Math.round(state.explode * 100); $("explodeV").textContent = Math.round(state.explode * 100) + "%";
-  const under = Math.abs(state.pos) < META.boxHalfX + META.supHalfX;
+  const under = state.pos < META.underMax;
   $("status").textContent = state.pos < 0.5
-    ? `Docked: fixed mount ${mm(META.airGap)} mm above the lid, coils ${mm(META.coilGap)} mm apart (plastic ${mm(META.plastic)} + air ${mm(META.airGap)}).`
-    : under ? `The lid passes under the mount, ${mm(META.airGap)} mm of clearance.`
-    : `Reversing in: nothing moves under the roof (minimum gap ${mm(META.sweepGap)} mm).`;
+    ? `Docked: each blade bent ${mm(META.deltaNom)} mm, about ${META.forceNom.toFixed(2)} N on its plate; holder ${mm(META.sNom)} mm above the lid `
+      + `(height window +${mm(META.windowUp)} / −${mm(META.windowDown)} mm).`
+    : under ? `The ramp lifts the blades onto the lid, which passes under the holder with ${mm(META.sNom)} mm of clearance.`
+    : `Reversing in: nothing moves under the roof (minimum gap ${mm(META.sweepGap)} mm with the robot at the top of the window).`;
   invalidate();
 }
 
@@ -608,7 +610,7 @@ $("fs").onclick = () => {
 $("explode").oninput = e => { state.explode = state.explodeTarget = e.target.value / 100; refresh(); placeAll(); };
 document.querySelectorAll("[data-ex]").forEach(b => b.onclick = () => { state.explodeTarget = b.dataset.ex / 100; refresh(); });
 function syncSectionUi() {
-  const lim = section.axis === "x" ? 42 : 72;
+  const lim = section.axis === "x" ? 56 : 72;
   const s = $("secOff"); s.min = -lim; s.max = lim; s.value = section.offset; s.disabled = !section.axis;
   $("secOffV").textContent = section.axis ? `${mm(section.offset)} mm` : "—";
 }

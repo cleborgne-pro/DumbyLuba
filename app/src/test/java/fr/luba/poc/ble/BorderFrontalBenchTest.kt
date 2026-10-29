@@ -98,4 +98,19 @@ class BorderFrontalBenchTest {
         bench.advance(2000)
         assertEquals(0.0, bench.sim.speed, 0.01)
     }
+
+    /** DumbyLuba#2: positioning and advance to the edge with blades stopped keep the reported deck height. */
+    @Test fun `positioning and advance to the edge keep the reported deck height`() {
+        bench.sim.heightMm = 40
+        wallAt(0.05)
+        val since = bench.now
+        reachPassEnd()
+        bench.ble.continueBorderToEdge()
+        bench.until(2 * 60_000, "contact") { !bench.state.borderFrontal.running }
+        bench.advance(2000)
+        val heights = bench.sim.handHeightsSince(since)
+        assertTrue(heights.isNotEmpty())
+        assertEquals(heights.toString(), setOf(40), heights.toSet())
+        assertEquals(40, bench.sim.heightMm)
+    }
 }

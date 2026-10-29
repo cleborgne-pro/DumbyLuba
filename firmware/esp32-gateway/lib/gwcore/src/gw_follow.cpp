@@ -93,6 +93,18 @@ std::vector<bool> PathFollower::stopVertices(const std::vector<SimEdge> &edges, 
   return stops;
 }
 
+double PathFollower::curveSpeed(double curvature, int angular, double degreesPerUnit, bool rotationCalibrated) {
+  if (curvature <= 1e-6) return INF;
+  return std::min(angular * degreesPerUnit * CURVE_FF_SHARE, CURVE_MAX_RATE) *
+         (rotationCalibrated ? 1.0 : UNCALIBRATED_TURN_SHARE) / curvature;
+}
+
+double PathFollower::exitLimit(double behind, double hold, double setSpeed) {
+  if (hold >= setSpeed || behind >= CURVE_EXIT_HOLD_M + CURVE_EXIT_RAMP_M) return INF;
+  if (behind <= CURVE_EXIT_HOLD_M) return hold;
+  return hold + (setSpeed - hold) * (behind - CURVE_EXIT_HOLD_M) / CURVE_EXIT_RAMP_M;
+}
+
 PathFollower::PathFollower(const std::vector<SimEdge> &edges, int start, int end, double finalArrivalM)
     : edges_(edges), start_(start), end_(end), finalArrivalM_(finalArrivalM), index_(start) {
   require(start >= 0 && start < end && end <= (int)edges.size(), "Plage d'arêtes invalide");
@@ -181,8 +193,13 @@ PathFollower::Command PathFollower::command(const Point &position, double headin
   Opt<Point> preview;
   double travelled = 0.0;
   double curveDegrees = 0.0;
+  // Same, vertices of arcs only (an edge shorter than CURVE_ARC_EDGE_M on one side): curve tracking.
+  double arcDegrees = 0.0;
   while (true) {
-    if (i > index_ && travelled < CURVE_WINDOW_M) curveDegrees += turnDegrees(edges_[i - 1], edges_[i]);
+    if (i > index_ && travelled < CURVE_WINDOW_M) {
+      curveDegrees += turnDegrees(edges_[i - 1], edges_[i]);
+      if (arcVertex(i - 1)) arcDegrees += turnDegrees(edges_[i - 1], edges_[i]);
+    }
     const Point to = edges_[i].b;
     const double length = from.distance(to);
     auto along = [&](double d) {
@@ -209,15 +226,31 @@ PathFollower::Command PathFollower::command(const Point &position, double headin
   const double stop = corner(i) ? travelled - slideAlong(i, degreesPerUnit, angular) : INF;
   const Point aim = need(target);
   const Point p = need(preview);
-  const double reference = p.distance(foot) < 1e-6 ? headingOf(edge) : toDegrees(std::atan2(p.y - foot.y, p.x - foot.x));
+  // In a curve: tangent at the nearest point of the route and signed curvature around it (feed-forward); otherwise
+  // the chord ahead. The vertices between the nearest edge and the followed one are still ahead of the robot. Only
+  // arcs of short edges are curves (bends of a polygonal path keep the chord). Just after a stop vertex, and within
+  // CURVE_WINDOW_M before the stop of a tight rounded turn, the chord and the pivot of the corner, as before.
+  const int near = nearestEdge(position);
+  double skipped = 0.0;
+  for (int k = near; k < index_; k++)
+    if (arcVertex(k)) skipped += std::fabs(vertexTurn(k));
+  const bool nearStop = stopJustReached(position) || (i + 1 < end_ && stops_[i] && travelled <= CURVE_WINDOW_M &&
+                                                      turnDegrees(edges_[i], edges_[i + 1]) <= CORNER_DEGREES);
+  const bool curved = !nearStop && arcDegrees + skipped > CURVE_TANGENT_DEGREES;
+  const double nearT = coerceIn(progressOf(position, edges_[near]), 0.0, 1.0);
+  const double reference = curved ? tangentAt(near, nearT)
+                                  : (p.distance(foot) < 1e-6 ? headingOf(edge) : toDegrees(std::atan2(p.y - foot.y, p.x - foot.x)));
   // Target heading: route reference corrected by the lateral offset, convergence damped over CONVERGE_M.
-  const double desired = overshoot ? toDegrees(std::atan2(edge.b.y - position.y, edge.b.x - position.x))
-                                   : reference - toDegrees(std::atan(lateral(position, edge) / std::max(CONVERGE_M, speed * CONVERGE_S)));
+  const double desired =
+      overshoot ? toDegrees(std::atan2(edge.b.y - position.y, edge.b.x - position.x))
+                : reference - toDegrees(std::atan(lateral(position, curved ? edges_[near] : edge) / std::max(CONVERGE_M, speed * CONVERGE_S)));
   const double error = wrap(desired - heading);
   const double misaligned = std::fabs(wrap(reference - heading));
+  const double lateralM = lateral(position, edges_[near]);
+  const double enter = curved && std::fabs(lateralM) < CURVE_PIVOT_LATERAL_M ? CURVE_PIVOT_DEGREES : PIVOT_ENTER_DEGREES;
   if (turning_) {
     if (std::fabs(error) <= PIVOT_EXIT_DEGREES) turning_ = false;
-  } else if (misaligned > PIVOT_ENTER_DEGREES || std::fabs(error) > PIVOT_LATERAL_DEGREES)
+  } else if (misaligned > enter || std::fabs(error) > PIVOT_LATERAL_DEGREES)
     turning_ = true;
   if (turning_) {
     const int magnitude = coerceIn(roundToInt(std::fabs(error) * PIVOT_GAIN / degreesPerUnit), std::min(MIN_PIVOT, angular), angular);
@@ -231,18 +264,114 @@ PathFollower::Command PathFollower::command(const Point &position, double headin
     const double approach = std::min(minLinear, linear) * metersPerUnit;
     braking = std::sqrt(approach * approach + 2 * DECELERATION * std::max(0.0, stop - CORNER_REACH_M - CORNER_PLATEAU_M));
   }
-  // Tight curve: speed limited so that the requested rotation stays below half of the available correction.
+  // Tight curve: speed limited so that the rotation the curve needs stays within CURVE_FF_SHARE of the limit
+  // (curveSpeed), and kept after the exit of a curve (exitSpeed).
   const double curvature = curveDegrees / std::max(std::min(travelled, CURVE_WINDOW_M), 0.2);
-  const double turnRate = angular / 2 * degreesPerUnit * CURVE_STEER_SHARE * (rotationCalibrated ? 1.0 : UNCALIBRATED_TURN_SHARE);
+  const double curveLimit = curveSpeed(curvature, angular, degreesPerUnit, rotationCalibrated);
   const double governed = deviationM <= GOVERNOR_START_M
                               ? INF
                               : linear * metersPerUnit *
                                     (0.5 + 0.5 * coerceIn((GOVERNOR_FULL_M - deviationM) / (GOVERNOR_FULL_M - GOVERNOR_START_M), 0.0, 1.0));
-  const double allowed = std::min(std::min(braking, governed), curvature > 1e-6 ? turnRate / curvature : INF) / metersPerUnit;
+  const double exitLimitM = exitSpeed(near, nearT, linear * metersPerUnit, angular, degreesPerUnit, rotationCalibrated);
+  const double allowed = std::min(std::min(std::min(braking, governed), curveLimit), exitLimitM) / metersPerUnit;
   const int forward = coerceIn(roundToInt(std::min((double)linear, allowed) * std::max(std::cos(toRadians(error)), 0.0)),
                                std::min(minLinear, linear), linear);
-  const int steer = coerceIn(roundToInt(error * STEER_GAIN / degreesPerUnit), -angular / 2, angular / 2);
+  if (!curved) {
+    const int steer = coerceIn(roundToInt(error * STEER_GAIN / degreesPerUnit), -angular / 2, angular / 2);
+    return Command{forward, steer, false, aim, std::min(stop, horizon)};
+  }
+  // Feed-forward: rotation of the curve at the commanded speed (curvature CURVE_LEAD_S of travel ahead), plus the
+  // proportional correction.
+  const double feedForward =
+      forward * metersPerUnit * localCurvature(near, nearT, std::min(forward * metersPerUnit * CURVE_LEAD_S, CURVE_LOCAL_M));
+  const int bound = roundToInt(CURVE_STEER_LIMIT * angular);
+  const int steer = coerceIn(roundToInt((error * STEER_GAIN + feedForward) / degreesPerUnit), -bound, bound);
   return Command{forward, steer, false, aim, std::min(stop, horizon)};
+}
+
+bool PathFollower::arcVertex(int i) const {
+  return i + 1 < (int)edges_.size() && std::min(edges_[i].meters(), edges_[i + 1].meters()) < CURVE_ARC_EDGE_M;
+}
+
+double PathFollower::vertexTurn(int i) const {
+  if (i < start_ || i + 1 >= end_ || stops_[i]) return 0.0;
+  return wrap(headingOf(edges_[i + 1]) - headingOf(edges_[i]));
+}
+
+int PathFollower::nearestEdge(const Point &position) const {
+  int best = index_;
+  double bestDistance = segmentDistance(position, edges_[index_].a, edges_[index_].b);
+  int k = index_ - 1;
+  double behind = 0.0;
+  while (k >= start_ && behind <= ARRIVAL_M + 0.05 && !stops_[k]) {
+    const double d = segmentDistance(position, edges_[k].a, edges_[k].b);
+    if (d < bestDistance - 1e-9) { best = k; bestDistance = d; }
+    behind += edges_[k].meters();
+    k--;
+  }
+  return best;
+}
+
+bool PathFollower::stopJustReached(const Point &position) const {
+  int k = index_ - 1;
+  double behind = 0.0;
+  while (k >= start_ && behind <= ARRIVAL_M + 0.05) {
+    if (stops_[k]) return position.distance(edges_[k].b) <= ARRIVAL_M;
+    behind += edges_[k].meters();
+    k--;
+  }
+  return false;
+}
+
+double PathFollower::tangentAt(int e, double t) const {
+  const double length = edges_[e].meters(), s = t * length;
+  const double half = std::min(length / 2, CURVE_BLEND_M);
+  if (half < 1e-9) return headingOf(edges_[e]);
+  double shift = 0.0;
+  if (s < half)
+    shift = -vertexTurn(e - 1) / 2 * (1 - s / half);
+  else if (s > length - half)
+    shift = vertexTurn(e) / 2 * (1 - (length - s) / half);
+  return headingOf(edges_[e]) + shift;
+}
+
+double PathFollower::localCurvature(int e, double t, double shift) const {
+  double sum = 0.0;
+  double ahead = (1 - t) * edges_[e].meters();
+  int k = e;
+  while (ahead <= shift + CURVE_LOCAL_M && k + 1 < end_) {
+    sum += vertexTurn(k);
+    k++;
+    ahead += edges_[k].meters();
+  }
+  double behind = t * edges_[e].meters();
+  k = e - 1;
+  while (behind <= CURVE_LOCAL_M - shift && k >= start_) {
+    sum += vertexTurn(k);
+    behind += edges_[k].meters();
+    k--;
+  }
+  return sum / (2 * CURVE_LOCAL_M);
+}
+
+double PathFollower::exitSpeed(int e, double t, double setSpeed, int angular, double degreesPerUnit, bool rotationCalibrated) const {
+  double behind = t * edges_[e].meters();
+  int k = e - 1;
+  while (k >= start_ && behind <= CURVE_EXIT_HOLD_M + CURVE_EXIT_RAMP_M) {
+    if (std::fabs(vertexTurn(k)) >= 0.5) {
+      double sum = 0.0, length = 0.0;
+      int j = k;
+      while (j >= start_ && length < CURVE_WINDOW_M) {
+        sum += std::fabs(vertexTurn(j));
+        length += edges_[j].meters();
+        j--;
+      }
+      return exitLimit(behind, curveSpeed(sum / std::max(std::min(length, CURVE_WINDOW_M), 0.2), angular, degreesPerUnit, rotationCalibrated), setSpeed);
+    }
+    behind += edges_[k].meters();
+    k--;
+  }
+  return INF;
 }
 
 // ---------------------------------------------------------------------------------------------------------- RangeArrival

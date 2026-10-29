@@ -32,7 +32,8 @@ import java.util.concurrent.TimeUnit
  * virtual time of the Robolectric main looper. Work RobotBle hands to `Dispatchers.Default` / `IO`
  * (links, route repair, disk writes) runs in real time while virtual time advances.
  */
-class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name: String = "Luba-VS-SIM01", seed: Long = 1) {
+class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name: String = "Luba-VS-SIM01", seed: Long = 1,
+                 address: String = "AA:BB:CC:00:00:01") {
     val app: Application = ApplicationProvider.getApplicationContext()
     val sim = SimRobot(start, heading, seed)
     private val store = ViewModelStore()
@@ -40,7 +41,8 @@ class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name
     val links = mutableListOf<SimLink>()
     /** False: opened links never become ready (robot off, out of range). */
     var reachable = true
-    val device = SeenRobot(name, "AA:BB:CC:00:00:01", -48)
+    /** Two benches of one test need distinct [address]es: the map cache file is per address and written in the background. */
+    val device = SeenRobot(name, address, -48)
     private val logQueue: java.util.concurrent.BlockingQueue<Runnable>? = runCatching {
         val log = RobotBle::class.java.getDeclaredField("log").apply { isAccessible = true }.get(ble)
         (log.javaClass.getDeclaredField("executor").apply { isAccessible = true }.get(log) as ThreadPoolExecutor).queue
@@ -66,20 +68,37 @@ class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name
         }
     }
 
+    private var lastEvent: String? = null
+
+    /**
+     * Events logged since the previous call (every one still kept, up to 150), for watchers run at each tick: a fixed
+     * window of the last 20 or 40 missed an event when a loaded machine let more lines through between two ticks.
+     */
+    fun newEvents(): List<String> {
+        val all = state.events
+        val from = lastEvent?.let { all.lastIndexOf(it) + 1 } ?: 0
+        lastEvent = all.lastOrNull() ?: lastEvent
+        return all.drop(from)
+    }
+
     private var workers: List<Thread> = emptyList()
     private var workersAt = 0L
 
     /**
      * Work RobotBle hands to `Dispatchers.Default` (route repair, links) runs in real time.
-     * Virtual time does not advance while a coroutine worker thread is computing (at most 5 real seconds per step).
+     * Virtual time does not advance while a coroutine worker thread is computing (at most 30 real seconds per step:
+     * 5 were not enough for a route repair when parallel test processes load the machine).
      */
     private fun awaitBackground() {
         val wall = System.currentTimeMillis()
-        if (wall - workersAt > 500) { workersAt = wall; workers = Thread.getAllStackTraces().keys.filter { it.name.startsWith("DefaultDispatcher-worker") } }
-        var waited = 0
-        fun computing(t: Thread) = t.state == Thread.State.RUNNABLE && t.stackTrace.any { f ->
-            f.className.startsWith("fr.luba.poc.simulation") || f.className.startsWith("fr.luba.poc.planning") || f.className.startsWith("org.locationtech") }
-        while (workers.any(::computing) && waited++ < 2500) Thread.sleep(2)
+        // The preparation pool threads too: a worker waiting for its pool tasks is not RUNNABLE while they compute.
+        if (wall - workersAt > 500) { workersAt = wall; workers = Thread.getAllStackTraces().keys.filter { it.name.startsWith("DefaultDispatcher-worker") || it.name == "luba-preparation" } }
+        fun computing(t: Thread) = t.stackTrace.let { stack ->
+            stack.any { it.className.startsWith("fr.luba.poc.simulation.PreparationPool") } ||
+                t.state == Thread.State.RUNNABLE && stack.any { f ->
+                    f.className.startsWith("fr.luba.poc.simulation") || f.className.startsWith("fr.luba.poc.planning") || f.className.startsWith("org.locationtech") } }
+        val deadline = wall + 30_000
+        while (workers.any(::computing) && System.currentTimeMillis() < deadline) Thread.sleep(2)
     }
 
     private fun drainLog() {

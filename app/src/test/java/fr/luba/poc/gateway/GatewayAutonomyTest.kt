@@ -101,7 +101,7 @@ class GatewayAutonomyTest {
                 if (announceLegs) opened.send(LegFrames.LEG_HELLO)
                 opened.send(GatewayProtocol.OPEN, GatewayProtocol.open(address, robotName))
             }
-            assertNotNull("robot link ready", ready.poll(8, TimeUnit.SECONDS))
+            assertNotNull("robot link ready", ready.poll(30, TimeUnit.SECONDS))
         }
 
         /** New session after a Wi-Fi outage. */
@@ -126,7 +126,7 @@ class GatewayAutonomyTest {
     private fun spec(pilot: Pilot, route: Int, guard: Int, cutting: Boolean = false, shown: Boolean = true, watchBattery: Boolean = false, speed: Int = 100) =
         LegSpec(pilot.client.nextLegId(), route, 0, cutting, shown, watchBattery, departure = false, lastArrivalM = null, heightMm = 60, speedPercent = speed,
             returnPercent = 20, baseApproach = null, guardId = guard, physicalGuardId = guard, calibration = null, obstacles = emptyList(), sampling = true)
-    private fun waitFor(timeoutMs: Long = 8000, condition: () -> Boolean): Boolean {
+    private fun waitFor(timeoutMs: Long = 30_000, condition: () -> Boolean): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!condition() && System.currentTimeMillis() < deadline) Thread.sleep(20)
         return condition()

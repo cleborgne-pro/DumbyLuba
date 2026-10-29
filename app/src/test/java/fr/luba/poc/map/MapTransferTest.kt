@@ -102,6 +102,37 @@ class MapTransferTest {
         now = 30_000; assertTrue(t.tick(c).isEmpty())
         assertTrue(t.finished)
         assertNotNull(t.failure)
+        // Not a single navigation message during the reading (DumbyLuba#3): the robot did not answer.
+        assertTrue(t.failure!!, t.failure!!.startsWith("aucune réponse du robot"))
+        assertEquals(0, t.navFrames)
+        assertEquals(listOf(0), t.notices().filter { it.kind == "map_hash_list_failed" }.map { it.fields["navFrames"] })
+    }
+
+    @Test fun `navigation messages received during the reading are noted by kind, the unhandled ones each time`() {
+        val t = transfer()
+        // Another navigation sub-message (task state) and a NAV message without sub-message, without the element list.
+        val other = LubaMsg.newBuilder().setMsgtype(fr.luba.poc.proto.LubaMsgProto.MsgCmdType.MSG_CMD_TYPE_NAV)
+            .setSender(fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_MAINCTL).setRcver(fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_MOBILEAPP)
+            .setNav(MctlNav.newBuilder().setTodevTaskctrlAck(NavTaskCtrlAck.newBuilder().setType(1).setAction(2))).build()
+        val empty = LubaMsg.newBuilder().setMsgtype(fr.luba.poc.proto.LubaMsgProto.MsgCmdType.MSG_CMD_TYPE_NAV).build()
+        t.accept(other, c); t.accept(other, c); t.accept(empty, c)
+        // Telemetry is not a navigation message.
+        t.accept(LubaMsg.newBuilder().setMsgtype(fr.luba.poc.proto.LubaMsgProto.MsgCmdType.MSG_CMD_TYPE_EMBED_SYS).build(), c)
+        val unhandled = t.notices().filter { it.kind == "map_nav_unhandled" }
+        assertEquals(listOf("TODEV_TASKCTRL_ACK", "TODEV_TASKCTRL_ACK", "NONE"), unhandled.map { it.fields["subMessage"] })
+        assertEquals("DEV_MAINCTL", unhandled.first().fields["sender"])
+        // Only names and counters: no hash, position or account.
+        unhandled.forEach { assertEquals(setOf("subMessage", "sender", "receiver", "msgAttr", "navFrames"), it.fields.keys) }
+        assertEquals(3, t.navFrames)
+        now = 10_000; t.tick(c); now = 20_000; t.tick(c); now = 30_000; t.tick(c)
+        // The robot answered something: the failure is the missing element list, not a silent robot.
+        assertTrue(t.failure!!, t.failure!!.startsWith("liste des éléments de carte non reçue"))
+        assertEquals(mapOf("NONE" to 1, "TODEV_TASKCTRL_ACK" to 2), t.navSummary)
+        // Handled messages: only the first one of each kind is noted.
+        val read = transfer()
+        read.accept(roots(1, 2), c); read.accept(boundary(1, 0), c); read.accept(boundary(2, 0), c)
+        assertEquals(listOf("TOAPP_GETHASH_ACK", "TOAPP_GET_COMMONDATA_ACK"), read.notices().filter { it.kind == "map_nav_rx" }.map { it.fields["subMessage"] })
+        assertEquals(3, read.navFrames)
     }
 
     @Test fun `map acknowledgements stay within the read-only barriers`() {

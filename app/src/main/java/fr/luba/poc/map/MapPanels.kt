@@ -122,7 +122,8 @@ internal class RobotProtection(state: RobotUi, demo: Boolean, cloud: Boolean) {
     // Self-check 25 beyond the mapped zones or at a no-go zone, bumper clear: not a lock for the joystick (2026-10-20 and
     // 2026-10-25, [fr.luba.poc.protocol.OffMapLatch]); a note replaces the "Robot stuck" panel.
     val offMapLatch = state.ready && !demo && !cloud && !state.mowing.active && !state.robotRoute.running &&
-        fr.luba.poc.protocol.OffMapLatch.ignored(selfCheck, state.telemetry.sensorStatus,
+        fr.luba.poc.protocol.OffMapLatch.ignored(selfCheck,
+            fr.luba.poc.protocol.BumperRest.guard(state.selected?.name, state.telemetry.sensorStatus, state.bumperRest, android.os.SystemClock.elapsedRealtime()),
             fr.luba.poc.protocol.OffMapLatch.atEdge(state.robotMap, state.telemetry.x?.let { x -> state.telemetry.y?.let { y -> Point(x, y) } }))
     /** At a no-go zone only: the move to a point keeps its stop on 25 there, only the joystick ignores it. */
     val exclusionLatch = offMapLatch &&
@@ -447,6 +448,18 @@ internal fun mapFetchAllowed(state: RobotUi, simulating: Boolean): Boolean =
     state.ready && !state.mapLoading && !state.campaign.running && !state.bladeTestActive && !state.navTest.running &&
         !state.teach.running && !state.robotRoute.running && !state.mowing.active && !state.manualActive && !simulating
 
+/** Reason of the last failed robot map reading, shown while no reading runs and the robot is linked; null otherwise. */
+internal fun mapReadFailureShown(state: RobotUi, cloud: Boolean = false): String? =
+    state.mapReadFailure?.takeIf { !state.mapLoading && state.ready && !cloud }
+
+/** Label of the robot map reading action: reading, retry after a failure, or read (through the gateway if used). */
+internal fun mapReadAction(loading: Boolean, failed: Boolean, gateway: Boolean): String = when {
+    loading -> tr("Reading…", "Lecture…")
+    failed -> tr("Retry the reading", "Relancer la lecture")
+    gateway -> tr("Read via the gateway", "Lire par la passerelle")
+    else -> tr("Read the robot map", "Lire la carte du robot")
+}
+
 /** Empty map: read the robot map (through the gateway when the pilot uses it) or open the Mammotion account map. */
 @Composable
 internal fun NoMapPanel(state: RobotUi, cloud: Boolean, fetchEnabled: Boolean, onFetch: () -> Unit, onAccount: () -> Unit) {
@@ -460,10 +473,13 @@ internal fun NoMapPanel(state: RobotUi, cloud: Boolean, fetchEnabled: Boolean, o
         localOnly -> tr("Connect the robot (Bluetooth or gateway) to read its map.", "Connectez le robot (Bluetooth ou passerelle) pour lire sa carte.")
         else -> tr("Connect the robot (Bluetooth or gateway) to read its map, or view the Mammotion account map.", "Connectez le robot (Bluetooth ou passerelle) pour lire sa carte, ou consultez la carte du compte Mammotion.")
     }
+    val failure = mapReadFailureShown(state, cloud)
     MapPanel(tr("No map on this phone", "Aucune carte sur ce téléphone"), subtitle = subtitle) {
+        // Failed reading: the reason stays here until the next reading (DumbyLuba#3: only "Reading…" was seen).
+        if (failure != null) StatusNote(failure, NoteTone.WARNING)
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalAlignment = Alignment.CenterVertically) {
             if (!localOnly) SecondaryPillButton(tr("Account map", "Carte du compte"), onAccount, Modifier.weight(1f))
-            PrimaryPillButton(if (state.mapLoading) tr("Reading…", "Lecture…") else if (gateway) tr("Read via the gateway", "Lire par la passerelle") else tr("Read the robot map", "Lire la carte du robot"),
+            PrimaryPillButton(mapReadAction(state.mapLoading, failure != null, gateway),
                 onFetch, Modifier.weight(1.3f), enabled = fetchEnabled && !cloud)
         }
     }

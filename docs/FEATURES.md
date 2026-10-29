@@ -65,7 +65,7 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 |---|---|
 | [Gateway on the robot](features/gateway.md) | Android phone or ESP32 placed on the robot, safety stop, autonomous tracking, gateway health, ESP32 updates over Wi-Fi |
 | [Home server](features/home-server.md) | local web page with the robot's status, dependency-free |
-| [ESP32 hardware](features/esp32-hardware.md) | PlatformIO firmware, waterproof enclosure charged by induction |
+| [ESP32 hardware](features/esp32-hardware.md) | PlatformIO firmware, waterproof enclosure charged by contacts at the base |
 
 ## Milestones
 

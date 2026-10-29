@@ -13,9 +13,10 @@ import kotlin.math.*
  * at each one made actual mowing very slow, and an edge shorter than the arrival radius could be "reached" before the
  * blades were confirmed.
  * Here the robot follows the line: reference heading of the route ahead of it, corrected by the lateral offset
- * (convergence damped over [CONVERGE_M]), on the pose predicted at the moment the command takes effect. It only pivots
- * in place at sharp corners (> [CORNER_DEGREES]), at the actual vertex, brakes at constant deceleration before each
- * stop and slows down in tight curves.
+ * (convergence damped over [CONVERGE_M]), on the pose predicted at the moment the command takes effect. In curves the
+ * reference is the tangent under the robot and the rotation of the curve is commanded directly (feed-forward,
+ * [CURVE_TANGENT_DEGREES]). It only pivots in place at sharp corners (> [CORNER_DEGREES]), at the actual vertex, brakes
+ * at constant deceleration before each stop and slows down in tight curves ([curveSpeed]) and just after them.
  * The route deviation, chassis envelope and other checks remain the caller's.
  */
 class PathFollower(private val edges: List<SimEdge>, private val start: Int, private val end: Int, private val finalArrivalM: Double) {
@@ -43,9 +44,60 @@ class PathFollower(private val edges: List<SimEdge>, private val start: Int, pri
         const val DECELERATION = 0.25
         const val STOP_MARGIN_M = 0.08
         const val RANGE_END_DECELERATION = 0.15
-        /** Window for measuring the curvature ahead of the robot and share of the heading correction reserved for it. */
+        /** Window for measuring the curvature ahead of the robot (speed in curves, [curveSpeed]). */
         const val CURVE_WINDOW_M = 0.5
-        const val CURVE_STEER_SHARE = 0.6
+        /**
+         * Curve tracking (turn tracking plan, step C, docs/TRACKING_TURNS_AND_BORDER_CONTACTS.md): above this cumulative
+         * turn over [CURVE_WINDOW_M] ahead, the reference heading is the tangent of the route at the foot of the
+         * perpendicular instead of the [PREVIEW_M] chord (which led the tangent by ≈ 20° on a 0.35 m arc and settled the
+         * robot inside the arc, then overshot at the exit), and the rotation the curve needs is commanded directly
+         * (feed-forward, [CURVE_LOCAL_M]). Straight stretches keep the chord, unchanged.
+         */
+        const val CURVE_TANGENT_DEGREES = 3.0
+        /**
+         * Arc vertex: one of its edges shorter than this (rolling U-turns 2.4 cm, outer lap 4 cm, painted borders 7 cm,
+         * transit links 14 cm). The chamfered corners of the map sync outlines (16.5 cm edges) keep the chord: driven as
+         * curves they swung the chassis out of the recording corridor (MapSyncBenchTest); at 10 cm the transit links of
+         * the bench lost the curve tracking (6 missions out of 175 beyond 30 cm at 100 % instead of 3).
+         */
+        const val CURVE_ARC_EDGE_M = 0.15
+        /**
+         * Share of the rotation limit given to the curve itself ([curveSpeed]): the speed in a curve is the one at which
+         * the feed-forward rotation stays under this share. Before the feed-forward, 0.6 × half of the limit (30 %) was
+         * kept for a proportional correction that had to carry the whole curve: 0.07 m/s on the rolling U-turns of
+         * 2026-10-28. Bench sweep 0.4 / 0.5 / 0.6: see docs/TRACKING_EXECUTION.md.
+         */
+        const val CURVE_FF_SHARE = 0.6
+        /**
+         * Rotation (°/s) of a curve at most, whatever the speed setting: a delay off by 0.2 s turns the robot by this rate
+         * × 0.2 s too early or too late at the entry and exit of a curve, a gain off by 20 % misses 20 % of it. Bench of
+         * 2026-10-28 at 100 % (robot 0.8 s and 0.09 °/s·u against 0.6 s and 0.108 believed), first version of the curve
+         * tracking: 32 °/s, 6 missions out of 175 beyond 30 cm and 28 cm at the exit of a painted curve of 2026-10-10;
+         * 25 °/s, 6; 22 °/s, 1. The 63 % setting gives 23 °/s with the measured gain (0.11 °/s·u).
+         */
+        const val CURVE_MAX_RATE = 22.0
+        /** Steering bound in a curve (share of the rotation limit): feed-forward plus the proportional correction. */
+        const val CURVE_STEER_LIMIT = 0.8
+        /** Feed-forward curvature: signed turn of the route within this distance on each side of the foot. */
+        const val CURVE_LOCAL_M = 0.1
+        /**
+         * Feed-forward lead: rotation response of the LUBA 2 after the command delay (first-order, ≈ 0.25 s: surveys of
+         * 2026-10-10, [DeadReckoning] predicts the delay but not this lag).
+         */
+        const val CURVE_LEAD_S = 0.25
+        /** Length around a vertex over which its turn is spread in the tangent reference (short edges: half of each). */
+        const val CURVE_BLEND_M = 0.1
+        /**
+         * In a curve (turn over [CURVE_TANGENT_DEGREES] ahead) and within [CURVE_PIVOT_LATERAL_M] of the line, in-place
+         * pivot only beyond this heading error: the arc is followed, not cut into pivots (bench of 2026-10-28: 3 to 6
+         * pivots per rolling U).
+         */
+        const val CURVE_PIVOT_DEGREES = 40.0
+        const val CURVE_PIVOT_LATERAL_M = 0.15
+        /** Exit of a curve: speed of the curve kept over this distance after its last curved vertex, then raised to the
+         * set speed over [CURVE_EXIT_RAMP_M]. */
+        const val CURVE_EXIT_HOLD_M = 0.3
+        const val CURVE_EXIT_RAMP_M = 0.5
         /**
          * Rotation assumed in curves as long as the robot's rotation gain is not calibrated
          * ([DeadReckoning.rotationCalibrated]): execution bench of 2026-10-10, robot turning 25 % less than expected,
@@ -94,6 +146,27 @@ class PathFollower(private val edges: List<SimEdge>, private val start: Int, pri
             return if (l2 < 1e-12) 1.0 else ((p.x - e.a.x) * dx + (p.y - e.a.y) * dy) / l2
         }
         fun turnDegrees(a: SimEdge, b: SimEdge) = abs(((headingOf(b) - headingOf(a) + 540) % 360) - 180)
+
+        /**
+         * Speed (m/s) at which a curve of [curvature] (°/m) is driven with the rotation share [CURVE_FF_SHARE] of
+         * [angular] (raw units, [degreesPerUnit]); [UNCALIBRATED_TURN_SHARE] of it while the rotation gain is not
+         * calibrated. Shared by the tracking and the duration model of the Turn Optimizer
+         * ([fr.luba.poc.map.TurnOptimizer.drive]), so that a manoeuvre is planned at the speed it is driven.
+         */
+        fun curveSpeed(curvature: Double, angular: Int, degreesPerUnit: Double, rotationCalibrated: Boolean = true): Double =
+            if (curvature <= 1e-6) Double.POSITIVE_INFINITY
+            else min(angular * degreesPerUnit * CURVE_FF_SHARE, CURVE_MAX_RATE) * (if (rotationCalibrated) 1.0 else UNCALIBRATED_TURN_SHARE) / curvature
+
+        /**
+         * Speed limit (m/s) [behind] metres after the last curved vertex of a curve driven at [hold]: [hold] over
+         * [CURVE_EXIT_HOLD_M], then up to [setSpeed] over [CURVE_EXIT_RAMP_M]; no limit beyond. Shared by the tracking
+         * and [fr.luba.poc.map.TurnOptimizer.drive].
+         */
+        fun exitLimit(behind: Double, hold: Double, setSpeed: Double): Double = when {
+            hold >= setSpeed || behind >= CURVE_EXIT_HOLD_M + CURVE_EXIT_RAMP_M -> Double.POSITIVE_INFINITY
+            behind <= CURVE_EXIT_HOLD_M -> hold
+            else -> hold + (setSpeed - hold) * (behind - CURVE_EXIT_HOLD_M) / CURVE_EXIT_RAMP_M
+        }
 
         /**
          * Tight rounded turn: successive vertices turning the same way whose sum exceeds [CORNER_DEGREES] over at most
@@ -257,8 +330,13 @@ class PathFollower(private val edges: List<SimEdge>, private val start: Int, pri
         var travelled = 0.0
         // Cumulative turn over [CURVE_WINDOW_M] ahead of the robot (curved borders, angles < [CORNER_DEGREES]).
         var curveDegrees = 0.0
+        // Same, vertices of arcs only (an edge shorter than [CURVE_ARC_EDGE_M] on one side): curve tracking.
+        var arcDegrees = 0.0
         while (true) {
-            if (i > index && travelled < CURVE_WINDOW_M) curveDegrees += turnDegrees(edges[i - 1], edges[i])
+            if (i > index && travelled < CURVE_WINDOW_M) {
+                curveDegrees += turnDegrees(edges[i - 1], edges[i])
+                if (arcVertex(i - 1)) arcDegrees += turnDegrees(edges[i - 1], edges[i])
+            }
             val to = edges[i].b
             val length = from.distance(to)
             fun along(d: Double) = if (length < 1e-9) to else Point(from.x + (to.x - from.x) * d / length, from.y + (to.y - from.y) * d / length)
@@ -280,17 +358,31 @@ class PathFollower(private val edges: List<SimEdge>, private val start: Int, pri
         }
         val stop = if (corner(i)) travelled - slideAlong(i, degreesPerUnit, angular) else Double.POSITIVE_INFINITY
         val aim = requireNotNull(target)
-        val reference = requireNotNull(preview).let { p ->
+        // In a curve: tangent at the nearest point of the route and signed curvature around it (feed-forward); otherwise
+        // the chord ahead. The followed edge runs up to [ARRIVAL_M] ahead of the robot on short edges (its own heading
+        // led the tangent by ≈ 25° on a 0.35 m arc): the vertices between the nearest edge and the followed one are still
+        // ahead of the robot. Only arcs of short edges are curves ([CURVE_ARC_EDGE_M]): the bends of a polygonal path keep
+        // the chord. Just after a stop vertex, and within [CURVE_WINDOW_M] before the stop of a tight rounded turn, the
+        // chord and the pivot of the corner, as before.
+        val near = nearestEdge(position)
+        val skipped = (near until index).sumOf { if (arcVertex(it)) abs(vertexTurn(it)) else 0.0 }
+        val nearStop = stopJustReached(position) ||
+            (i + 1 < end && stops[i] && travelled <= CURVE_WINDOW_M && turnDegrees(edges[i], edges[i + 1]) <= CORNER_DEGREES)
+        val curved = !nearStop && arcDegrees + skipped > CURVE_TANGENT_DEGREES
+        val nearT = progress(position, edges[near]).coerceIn(0.0, 1.0)
+        val reference = if (curved) tangentAt(near, nearT) else requireNotNull(preview).let { p ->
             if (p.distance(foot) < 1e-6) headingOf(edge) else Math.toDegrees(atan2(p.y - foot.y, p.x - foot.x)) }
         // Target heading: route reference corrected by the lateral offset, convergence damped over
         // [CONVERGE_M]. Aiming at a point 40 cm away made the tracking underdamped: ±10–20 cm zigzag
         // and pivots in the middle of a stripe (debug mowing of 2026-10-10, 14:55).
         val desired = if (overshoot) Math.toDegrees(atan2(edge.b.y - position.y, edge.b.x - position.x))
-            else reference - Math.toDegrees(atan(lateral(position, edge) / max(CONVERGE_M, speed * CONVERGE_S)))
+            else reference - Math.toDegrees(atan(lateral(position, if (curved) edges[near] else edge) / max(CONVERGE_M, speed * CONVERGE_S)))
         val error = wrap(desired - heading)
         val misaligned = abs(wrap(reference - heading))
+        val lateralM = lateral(position, edges[near])
+        val enter = if (curved && abs(lateralM) < CURVE_PIVOT_LATERAL_M) CURVE_PIVOT_DEGREES else PIVOT_ENTER_DEGREES
         if (turning) { if (abs(error) <= PIVOT_EXIT_DEGREES) turning = false }
-        else if (misaligned > PIVOT_ENTER_DEGREES || abs(error) > PIVOT_LATERAL_DEGREES) turning = true
+        else if (misaligned > enter || abs(error) > PIVOT_LATERAL_DEGREES) turning = true
         if (turning) {
             val magnitude = (abs(error) * PIVOT_GAIN / degreesPerUnit).roundToInt().coerceIn(min(MIN_PIVOT, angular), angular)
             return Command(0, if (error > 0) magnitude else -magnitude, false, aim, min(stop, horizon))
@@ -303,17 +395,113 @@ class PathFollower(private val edges: List<SimEdge>, private val start: Int, pri
         val braking = if (i == end - 1) sqrt(2 * RANGE_END_DECELERATION * max(0.0, stop - STOP_MARGIN_M))
             else (min(minLinear, linear) * metersPerUnit).let { approach ->
                 sqrt(approach * approach + 2 * DECELERATION * max(0.0, stop - CORNER_REACH_M - CORNER_PLATEAU_M)) }
-        // Tight curve: speed limited so that the requested rotation stays below half of the
-        // available correction (painted border of radius ≈ 0.7 m: 44 °/s required at 0.54 m/s).
+        // Tight curve: speed limited so that the rotation the curve needs stays within [CURVE_FF_SHARE] of the limit
+        // ([curveSpeed]), and kept after the exit of a curve ([exitSpeed]).
         val curvature = curveDegrees / max(min(travelled, CURVE_WINDOW_M), 0.2)
-        val turnRate = angular / 2 * degreesPerUnit * CURVE_STEER_SHARE * if (rotationCalibrated) 1.0 else UNCALIBRATED_TURN_SHARE
+        val curveLimit = curveSpeed(curvature, angular, degreesPerUnit, rotationCalibrated)
         val governed = if (deviationM <= GOVERNOR_START_M) Double.POSITIVE_INFINITY
             else linear * metersPerUnit * (0.5 + 0.5 * ((GOVERNOR_FULL_M - deviationM) / (GOVERNOR_FULL_M - GOVERNOR_START_M)).coerceIn(0.0, 1.0))
-        val allowed = minOf(braking, governed, if (curvature > 1e-6) turnRate / curvature else Double.POSITIVE_INFINITY) / metersPerUnit
+        val allowed = minOf(braking, governed, curveLimit, exitSpeed(near, nearT, linear * metersPerUnit, angular, degreesPerUnit, rotationCalibrated)) / metersPerUnit
         val forward = (min(linear.toDouble(), allowed) * cos(Math.toRadians(error)).coerceAtLeast(0.0))
             .roundToInt().coerceIn(min(minLinear, linear), linear)
-        val steer = (error * STEER_GAIN / degreesPerUnit).roundToInt().coerceIn(-angular / 2, angular / 2)
+        if (!curved) {
+            val steer = (error * STEER_GAIN / degreesPerUnit).roundToInt().coerceIn(-angular / 2, angular / 2)
+            return Command(forward, steer, false, aim, min(stop, horizon))
+        }
+        // Feed-forward: rotation of the curve at the commanded speed, plus the proportional correction.
+        // Curvature taken [CURVE_LEAD_S] of travel ahead: the rotation of the robot follows its command with that lag.
+        val feedForward = forward * metersPerUnit *
+            localCurvature(near, nearT, (forward * metersPerUnit * CURVE_LEAD_S).coerceAtMost(CURVE_LOCAL_M))
+        val bound = (CURVE_STEER_LIMIT * angular).roundToInt()
+        val steer = ((error * STEER_GAIN + feedForward) / degreesPerUnit).roundToInt().coerceIn(-bound, bound)
         return Command(forward, steer, false, aim, min(stop, horizon))
+    }
+
+    /** Vertex at the end of edge [i] on an arc: one of its edges shorter than [CURVE_ARC_EDGE_M]. */
+    private fun arcVertex(i: Int): Boolean = i + 1 < edges.size && min(edges[i].meters, edges[i + 1].meters) < CURVE_ARC_EDGE_M
+
+    /** Signed turn (°, + to the left) at the vertex at the end of edge [i]; 0 at a stop vertex (pivot) or outside the range. */
+    private fun vertexTurn(i: Int): Double =
+        if (i < start || i + 1 >= end || stops[i]) 0.0 else wrap(headingOf(edges[i + 1]) - headingOf(edges[i]))
+
+    /**
+     * Edge of the route nearest to [position] among the followed edge and those left over the last [ARRIVAL_M], back to
+     * the last stop vertex (pivot): on short edges the followed edge is reached up to [ARRIVAL_M] before its end.
+     */
+    private fun nearestEdge(position: Point): Int {
+        var best = index
+        var bestDistance = Geometry.distance(position, edges[index].a, edges[index].b)
+        var k = index - 1
+        var behind = 0.0
+        while (k >= start && behind <= ARRIVAL_M + 0.05 && !stops[k]) {
+            val d = Geometry.distance(position, edges[k].a, edges[k].b)
+            if (d < bestDistance - 1e-9) { best = k; bestDistance = d }
+            behind += edges[k].meters; k--
+        }
+        return best
+    }
+
+    /**
+     * A stop vertex (pivot) lies within [ARRIVAL_M] of [position] among the vertices left over the last [ARRIVAL_M]:
+     * the followed edge may already be several short edges beyond it.
+     */
+    private fun stopJustReached(position: Point): Boolean {
+        var k = index - 1
+        var behind = 0.0
+        while (k >= start && behind <= ARRIVAL_M + 0.05) {
+            if (stops[k]) return position.distance(edges[k].b) <= ARRIVAL_M
+            behind += edges[k].meters; k--
+        }
+        return false
+    }
+
+    /**
+     * Tangent of the route at [t] along edge [e]: its heading, the turn of each vertex spread over [CURVE_BLEND_M] (at
+     * most half of the edge) on each side of it. On an arc cut into short edges this is the heading of the circle.
+     */
+    private fun tangentAt(e: Int, t: Double): Double {
+        val length = edges[e].meters; val s = t * length
+        val half = min(length / 2, CURVE_BLEND_M)
+        if (half < 1e-9) return headingOf(edges[e])
+        return headingOf(edges[e]) + when {
+            s < half -> -vertexTurn(e - 1) / 2 * (1 - s / half)
+            s > length - half -> vertexTurn(e) / 2 * (1 - (length - s) / half)
+            else -> 0.0
+        }
+    }
+
+    /**
+     * Signed curvature (°/m) [shift] metres ahead of [t] along edge [e] ([shift] at most [CURVE_LOCAL_M]): turns of
+     * the vertices within [CURVE_LOCAL_M] on each side of that point.
+     */
+    private fun localCurvature(e: Int, t: Double, shift: Double): Double {
+        var sum = 0.0
+        var ahead = (1 - t) * edges[e].meters
+        var k = e
+        while (ahead <= shift + CURVE_LOCAL_M && k + 1 < end) { sum += vertexTurn(k); k++; ahead += edges[k].meters }
+        var behind = t * edges[e].meters
+        k = e - 1
+        while (behind <= CURVE_LOCAL_M - shift && k >= start) { sum += vertexTurn(k); behind += edges[k].meters; k-- }
+        return sum / (2 * CURVE_LOCAL_M)
+    }
+
+    /**
+     * Speed (m/s) after the exit of a curve, robot at [t] along edge [e]: the speed of that curve ([curveSpeed] of the
+     * turns over [CURVE_WINDOW_M] behind its last curved vertex) for [CURVE_EXIT_HOLD_M], then up to [setSpeed] over
+     * [CURVE_EXIT_RAMP_M].
+     */
+    private fun exitSpeed(e: Int, t: Double, setSpeed: Double, angular: Int, degreesPerUnit: Double, rotationCalibrated: Boolean): Double {
+        var behind = t * edges[e].meters
+        var k = e - 1
+        while (k >= start && behind <= CURVE_EXIT_HOLD_M + CURVE_EXIT_RAMP_M) {
+            if (abs(vertexTurn(k)) >= 0.5) {
+                var sum = 0.0; var length = 0.0; var j = k
+                while (j >= start && length < CURVE_WINDOW_M) { sum += abs(vertexTurn(j)); length += edges[j].meters; j-- }
+                return exitLimit(behind, curveSpeed(sum / max(min(length, CURVE_WINDOW_M), 0.2), angular, degreesPerUnit, rotationCalibrated), setSpeed)
+            }
+            behind += edges[k].meters; k--
+        }
+        return Double.POSITIVE_INFINITY
     }
 
     private fun wrap(degrees: Double) = ((degrees + 540) % 360 + 360) % 360 - 180

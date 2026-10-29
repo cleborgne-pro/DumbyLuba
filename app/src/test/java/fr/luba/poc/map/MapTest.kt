@@ -25,6 +25,8 @@ class MapTest {
         val c=Commands();val msg=LubaMsg.parseFrom(c.mapData(42))
         assertEquals(MsgCmdType.MSG_CMD_TYPE_NAV,msg.msgtype)
         assertEquals(MsgDevice.DEV_NAVIGATION,msg.rcver)
+        // LUBA 1: same request, addressed to the main controller (PyMammotion get_msg_device).
+        assertEquals(MsgDevice.DEV_MAINCTL,LubaMsg.parseFrom(Commands.forRobot("Luba-DEMO0001").mapData(42)).rcver)
         assertEquals(8,msg.nav.todevGetCommondata.action)
         assertEquals(1,msg.nav.todevGetCommondata.subCmd)
         assertEquals(42L,msg.nav.todevGetCommondata.hash)

@@ -92,4 +92,30 @@ class DriftRecoveryTest {
         }
         assertTrue(error.message!!.contains("Recul impossible"))
     }
+
+    /**
+     * Border contact ([EdgeContactKind.LIMIT]): the collision lock only clears once the robot has moved away, so the
+     * resume always starts with a back-off of at least 30 cm, even with the chassis inside the surface; without a trail
+     * behind, the straight 30 cm back-off checked on the map; nothing possible behind: refused (obstacle path then).
+     */
+    @Test fun borderContactAlwaysBacksOffAtLeast30cm() {
+        // Robot on the first pass (y = 1), heading east, chassis inside: a trajectory exit would link from here.
+        val position = Point(6.0, 1.0)
+        val trail = listOf(Point(1.5, 1.0), position)
+        assertNull(DriftRecovery.plan(routes, routes, edges, null, 0, position, 0.0, trail).backOff)
+        val plan = DriftRecovery.plan(routes, routes, edges, null, 0, position, 0.0, trail, afterContact = true)
+        val back = requireNotNull(plan.backOff)
+        assertTrue(position.distance(back) >= fr.luba.poc.protocol.CollisionLatch.UNLOCK_BACK_OFF_M - 1e-9)
+        assertEquals(1.0, back.y, 1e-9)
+        assertEquals(back, plan.edges.first().a)
+        assertEquals(edges.last().b, plan.edges.last().b)
+        // Trail from another direction (contact right after a pivot): straight 30 cm back-off.
+        val blind = DriftRecovery.plan(routes, routes, edges, null, 0, position, 0.0, listOf(Point(6.0, 3.0), position), afterContact = true)
+        assertEquals(ObstacleBypass.BLIND_BACK_OFF_M, position.distance(requireNotNull(blind.backOff)), 1e-9)
+        // Border right behind the robot: no back-off, refused.
+        val corner = Point(0.45, 5.0)
+        assertThrows(IllegalArgumentException::class.java) {
+            DriftRecovery.plan(routes, routes, edges, null, 8, corner, 0.0, listOf(Point(0.45, 3.0), corner), afterContact = true)
+        }
+    }
 }

@@ -62,6 +62,20 @@ object ObstacleBypass {
     /** Default physical radius of an unknown obstacle hit ("Other" kind) and margin. */
     const val CONTACT_RADIUS_M = 0.2
     const val CONTACT_MARGIN_M = 0.3
+    /**
+     * Margin of the estimated disc for an object at the drawn border ([EdgeContactKind.OBJECT_AT_EDGE]): a planning
+     * estimate, not a robot protection (bumper, [fr.luba.poc.obstacles.FollowObstacleGuard] and physical radius
+     * unchanged). Clip radius 1.18 → 1.08 m, keep-out 0.93 → 0.83 m: one pass fewer cut away on each side in a narrow
+     * corridor (2026-10-28, 2 m corridor).
+     */
+    const val CONTACT_EDGE_MARGIN_M = 0.2
+    /**
+     * Detour budget of a repair ([detourRefusal]): links at most `max(DETOUR_FLOOR_M, DETOUR_RATIO × cutting skipped)`.
+     * 2026-10-28: 79.2 m of links for 14.1 m of cutting skipped at a wood pile at the border of a 2 m corridor, then
+     * 73.6 m around a hedge in transit.
+     */
+    const val DETOUR_FLOOR_M = 15.0
+    const val DETOUR_RATIO = 3.0
     /** Bypasses allowed per mission (contacts or added obstacles). */
     const val MAX_BYPASSES = 8
     /** Successive contacts around the same object: beyond this, object too large (to be drawn as a no-go zone). */
@@ -100,11 +114,28 @@ object ObstacleBypass {
 
     /** Unknown obstacle estimated from the pose stopped at the contact (front bumper, fused heading). */
     fun contactObstacle(id: String, position: Point, headingDegrees: Double, atMs: Long,
-                        robot: RobotEnvelope = RobotEnvelope.LUBA2): LocalObstacle {
+                        robot: RobotEnvelope = RobotEnvelope.LUBA2, marginM: Double = CONTACT_MARGIN_M): LocalObstacle {
         val center = fr.luba.poc.obstacles.TeachObstacle.estimateCenter(
             fr.luba.poc.obstacles.TeachContact(position.x, position.y, headingDegrees, atMs), CONTACT_RADIUS_M, robot)
         return LocalObstacle(id, fr.luba.poc.obstacles.ObstacleKind.OTHER, center.x, center.y, CONTACT_RADIUS_M,
-            CONTACT_MARGIN_M, createdAtMs = atMs, updatedAtMs = atMs, label = tr("Contact during the mission", "Contact pendant la mission"))
+            marginM, createdAtMs = atMs, updatedAtMs = atMs, label = tr("Contact during the mission", "Contact pendant la mission"))
+    }
+
+    /** Longest links accepted for a repair skipping [skippedCuttingM] of cutting ([detourRefusal]). */
+    fun detourBudgetM(skippedCuttingM: Double): Double = max(DETOUR_FLOOR_M, DETOUR_RATIO * skippedCuttingM)
+
+    /**
+     * Rule shared by actual mowing and simulation: reason why [repair] costs too much transit for what it saves
+     * ([DETOUR_FLOOR_M], [DETOUR_RATIO]), or null. The caller then defers the segment to the end of the mowing when it
+     * can ([SmartResume.deferBlocked]); otherwise (station route, no progress saved) the repair is kept, never worse
+     * than before.
+     */
+    fun detourRefusal(repair: RouteRepair): String? {
+        val budget = detourBudgetM(repair.skippedCuttingMeters)
+        if (repair.bypassMeters <= budget) return null
+        return tr("Bypass too long (%.1f m of links for %.1f m of cutting skipped, at most %.1f m)",
+            "Contournement trop long (%.1f m de raccords pour %.1f m de coupe sautés, au plus %.1f m)")
+            .format(repair.bypassMeters, repair.skippedCuttingMeters, budget)
     }
 
     /** Planner for the rest of the mission: navigation exclusions of the discovered obstacles. */

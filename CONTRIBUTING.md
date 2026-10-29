@@ -38,9 +38,9 @@ never by weakening the read-only barrier.
 
    For the firmware: `pio test -e native` in `firmware/esp32-gateway`. For the home server:
    `python3 -m unittest discover home-server/tests` and `node --test tools/relay-web-test.cjs tools/relay-map-test.cjs`
-   (web page). Shortcuts: `tools/check.sh quick` (without the long reference-map tests), `tools/check.sh planner`
-   (planner on the reference map), `tools/check.sh full` (build, tests, lint). Every planner change is checked on the
-   reference map (`ReferenceMapPlannerTest`). Compose screenshots (opt-in, English UI):
+   (web page). Shortcuts: `tools/check.sh quick` (without the planner sweeps on the reference map), `tools/check.sh planner`
+   (those sweeps only), `tools/check.sh full` (build, tests, lint), on the Fold variant deployed by `tools/deploy.sh`. Every planner change is checked on the
+   reference map (`ReferenceMapPlannerTest` and `ReferenceMapPlannerZamboniSpiralTest`, run by `tools/check.sh planner`). Compose screenshots (opt-in, English UI):
    `./gradlew :app:testDebugUnitTest --tests '*UiShots*' --tests '*UiScreenshotTest*' -PuiShots=<folder>`, then
    `tools/export-screenshots.py` to update `docs/images/`.
    JVM test coverage, Robolectric included (opt-in): `./gradlew :app:testDebugUnitTest

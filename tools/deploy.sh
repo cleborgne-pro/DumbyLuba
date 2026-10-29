@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Deploys the Fold variant, signed like debug but not debuggable, after validation.
-# Usage: tools/deploy.sh [--no-tests]   (all distinct ADB devices; DEPLOY_SERIALS="serial..." to restrict)
+# Usage: tools/deploy.sh [--no-tests]   (all distinct ADB devices; DEPLOY_SERIALS="serial..." to restrict;
+# DEPLOY_FULL_TESTS=1 runs the planner sweeps even when the branch does not touch the planner)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -50,9 +51,24 @@ fi
 echo ">> Target devices"
 for serial in "${targets[@]}"; do echo "   $serial ($("$ADB" -s "$serial" shell getprop ro.product.model | tr -d '\r'))"; done
 
+# Planner sweeps on the reference map (about two thirds of the test time) only when the branch touches the planner
+# (rule of 2026-10-29): files changed since the branch left origin/main, committed or not. DEPLOY_FULL_TESTS=1 forces them.
+planner_changed() {
+  [ "${DEPLOY_FULL_TESTS:-}" = "1" ] && return 0
+  local base
+  base="$(git merge-base HEAD origin/main 2>/dev/null)" || return 0
+  { git diff --name-only "$base"; git ls-files --others --exclude-standard; } | grep -qE \
+    '^app/src/main/java/fr/luba/poc/(map|planning|simulation|obstacles)/|^app/src/test/resources/|^app/src/test/java/fr/luba/poc/(map|planning|simulation)/|^app/build\.gradle\.kts$|^build\.gradle\.kts$|^gradle'
+}
+
 if [ "${1:-}" != "--no-tests" ]; then
-  echo ">> Build + tests + lint"
-  ./gradlew :app:assembleFold :app:testFoldUnitTest :app:lintFold
+  if planner_changed; then
+    echo ">> Build + tests + lint (planner touched: full suite)"
+    ./gradlew :app:assembleFold :app:testFoldUnitTest :app:lintFold
+  else
+    echo ">> Build + tests + lint (planner untouched: without the planner sweeps, DEPLOY_FULL_TESTS=1 to run them)"
+    ./gradlew :app:assembleFold :app:testFoldUnitTest :app:lintFold -PlubaQuickTests
+  fi
 else
   echo ">> Build (without tests)"
   ./gradlew :app:assembleFold

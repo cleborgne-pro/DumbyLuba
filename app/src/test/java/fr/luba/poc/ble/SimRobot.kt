@@ -63,7 +63,8 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
     var chargePerSecond = 0.5
     var manual = false; private set
     var bladesOn = false; private set
-    var heightMm = 60; private set
+    /** Deck height, published in `report.work`; settable to start from a deck that is not at 60 mm (DumbyLuba#2). */
+    var heightMm = 60
     var selfCheck = 0L
     /** `sensor_status` bits other than blades (0–8): bits 0–2 = bumper health alert. */
     var sensorLow = 0
@@ -197,6 +198,13 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
 
     /** The robot answers the map reading (off by default: the other tests check a robot that does not answer it). */
     var servesMap = false
+    /**
+     * Only receiver whose navigation messages the firmware handles (LUBA 1: `DEV_MAINCTL`, DumbyLuba#3); the others are
+     * ignored without answer. Null: every navigation message is handled.
+     */
+    var navReceiver: fr.luba.poc.proto.LubaMsgProto.MsgDevice? = null
+    /** Account number the firmware echoes in `subtype` of every message it sends (0: none), as seen in DumbyLuba#3. */
+    var echoSubtype = 0
 
     fun loadMap(map: fr.luba.poc.map.RobotMap) { servesMap = true; mapElements.clear(); map.shapes.forEach { mapElements[it.id] = it.type to it.points } }
 
@@ -269,6 +277,9 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
     /** Was a movement setpoint received since [since] (virtual time)? */
     fun movedCommandSince(since: Long): Boolean = trace.any { (at, label) -> at >= since && label.startsWith("move") }
     fun labelsSince(since: Long): List<String> = trace.filter { it.first >= since }.map { it.second }
+    /** `cut_knife_height` of each `mow_ctrl_by_hand` received since [since] (virtual time). */
+    fun handHeightsSince(since: Long = 0): List<Int> = received.filter { (at, m) -> at >= since && m.hasDriver() && m.driver.hasMowCtrlByHand() }
+        .map { it.second.driver.mowCtrlByHand.cutKnifeHeight }
 
     // ───── Command reception ─────
     fun receive(message: LubaMsg) {
@@ -308,6 +319,7 @@ class SimRobot(start: Point, startHeading: Double, seed: Long = 1) {
                 trace += now to if (bladesOn) "knife-on" else "knife-off"
             }
         }
+        if (message.hasNav() && navReceiver?.let { message.rcver != it } == true) return
         if (message.hasNav()) receiveNav(message.nav, now)
         if (message.hasNav() && message.nav.hasTodevTaskctrl()) {
             when (val action = message.nav.todevTaskctrl.action) {
@@ -495,6 +507,7 @@ class SimLink(private val robot: SimRobot, private val listener: RobotLink.Liste
 
     fun notify(message: LubaMsg) {
         if (!connected) return
-        outgoing.encode(message.toByteArray(), mtu).forEach { listener.onNotification(this, it) }
+        val sent = if (robot.echoSubtype != 0) message.toBuilder().setSubtype(robot.echoSubtype).build() else message
+        outgoing.encode(sent.toByteArray(), mtu).forEach { listener.onNotification(this, it) }
     }
 }

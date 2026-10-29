@@ -80,4 +80,21 @@ class EventLogExportTest {
         assertTrue(entries(raw).values.joinToString().contains("D4:3D:39:AA:BB:CC"))
         log.close()
     }
+
+    /** The part stays open between lines: every line in order, a new part past 8 MB, the same lines in the external copy. */
+    @Test fun linesKeepTheirOrderAcrossAPartRotationAndInTheExternalCopy() {
+        val log = EventLog(context) { error -> throw AssertionError(error) }
+        val padding = "x".repeat(64 * 1024)
+        repeat(140) { log.append("probe", "line $it $padding") }
+        val written = CountDownLatch(1)
+        log.history { written.countDown() }   // same writer thread: runs after every line
+        assertTrue(written.await(30, TimeUnit.SECONDS))
+        log.close()
+        fun lines(root: File?): List<String> = root?.walkTopDown().orEmpty().filter { it.extension == "jsonl" }.sortedBy { it.name }
+            .flatMap { it.readLines() }.map { org.json.JSONObject(it).getString("detail").substringBefore(" x") }.toList()
+        val parts = File(context.filesDir, "diagnostics").walkTopDown().filter { it.extension == "jsonl" }.map { it.name }.toSet()
+        assertEquals(setOf("0000.jsonl", "0001.jsonl"), parts)
+        assertEquals(List(140) { "line $it" }, lines(File(context.filesDir, "diagnostics")))
+        assertEquals(List(140) { "line $it" }, lines(context.getExternalFilesDir("diagnostics")))
+    }
 }

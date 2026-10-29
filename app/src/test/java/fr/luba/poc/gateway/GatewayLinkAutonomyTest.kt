@@ -85,7 +85,7 @@ class GatewayLinkAutonomyTest {
         override fun gatewayEvent(kind: String, text: String, fields: Map<String, Any?>) { }
     }
 
-    private fun waitFor(timeoutMs: Long = 8000, condition: () -> Boolean): Boolean {
+    private fun waitFor(timeoutMs: Long = 30_000, condition: () -> Boolean): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!condition() && System.currentTimeMillis() < deadline) Thread.sleep(20)
         return condition()

@@ -20,18 +20,26 @@ class RollingTurnExecutionTest {
                 val plan = ReferenceRoutes.plan(map, base, zone, style)
                 val (edges, approach) = ReferenceRoutes.routeEdges(map, base, zone, plan)
                 val metrics = plan.report?.selected?.metrics
-                listOf(30, 50).map { speed -> speed to RouteExecutionModel.drive(edges, RouteExecutionModel.Robot(), speed, approach) }.also { executed ->
+                val windows = RouteManoeuvres.find(edges)
+                listOf(30, 50).map { speed -> speed to RouteExecutionModel.drive(edges, RouteExecutionModel.Robot(), speed, approach, windows = windows) }.also { executed ->
                     executed.forEach { (speed, run) ->
-                        println("ROLLING $name ${style.name} $speed %%: plan %.0f m, %.0f m transit, %d pivots, %.0f°, coverage %.1f %% | %s".format(
+                        println("ROLLING $name ${style.name} $speed %%: plan %.0f m, %.0f m transit, %d pivots, %.0f°, coverage %.1f %% | %s | %s".format(
                             metrics?.distanceM ?: 0.0, metrics?.transitM ?: 0.0, metrics?.pivots ?: 0, metrics?.turnDegrees ?: 0.0,
-                            100 * (metrics?.coverage ?: 0.0), run))
+                            100 * (metrics?.coverage ?: 0.0), run, TurnBench.summary(listOf(run))))
                     }
                 }
             }
             for ((style, executed) in runs) for ((speed, run) in executed)
                 if (run.worst > 0.27 || run.blocked > 0 || run.midPivots > 0) failures += "$name $style $speed %: $run"
-            // Time spent pivoting in place (lawn wear): lower at every speed. The tracking still pivots a little on some
-            // rolling U-turns (reference heading 25 cm ahead on a 0.35 m arc), so the number of pivots is not the measure.
+            // Rolling U-turns (turn tracking, step C of docs/TRACKING_TURNS_AND_BORDER_CONTACTS.md): no pivot inside the arc,
+            // true deviation within 15 cm (p90 within 8 cm) and quicker than before the tangent reference and the
+            // feed-forward (bench of 2026-10-28 at 30 %: 15.0 to 15.2 s per U, p90 17 cm, 3 to 4 pivots per U).
+            for ((speed, run) in runs.getValue(TurnStyle.LAWN)) {
+                val t = TurnBench.totals(listOf(run))
+                if (t.uCount == 0 || t.uPivots > 0 || t.uMax > 0.15 || t.uP90 > 0.08 || (speed == 30 && t.uSeconds > 13.5))
+                    failures += "$name LAWN $speed %: ${TurnBench.summary(listOf(run))}"
+            }
+            // Time spent pivoting in place (lawn wear): lower at every speed.
             for (k in runs.getValue(TurnStyle.FAST).indices) {
                 val (speed, fast) = runs.getValue(TurnStyle.FAST)[k]
                 val lawn = runs.getValue(TurnStyle.LAWN)[k].second

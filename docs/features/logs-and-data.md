@@ -55,7 +55,8 @@ IP address gets the same pseudonym in every file of the archive.
 | Data | Treatment |
 |---|---|
 | Robot and RTK base names (`Luba-VSxxxx`, `Yuka-…`, `RTK-…`) | model prefix kept, rest replaced: `Luba-VS‹1›` |
-| Decoded messages (`decoded`, `mapNav`) | value of `latitude`, `longitude`, `lat`, `lon`, `rtk_base_num`, RTK credentials, Wi-Fi names and passwords, `wifi_mac`, `ip`, `gateway`, URLs, IMEI/IMSI/ICCID, APN, product and device keys, device names, user/device/account ids, tokens replaced by `"‹removed›"` |
+| Decoded messages (`decoded`, `mapNav`, `lastPerception`) | value of `latitude`, `longitude`, `lat`, `lon`, `rtk_base_num`, RTK credentials, Wi-Fi names and passwords, `wifi_mac`, `ip`, `gateway`, URLs, IMEI/IMSI/ICCID, APN, product and device keys, device names, user/device/account ids, tokens replaced by `"‹removed›"` |
+| Mammotion account number | `subtype` of the decoded messages (the robot echoes the account number there), `user_account` / `userAccount`, `preemptAccount`: replaced by `"‹removed›"` in a decoded message, a JSON field (number or string, at any depth) or a free text (`userAccount=…`, `subtype: …`). The app also leaves `subtype` out of the `decoded` form it writes, raw logs included, and only notes `accountEcho` (true when the robot sent a number) |
 | MAC addresses | `‹mac-1›`, `‹mac-2›`… |
 | IP addresses (private ranges, after `/`, before `:port`) | `‹ip-1›`…; firmware versions are left alone |
 | E-mails, tokens (JWT) | `‹email›`, `‹token›` |

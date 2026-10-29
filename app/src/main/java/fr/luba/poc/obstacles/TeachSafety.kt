@@ -56,7 +56,8 @@ object TeachSafety {
         Triple(tr("Battery > $batteryFloor %", "Batterie > $batteryFloor %"), battery != null && battery > batteryFloor, tr("Battery unknown or ≤$batteryFloor %", "Batterie inconnue ou ≤$batteryFloor %")),
         Triple(tr("Robot ready (state 11)", "Robot prêt (état 11)"), robotState == 11, tr("Robot not ready (MODE_READY=11 expected)", "Robot non prêt (MODE_READY=11 attendu)")),
         Triple(tr("No active protection", "Aucune protection active"), fr.luba.poc.protocol.SelfCheck.nominal(selfCheck), fr.luba.poc.protocol.SelfCheck.refusal(selfCheck)),
-        Triple(tr("Bumper without alert", "Pare-chocs sans alerte"), sensors != null && sensors and 7 == 0, tr("Bumper health alert", "Alerte de santé bumper")),
+        Triple(tr("Bumper without alert", "Pare-chocs sans alerte"), sensors != null && sensors and 7 == 0,
+            fr.luba.poc.protocol.BumperRest.refusal(sensors, fr.luba.poc.protocol.ModelSupport.motionValidated(name))),
         Triple(tr("Blades stopped", "Lames arrêtées"), sensors != null && sensors and (7 shl 9) == 0, tr("Blades not confirmed OFF by telemetry", "Lames non confirmées OFF par la télémétrie")),
     )
 

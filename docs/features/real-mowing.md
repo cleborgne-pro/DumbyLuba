@@ -83,6 +83,16 @@ these conditions is missing:
 2. Link to the first cutting point, then edge tracking. Each segment with the same blade state is followed
    **without stopping**: look-ahead target along the route, heading correction while moving, pivot on the spot at
    sharp corners, slowing down before a corner or the end of a segment.
+   **Curves** (rolling U-turns, loops, rounded borders, outer lap): the robot steers along the tangent of the route
+   under it and is given the rotation of the curve directly, instead of aiming at a point 25 cm ahead that made it cut
+   inside the arc and pivot 3 to 4 times per rolling U-turn. It no longer pivots inside an arc (unless 40° off), drives
+   the arc at up to 60 % of the rotation of the speed setting (22 °/s at most), keeps that speed 30 cm after the curve
+   and speeds up over the next 50 cm. On the execution bench at 63 %: a rolling U-turn in 9.3 s instead of 13.5 s,
+   deviation p90 3.4 cm instead of 17.5 cm, no pivot instead of 3 per U; details in
+   [TRACKING_EXECUTION.md](../TRACKING_EXECUTION.md#curves-tangent-reference-and-feed-forward-2026-10-28). Only arcs
+   made of short edges (under 15 cm) are tracked this way; the bends of a polygonal path, such as the outlines recorded
+   by the map sync, keep the former tracking. Same rule on the Fold, both gateways and the simulation. Not tried on the
+   robot yet.
 3. **Blades**: the height must be reported by the robot before cutting; rotation is confirmed within 5 s, stopping
    within 3 s. Links outside zones are done with blades stopped. **Height passes** (0.45.0): each edge of the
    prepared route carries the height of its pass; at the first edge of a new pass, tracking stops, commands the new
@@ -112,6 +122,9 @@ obstacles are computed on this center. Heading and speed are still measured on t
 - Speeds remain **raw units** not calibrated in m/s: 100 % ≈ 500 units (≈ 0.48 m/s measured), 30 % = 150 units.
 - The rotation gain is calibrated online and stored per robot; beyond a 12 cm deviation, speed is reduced
   progressively.
+
+In the log, `route_manoeuvres` lists the U-turns, loops and curves of the route with their planned duration, and
+`route_curve_stats` gives for each of them, once driven, its duration, median speed and largest deviation.
 
 ## Automatic stops
 
@@ -156,6 +169,11 @@ consecutive exit at the same place (passage too narrow: widen the zone or mark i
 the mission, if the chassis can get back in neither by reversing along its trail nor by moving straight ahead, or
 for a drift into the base safety zone.
 
+**Contact at the border of the zone** (Unreleased): a bumper contact or a collision lock against the limit of the
+zone after a drift or a pivot slide takes the same resume, preceded by a back-off of at least 30 cm under the lock and
+the wait for the lock to clear; no obstacle is estimated and no bypass is made
+([border contact](obstacles.md#contact-at-the-border-of-the-zone), `route_edge_contact` event).
+
 Robot inside the reserve of an obstacle already being bypassed (pivot or skid near an obstacle, for example in front
 of the base): same resume. The link starts with a **straight-line clearance** checked against the physical radius of
 the obstacles; during this clearance, only a movement that brings the robot closer to the obstacle, or a pivot on the
@@ -174,7 +192,10 @@ mowing:
    (`route_protection_pause` then `route_protection_cleared` events). On Oct 19 at 14:50, a collision lock (25)
    without a contact code appeared during a 150° pivot that had slid the robot 24 cm towards the border; once it
    cleared, the resume was refused ("Back-off impossible: chassis outside the zone along the whole trail") because
-   the trail was ahead of the robot. Since 1.1.5 the resume leaves straight ahead in that case.
+   the trail was ahead of the robot. Since 1.1.5 the resume leaves straight ahead in that case. Such a lock without
+   a contact code, robot within 35 cm of the zone limit and sensors clear, is now a
+   [border contact](obstacles.md#contact-at-the-border-of-the-zone) (Unreleased): back-off of at least 30 cm,
+   wait for the lock, resume on the same route, no obstacle.
 
 Protection 41 is the "weak satellite signal" of the Mammotion app ([positioning lost](safety.md#positioning-lost-self-check-41)):
 for it and the other positioning conditions (40, 42, 99), the wait lasts up to **5 minutes**. A short loss is first

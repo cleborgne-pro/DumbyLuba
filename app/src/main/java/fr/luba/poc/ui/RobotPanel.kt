@@ -705,7 +705,7 @@ private fun DataEntry(title: String, detail: String, maxLines: Int = 3) {
 
 /** Decoded states of the bumper and the 4 ultrasonic sensors (`sensor_status`, 3 bits each), live and during the capture. */
 @Composable
-private fun SensorSlotsGroup(sensorStatus: Int?, probe: fr.luba.poc.diagnostics.SensorProbeSnapshot) {
+private fun SensorSlotsGroup(sensorStatus: Int?, probe: fr.luba.poc.diagnostics.SensorProbeSnapshot, bumperRest: Int = 0) {
     SettingsGroup(tr("Ultrasonic sensors and bumper (decoded sensor_status)", "Ultrasons et bumper (sensor_status décodé)")) {
         fr.luba.poc.diagnostics.SensorSlot.entries.forEach { slot ->
             val live = sensorStatus?.let(slot::raw)
@@ -714,6 +714,8 @@ private fun SensorSlotsGroup(sensorStatus: Int?, probe: fr.luba.poc.diagnostics.
             KeyValueRow(slot.label, fr.luba.poc.diagnostics.SensorSlot.stateLabel(live) + history)
         }
         InfoNote(tr("0 = OK, 1 = warning, 2 to 7 = error or obstacle (Mammotion app decoding via PyMammotion).", "0 = OK, 1 = alerte, 2 à 7 = erreur ou obstacle (décodage de l'app Mammotion via PyMammotion)."))
+        if (bumperRest != 0) InfoNote(tr("Bumper at $bumperRest since the connection, robot at rest, no contact: taken as this robot's resting value and ignored by the safety checks until it changes. Contacts (code 1014, self-check 25) still stop the robot.",
+            "Pare-chocs à $bumperRest depuis la connexion, robot au repos, sans contact : pris comme valeur de repos de ce robot et ignoré par les contrôles de sécurité tant qu'il ne change pas. Les contacts (code 1014, self-check 25) arrêtent toujours le robot."))
     }
 }
 
@@ -775,7 +777,7 @@ private fun SensorsPage(robot: RobotBle, state: RobotUi, back: () -> Unit, expor
             z.samples.forEach { DataEntry("Message", it, maxLines = 3) }
         }
         PerceptionMapGroup(state.perceptionMap)
-        SensorSlotsGroup(state.telemetry.sensorStatus, probe)
+        SensorSlotsGroup(state.telemetry.sensorStatus, probe, state.bumperRest)
         SensorVisionGroup(probe.vision)
         SettingsGroup(tr("Vision, SLAM and camera", "Vision, SLAM et caméra")) {
             val e = probe.extras

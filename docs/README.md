@@ -82,7 +82,7 @@
 |---|---|
 | [../firmware/esp32-gateway/README.md](../firmware/esp32-gateway/README.md) | ESP32 gateway firmware (PlatformIO): build, upload, over-the-air update, native tests |
 | [../firmware/esp32-diag/README.md](../firmware/esp32-diag/README.md) | ESP32 diagnostics firmware: board checks before the gateway (charging, Wi-Fi, Bluetooth scan, latency), no robot control |
-| [../hardware/luba-esp32-qi/README.md](../hardware/luba-esp32-qi/README.md) | ESP32 enclosure charged by induction: STL parts, shopping list |
+| [../hardware/luba-esp32-dock/README.md](../hardware/luba-esp32-dock/README.md) | ESP32 enclosure charged by contacts at the base: STL parts, shopping list |
 | [../home-server/README.md](../home-server/README.md) | home server: installation and usage |
 
 ## Project

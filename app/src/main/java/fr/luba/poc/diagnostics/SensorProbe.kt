@@ -204,7 +204,8 @@ class SensorProbe {
         stream?.let { it.count++; it.lastAt = now; it.summary = summary(message) }
         val perceptionTagged = message.msgtype == MsgCmdType.MSG_CMD_TYPE_PEPT ||
             message.sender == MsgDevice.DEV_PERCEPTION || message.rcver == MsgDevice.DEV_PERCEPTION
-        if (perceptionTagged) { perception++; lastPerception = message.toString().take(MAX_TEXT) }
+        // Without `subtype`, the Mammotion account number echoed by the robot.
+        if (perceptionTagged) { perception++; lastPerception = message.toBuilder().clearSubtype().build().toString().take(MAX_TEXT) }
         if (message.hasPept()) { pept++; lastPerception = message.pept.toString().take(MAX_TEXT) }
         if (message.hasSys() && message.sys.hasToappReportData() && message.sys.toappReportData.hasDev()) {
             val value = message.sys.toappReportData.dev.sensorStatus

@@ -122,8 +122,12 @@ private fun ObstacleLiveStatus(state: RobotUi) {
     SettingsGroup(tr("Live status", "État en direct")) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             val alert = t.sensorStatus?.let { it and 7 }
-            StatTile(Icons.Rounded.Shield, when (alert) { null -> tr("unknown", "inconnu"); 0 -> tr("clear", "libre"); else -> tr("alert $alert", "alerte $alert") }, tr("Bumper", "Pare-chocs"), Modifier.weight(1f),
-                if (alert == 0) MammotionColors.GreenDeep else MammotionColors.Warning)
+            // Resting value learnt on this connection (DumbyLuba#1): shown as such, ignored by the guards.
+            val resting = alert != null && alert != 0 && alert == state.bumperRest
+            StatTile(Icons.Rounded.Shield, when {
+                alert == null -> tr("unknown", "inconnu"); alert == 0 -> tr("clear", "libre")
+                resting -> tr("alert $alert (at rest)", "alerte $alert (repos)"); else -> tr("alert $alert", "alerte $alert") }, tr("Bumper", "Pare-chocs"), Modifier.weight(1f),
+                if (alert == 0 || resting) MammotionColors.GreenDeep else MammotionColors.Warning)
             StatTile(Icons.Rounded.Sensors, bumperCodeLabel(state.lastBumperCode), tr("Event", "Événement"), Modifier.weight(1f),
                 if (state.lastBumperCode == null) MammotionColors.TextSecondary else MammotionColors.Danger)
             StatTile(if (state.teach.contactValidated) Icons.Rounded.CheckCircle else Icons.Rounded.HelpOutline,
@@ -141,7 +145,8 @@ private fun ObstacleLiveStatus(state: RobotUi) {
 private fun TeachPreconditions(state: RobotUi) {
     val t = state.telemetry
     SettingsGroup(tr("Preconditions", "Préconditions")) {
-        PreconditionList(TeachSafety.checks(state.selected?.name, state.ageMs, t.battery, if (state.teach.running) 11 else t.robotState, t.sensorStatus, t.selfCheck,
+        PreconditionList(TeachSafety.checks(state.selected?.name, state.ageMs, t.battery, if (state.teach.running) 11 else t.robotState,
+            fr.luba.poc.protocol.BumperRest.guard(state.selected?.name, t.sensorStatus, state.bumperRest, android.os.SystemClock.elapsedRealtime()), t.selfCheck,
             state.campaign.running, state.bladeTestActive, state.navTest.running, state.mapLoading).map { (label, ok, _) -> label to ok })
     }
 }

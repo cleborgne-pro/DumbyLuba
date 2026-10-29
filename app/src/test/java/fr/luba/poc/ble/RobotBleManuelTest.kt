@@ -59,6 +59,51 @@ class RobotBleManuelTest {
         bench.ble.stopManual()
     }
 
+    /**
+     * DumbyLuba#2 (LUBA 3): the deck moved while driving with the joystick. The manual mode held for the bumper sent the
+     * session's 60 mm; it now sends the height the robot reports, so the deck stays where it is.
+     */
+    @Test fun `joystick keeps the reported deck height, including on release and STOP`() {
+        bench.sim.heightMm = 40
+        bench.connect()
+        bench.until(3000, "height reported") { bench.state.telemetry.bladeHeightMm == 40 }
+        val since = bench.now
+        bench.ble.beginManualGesture()
+        assertTrue(hold(300, 0, 3000))
+        bench.ble.stopManual()
+        bench.advance(1500)
+        val heights = bench.sim.handHeightsSince(since)
+        assertTrue("Manual mode held and left: $heights", heights.size >= 4)
+        assertEquals(heights.toString(), setOf(40), heights.toSet())
+        assertEquals(40, bench.sim.heightMm)
+        // Global STOP while driving: blades OFF with the same height.
+        val stopped = bench.now
+        bench.ble.beginManualGesture()
+        assertTrue(hold(300, 0, 1500))
+        bench.ble.stop()
+        bench.until(3000, "closing") { bench.state.connection == ConnectionState.Disconnected }
+        val atStop = bench.sim.handHeightsSince(stopped)
+        assertTrue(atStop.isNotEmpty())
+        assertEquals(atStop.toString(), setOf(40), atStop.toSet())
+        assertEquals(40, bench.sim.heightMm)
+    }
+
+    /** A height set by the user is kept by the joystick that follows (reported height, not a stale request). */
+    @Test fun `joystick after a height setting keeps the height reached`() {
+        bench.connect()
+        bench.ble.setBladeHeight(45)
+        bench.until(20_000, "height result") { !bench.state.bladeHeightPending }
+        assertEquals(45, bench.sim.heightMm)
+        bench.advance(1500)
+        val since = bench.now
+        bench.ble.beginManualGesture()
+        assertTrue(bench.state.manualStatus, hold(300, 0, 2000))
+        bench.ble.stopManual()
+        bench.advance(1000)
+        assertEquals(setOf(45), bench.sim.handHeightsSince(since).toSet())
+        assertEquals(45, bench.sim.heightMm)
+    }
+
     @Test fun `joystick out of bounds or robot other than LUBA 2, refused without command`() {
         bench.connect()
         bench.ble.beginManualGesture()

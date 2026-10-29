@@ -24,7 +24,7 @@ constexpr bool IP5306 = false;  // power read from the BAT_SENS and PWR_SENS div
 struct Power {
   bool ok = false;      // reading available (IP5306 answered; cell voltage plausible or 5 V present)
   bool keepOn = false;  // IP5306 only: output kept on while on battery
-  bool vin = false;     // external 5 V present (USB or Qi receiver); reported as "charging"
+  bool vin = false;     // external 5 V present (USB or dock contacts); reported as "charging"
   bool full = false;    // IP5306 only: charge full (unknown on the Olimex board)
   int level = -1;       // battery level (%), -1 unknown
   int batteryMv = -1;   // cell voltage (mV), -1 if the board does not measure it (T-Call)

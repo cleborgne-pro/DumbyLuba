@@ -35,7 +35,7 @@ class RobotBleBlockageTest {
     }
 
     private val seen = linkedSetOf<String>()
-    private fun watch() { bench.sim.onTick = { bench.state.events.takeLast(20).forEach { e ->
+    private fun watch() { bench.sim.onTick = { bench.newEvents().forEach { e ->
         if (Regex("locage|reporté|abandon|Bloqué|contourn|réparé|Contact").containsMatchIn(e)) seen += e } } }
     private fun seen(text: String) = seen.count { it.contains(text) }
 

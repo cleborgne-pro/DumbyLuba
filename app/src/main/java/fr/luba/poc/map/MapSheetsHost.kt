@@ -142,6 +142,7 @@ internal fun MapSettingsDialogs(
             availableLayers(samples, signalView.relief != null, layers.surveySignal) else emptyList(),
             layers.surveySignal, layers.showSignalHeat, layers.layersOpen, simulatedSurvey),
         mapLoading = state.mapLoading,
+        mapReadFailure = mapReadFailureShown(state),
         fetchEnabled = mapFetchAllowed(state, simulating),
         accountEnabled = !simulating,
         demoEnabled = !prep.computing && !state.robotRoute.running && !state.mowing.active && !simulating,

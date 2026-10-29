@@ -69,6 +69,10 @@ With the [Mammotion account](mammotion-account.md) connected and no Bluetooth li
   [below](#leaving-the-base-first)).
 - Blades always stopped; at most 600 s; destination within a 200 m radius; battery above 30 %; fresh state and
   position and a known heading. Stop if no progress towards the point for 15 s.
+- The cutting deck stays at the height the robot reports: the manual mode held for the bumper sent 60 mm until
+  version 1.16.0, which moved a deck set elsewhere (same rule as the
+  [joystick](manual-control.md#cutting-deck-height-while-driving); also the obstacle bypass, the frontal border test
+  and the map sync). Not tried on a robot yet.
 - Refusals: "Destination inside a no-go zone or an obstacle", "Destination too close to a no-go zone or an obstacle",
   "No safe path to this point (zones not connected by a recorded passage?)", "The robot is already at the requested
   point", and beyond the zones the limits below.

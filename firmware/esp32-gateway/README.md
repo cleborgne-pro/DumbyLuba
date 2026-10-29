@@ -74,8 +74,9 @@ The diagnostics firmware (`firmware/esp32-diag`) stays T-Call only.
 ### Olimex board: battery and wiring
 
 - Charger BL4054B (linear, 4.2 V, about 100 mA as read from the schematic) with a power path: the 5 V of either USB-C
-  port, or of a Qi receiver, supplies the board and charges the cell beside it. **The board has no cell protection**
-  (no over-discharge, over-current or short-circuit cut-off): use a **protected 18650** only. No temperature input on
+  port (in the enclosure, the 5 V of the dock contacts through a USB-C plug) supplies the board and charges the cell
+  beside it. **The board has no cell protection** (no over-discharge, over-current or short-circuit cut-off): use a
+  **protected 18650** only. No temperature input on
   the charger: nothing stops charging in heat or frost (most cells are specified for charging between 0 and 45 °C,
   see the cell's datasheet); the board itself is specified up to 65 °C ambient.
 - Battery connector: 2 pins, 2.0 mm pitch (probably JST PH: to check). **Check the polarity with a multimeter before
@@ -389,13 +390,14 @@ the Olimex board, free memory: `heap`, then `internal` and its lowest value sinc
 
 ## Tests
 
-- `pio test -e native` (206 tests in six suites; `-f test_core` etc. for one). `test_autonomy` (53): autonomous
+- `pio test -e native` (213 tests in six suites; `-f test_core` etc. for one). `test_autonomy` (53): autonomous
   tracking frame codecs, the Kotlin `LegRunnerTest` scenarios on a port of its simulated robot, gateway end to end
   (upload, refusals, Wi-Fi drop with sample replay, abort, deliberate departure, pilot absent too long, docking
   without pilot), gateway fallen off. `test_telemetry` (32): robot telemetry decoding, observer, error catalogue,
   lift, navigation guards, tracking commands byte for byte against protobuf-java. `test_geom` (20): WKB, free
-  surface index, chassis envelope compared with JTS on the reference map. `test_follow` (59): path follower, dead
-  reckoning, return drift, slides, station exit. `test_power` (7): battery level of the Olimex board (divider,
+  surface index, chassis envelope compared with JTS on the reference map. `test_follow` (61): path follower (curve tracking
+  with the Kotlin parity vectors of `PathFollowerTest`: tangent reference, feed-forward, curve speed, exit of a curve),
+  dead reckoning, return drift, slides, station exit. `test_power` (12): battery level of the Olimex board (divider,
   conservative curve, unknown on 5 V or out of range). `test_core` (35): BluFi (splitting, reassembly, CRC, sequence loss), protobuf encoding of the stop and
   sync frames, blade tracking, cutting heights of every model, refusal to inject in the middle of a message, TCP
   protocol, protocol texts identical to the Android gateway's, mower name filter, pairing link, attempt limiting.

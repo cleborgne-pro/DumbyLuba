@@ -190,4 +190,19 @@ class MapSyncBenchTest {
         assertTrue(item.refusal, item.refusal!!.contains("station"))
         assertTrue(MapSyncPlanner.STATION_CLEARANCE_M < 1.0)
     }
+
+    /** DumbyLuba#2: the moves of the sync (blades stopped) keep the reported deck height instead of 60 mm. */
+    @Test fun `sync moves keep the reported deck height`() {
+        bench.sim.heightMm = 40
+        ready(AddedNoGo(1, 0L, "Tree", rect(7.0, 3.0, 1.0, 1.0), NoGoOrigin.SHAPE))
+        bench.until(3000, "height reported") { bench.state.telemetry.bladeHeightMm == 40 }
+        val since = bench.now
+        val run = sync()
+        assertEquals("${run.message}\n${bench.dump()}", SyncPhase.DONE, run.phase)
+        bench.advance(2000)
+        val heights = bench.sim.handHeightsSince(since)
+        assertTrue(heights.isNotEmpty())
+        assertEquals(heights.toString(), setOf(40), heights.toSet())
+        assertEquals(40, bench.sim.heightMm)
+    }
 }

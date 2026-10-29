@@ -27,6 +27,11 @@ import fr.luba.poc.proto.MctrlNavProto.*
  *   ([ShapeKind.UNKNOWN]), even without points, the map completes and the planning and moves refuse it
  *   ([MapShape.refusesPlanning], [MapShape.refusesMoves]); a frame that cannot be understood is skipped, only the size
  *   limits ([LimitException]) end the reading.
+ * Every navigation message (`MSG_CMD_TYPE_NAV`, 240) received during the reading is counted ([navFrames]) and noted by
+ * the name of its sub-message, never its content: the first one of each kind (`map_nav_rx`) and each one the reading
+ * does not handle (`map_nav_unhandled`), so that a robot which answers on another sub-message, or not at all
+ * (DumbyLuba#3), can be told apart in the log. A reading whose element list never came while no navigation message was
+ * received at all fails with "no answer from the robot".
  * [clock]: monotonic milliseconds. [notices]: steps to record in the log, drained by the caller.
  */
 class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = null,
@@ -54,6 +59,13 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
     private val abandoned = mutableSetOf<Long>()
     private val pending = mutableListOf<Notice>()
     private var ignoredNotices = 0
+    /** Navigation messages received during the reading, by sub-message name. */
+    private val navKinds = sortedMapOf<String, Int>()
+    private var navNotices = 0
+    /** Navigation messages (`MSG_CMD_TYPE_NAV`) received during the reading, handled or not. */
+    var navFrames = 0; private set
+    /** Navigation messages received, by sub-message name (`TOAPP_GETHASH_ACK`…), for the log. */
+    val navSummary: Map<String, Int> get() = navKinds.toMap()
     private var total = 0
     private var hashList: List<Long> = emptyList()
     private var hashSet: Set<Long> = emptySet()
@@ -83,8 +95,22 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
     }
     private fun index(h: Long) = hashList.indexOf(h) + 1
 
+    /** Counts and notes a navigation message by the name of its sub-message (no content: positions, hashes, names). */
+    private fun navReceived(message: LubaMsg) {
+        val kind = if (message.hasNav()) message.nav.subNavMsgCase.name else "NONE"
+        val seen = navKinds.getOrDefault(kind, 0)
+        navKinds[kind] = seen + 1; navFrames++
+        val handled = message.hasNav() && message.nav.subNavMsgCase in HANDLED_NAV
+        val fields = mapOf("subMessage" to kind, "sender" to message.sender.name, "receiver" to message.rcver.name,
+            "msgAttr" to message.msgattr.name, "navFrames" to navFrames)
+        if (navNotices >= MAX_NAV_NOTICES) return
+        if (!handled) { navNotices++; note("map_nav_unhandled", tr("Navigation message not handled by the map reading: $kind", "Message de navigation non traité par la lecture de carte : $kind"), fields) }
+        else if (seen == 0) { navNotices++; note("map_nav_rx", tr("First navigation message $kind of the reading", "Premier message de navigation $kind de la lecture"), fields) }
+    }
+
     fun accept(message: LubaMsg, commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
         stationReader.accept(message)
+        if (message.msgtype == fr.luba.poc.proto.LubaMsgProto.MsgCmdType.MSG_CMD_TYPE_NAV || message.hasNav()) navReceived(message)
         if (!message.hasNav() || failure != null) return emptyList()
         val n = message.nav; val out = mutableListOf<ByteArray>()
         if (n.hasToappGethashAck()) { val f = n.toappGethashAck
@@ -266,8 +292,11 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
         if (failure != null || clock() < limit) return emptyList()
         if (!rootsComplete) {
             if (rootAttempts >= maxAttempts) {
-                failure = tr("map element list not received after $rootAttempts requests", "liste des éléments de carte non reçue après $rootAttempts demandes")
-                note("map_hash_list_failed", failure!!, mapOf("attempts" to rootAttempts, "framesReceived" to roots.size, "totalFrames" to total)); deadline = null
+                failure = if (navFrames == 0) tr("no answer from the robot (map element list requested $rootAttempts times, no navigation message received)",
+                    "aucune réponse du robot (liste des éléments de carte demandée $rootAttempts fois, aucun message de navigation reçu)")
+                else tr("map element list not received after $rootAttempts requests", "liste des éléments de carte non reçue après $rootAttempts demandes")
+                note("map_hash_list_failed", failure!!, mapOf("attempts" to rootAttempts, "framesReceived" to roots.size, "totalFrames" to total,
+                    "navFrames" to navFrames, "navMessages" to navSummary)); deadline = null
                 return emptyList()
             }
             rootAttempts++
@@ -320,5 +349,10 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
         private const val DRAWING = "drawing"
         private const val NO_GEOMETRY = "no geometry"
         private const val EMPTY = "empty"
+        /** Most `map_nav_rx` / `map_nav_unhandled` notices of one reading. */
+        const val MAX_NAV_NOTICES = 40
+        /** Navigation sub-messages the reading handles. */
+        private val HANDLED_NAV = setOf(MctlNav.SubNavMsgCase.TOAPP_GETHASH_ACK, MctlNav.SubNavMsgCase.TOAPP_GET_COMMONDATA_ACK,
+            MctlNav.SubNavMsgCase.TOAPP_SVG_MSG)
     }
 }

@@ -60,8 +60,13 @@ data class EncounterFrame(
     val elapsedS: Double, val meters: Double,
 )
 
-/** Simulated contact: stopped pose, estimated obstacle and repair obtained (or stop reason). */
-data class EncounterContact(val pose: RobotPose, val estimated: LocalObstacle, val repair: RouteRepair?, val failure: String?)
+/**
+ * Simulated contact: stopped pose, estimated obstacle and repair obtained (or stop reason). [edge]: classification of
+ * the contact ([EdgeContact]); a limit contact keeps its estimate for display only (no obstacle, no repair) and
+ * resumes through [resume].
+ */
+data class EncounterContact(val pose: RobotPose, val estimated: LocalObstacle, val repair: RouteRepair?, val failure: String?,
+                            val edge: EdgeContactClass? = null, val resume: DriftPlan? = null)
 
 /**
  * Simulation of an unknown obstacle met during mowing, with the same building blocks as actual mowing:
@@ -69,9 +74,12 @@ data class EncounterContact(val pose: RobotPose, val estimated: LocalObstacle, v
  *   blade state, STOP between two ranges, end of range confirmed by [RangeArrival], commands at 5 Hz, positions
  *   published at 1 Hz, deviation check [ReturnDrift]) drives a [SimulatedRobot] (delay, inertia, friction, actual gains
  *   unknown to the tracking);
- * - **contact** detected when the LUBA 2 footprint touches the object (bumper), obstacle estimated in front of the
- *   bumper ([ObstacleBypass.contactObstacle]), acceptance rules ([ObstacleBypass.contactFailure]), straight back-off
- *   and remaining route repaired ([ObstacleBypass.repair]).
+ * - **contact** detected when the LUBA 2 footprint touches the object (bumper), classified like actual mowing
+ *   ([EdgeContact]): at the limit of the zone after a drift, back-off and resume on the same route
+ *   ([DriftRecovery.plan]); otherwise obstacle estimated in front of the bumper ([ObstacleBypass.contactObstacle],
+ *   tighter margin at the border), acceptance rules ([ObstacleBypass.contactFailure]), straight back-off and remaining
+ *   route repaired ([ObstacleBypass.repair]), detour budget checked ([ObstacleBypass.detourRefusal]: without saved
+ *   progress to defer to, the repair is kept and the refusal noted).
  * Only the Bluetooth exchanges, the blades and the camera are missing.
  */
 class ObstacleEncounterSimulation(
@@ -90,6 +98,8 @@ class ObstacleEncounterSimulation(
      * than in the field.
      */
     private val envelopeGuard: Boolean = false,
+    /** Longest resume link after a limit contact ([EdgeContact.longLink]); lowered by the tests of that guard. */
+    private val limitLinkMaxM: Double = EdgeContact.MAX_LINK_M,
 ) {
     companion object {
         /** Back-off after contact: forward command of the actual pilot (≈ 10 cm/s). */
@@ -159,6 +169,13 @@ class ObstacleEncounterSimulation(
     private var backOff: Pair<Point, () -> Unit>? = null
     private var backOffStart: Point? = null
     private var bypasses = 0
+    /** Drawn border of the zones ([EdgeContact]) and bumper points of the limit contacts already met. */
+    private val border = runCatching { EdgeContact.Border(zones) }.getOrNull()
+    private val limits = mutableListOf<Point>()
+    /** Limit contacts handled ([EdgeContact.MAX_PER_MISSION] at most). */
+    var edgeContacts = 0; private set
+    /** Detour budget refusals noted ([ObstacleBypass.detourRefusal]). */
+    val detourRefusals = mutableListOf<String>()
 
     // Actual mowing pilot: predicted pose, current blade range, confirmed arrival, progress guard.
     private val random = java.util.Random(1)
@@ -334,20 +351,27 @@ class ObstacleEncounterSimulation(
         publish()
     }
 
-    /** Contact: stop, estimated obstacle, acceptance rules then repair shared with actual mowing. */
+    /** Contact: stop, classification, then back-off and resume, or estimated obstacle, acceptance rules and repair shared with actual mowing. */
     private fun contact() {
         mower.halt(); follower = null
-        val estimated = ObstacleBypass.contactObstacle("simulation-${contacts.size + 1}", pose.position, pose.headingDegrees, ms)
+        val at = index.coerceAtMost(edges.lastIndex)
+        // Bumper code (-1014) always present in the simulation: classification b) of [EdgeContact].
+        val edge = EdgeContact.classify(true, null, null, pose.position, pose.headingDegrees, border, edges, at, trail.takeLast(400), limits, discovered.toList())
         note(tr("Contact detected (%.1f; %.1f): stop, blades OFF", "Contact détecté (%.1f ; %.1f) : arrêt, lames OFF").format(pose.position.x, pose.position.y))
+        if (edge.kind == EdgeContactKind.LIMIT && limitContact(edge)) return
+        val estimated = ObstacleBypass.contactObstacle("simulation-${contacts.size + 1}", pose.position, pose.headingDegrees, ms,
+            marginM = EdgeContact.marginM(edge.kind))
         val refusal = ObstacleBypass.contactFailure(discovered, estimated, bypasses)
         if (refusal != null) return stop(estimated, refusal)
         discovered += estimated
         val repair = try {
-            ObstacleBypass.repair(routes, physical, edges, origins, index.coerceAtMost(edges.lastIndex), pose.position, pose.headingDegrees,
+            ObstacleBypass.repair(routes, physical, edges, origins, at, pose.position, pose.headingDegrees,
                 discovered.toList(), zones, contact = true, trail = trail.takeLast(400))
         } catch (e: IllegalArgumentException) { return stop(estimated, e.message ?: tr("Bypass impossible", "Contournement impossible")) }
+        // No saved progress to defer to: the repair is kept, the refusal noted (actual mowing defers the segment).
+        if (edges[at].cutting) ObstacleBypass.detourRefusal(repair)?.let { detourRefusals += it; note(it) }
         bypasses++
-        contacts += EncounterContact(pose, estimated, repair, null)
+        contacts += EncounterContact(pose, estimated, repair, null, edge)
         val target = requireNotNull(repair.backOff)
         backOff = target to {
             follow(repair.edges, repair.origins)
@@ -360,6 +384,37 @@ class ObstacleEncounterSimulation(
         phase = EncounterPhase.BACKING_OFF
         message = tr("Contact ${contacts.size}: back-off of %.0f cm then adapted route", "Contact ${contacts.size} : recul de %.0f cm puis trajet adapté").format(target.distance(pose.position) * 100)
         note(message)
+    }
+
+    /**
+     * Contact at the limit of the zone ([EdgeContactKind.LIMIT]): no obstacle, no repair; back-off of at least 30 cm
+     * along the trail then the blades-OFF link of a trajectory exit back onto the same route ([DriftRecovery.plan]).
+     * False when no back-off is possible or the link exceeds [limitLinkMaxM] ([EdgeContact.longLink]): obstacle path
+     * then, not counted. Stop kept beyond [EdgeContact.MAX_PER_MISSION].
+     */
+    private fun limitContact(edge: EdgeContactClass): Boolean {
+        val position = pose.position
+        val estimated = ObstacleBypass.contactObstacle("simulation-${contacts.size + 1}", position, pose.headingDegrees, ms)
+        EdgeContact.refusal(edgeContacts)?.let { stop(estimated, it); return true }
+        val plan = try {
+            DriftRecovery.plan(missionRoutes, missionPhysical, edges, origins, index.coerceAtMost(edges.lastIndex), position,
+                pose.headingDegrees, trail.takeLast(400), afterContact = true)
+        } catch (e: IllegalArgumentException) { note(tr("Border contact: ${e.message}", "Contact en bordure : ${e.message}")); return false }
+        EdgeContact.longLink(plan.rejoinMeters, limitLinkMaxM)?.let { note(tr("Border contact: $it", "Contact en bordure : $it")); return false }
+        edgeContacts++
+        limits += edge.bumper
+        contacts += EncounterContact(pose, estimated, null, null, edge, plan)
+        val target = requireNotNull(plan.backOff)
+        backOff = target to {
+            follow(plan.edges, plan.origins)
+            message = tr("Border contact: route resumed · link of %.1f m blades OFF", "Contact en bordure : trajet repris · raccord de %.1f m lames OFF").format(plan.rejoinMeters)
+            note(message)
+        }
+        backOffStart = position
+        phase = EncounterPhase.BACKING_OFF
+        message = tr("Border contact: back-off of %.0f cm, then the route resumes", "Contact en bordure de zone : recul de %.0f cm puis reprise du trajet").format(target.distance(position) * 100)
+        note(message)
+        return true
     }
 
     /**

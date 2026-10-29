@@ -36,7 +36,17 @@ reading" or "Not signed in · sign in"; tapping it opens the **Mammotion account
 4. **Account robots** lists the account's mowers, recognized by their name (`Luba…`, `Yuka…`…) or their product key
    (other products are ignored and logged anonymously, see [supported models](supported-models.md#models)); devices
    none of which is recognized give "N devices in the account, none recognized as a Mammotion mower…", an empty
-   account "No device in the account". The followed robot is the
+   account "No device in the account". When the device page (`/v1/user/device/page`) is empty, the app reads, once
+   and read-only, the account's owned devices (`/device-server/v1/device/list`, as PyMammotion
+   `get_user_device_list`): a robot listed there but not on the page is bound to Mammotion's older Aliyun cloud,
+   which the page does not list, and the status says "Your LUBA is on Mammotion's older cloud (Aliyun), which this
+   app does not support yet; Bluetooth control still works." ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3));
+   RTK stations and pool cleaners do not count. If that read fails, the status stays "No device in the account".
+   The log keeps `cloud_device_page` (IoT domain, HTTP status, API `code`, `total`, number of records, also when the
+   page is refused) and `cloud_device_list` (number of devices, devices missing from the page, product key prefixes,
+   model words, short name prefixes; never a full name, a serial number or an iotId; or the error). A refused request
+   names its endpoint path, never its query: "Cloud failure: Mammotion HTTP/API 40400 (/v1/user/device/page)", and
+   the read errors give "code N (path)". The followed robot is the
    last one read, otherwise the first of the list. Tapping a robot (**Read the map**) reads its map through the cloud
    (an element that stops answering is asked again then left out, the message then gives how many were not read;
    4 min at most overall); **Open the map** shows the

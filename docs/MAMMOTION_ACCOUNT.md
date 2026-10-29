@@ -9,7 +9,8 @@ Inventory of 2026-10-11. Sources: PyMammotion 0.10.10 (commit `967c7ac9`), Mammo
 | Channel | Access | Used by the app |
 |---|---|---|
 | OAuth2 `id.mammotion.com/oauth2/token` | Bearer token + refresh (refused refresh: new password sign-in with the saved account, since 1.1.3) | yes |
-| `{iot}/v1/user/device/page` | list of robots (`deviceName`, `iotId`, `productKey`, `status`) | yes |
+| `{iot}/v1/user/device/page` | list of robots (`deviceName`, `iotId`, `productKey`, `status`); robots bound to the older Aliyun cloud are not listed | yes |
+| `https://domestic.mammotion.com/device-server/v1/device/list` (GET, same Bearer, `Client-Id`, `Client-Type: 1`) | owned devices, Aliyun ones included (`DeviceInfo`: `iotId`, `deviceName`, `deviceType`, `series`, `productSeries`, `generation`…, no `productKey` in the PyMammotion model) | yes, only when the device page is empty: diagnosis of a robot on the Aliyun cloud |
 | `{iot}/v1/mqtt/auth/jwt` + MQTT TLS | robot events | yes |
 | `{iot}/v1/mqtt/rpc/thing/service/invoke` | sends a protobuf `LubaMsg` to the robot | yes, filtered by `CloudReadOnly` |
 | `https://domestic.mammotion.com` (same Bearer) | application API (history, firmware, error codes…) | yes: 2 reads, update launch, wake-up |

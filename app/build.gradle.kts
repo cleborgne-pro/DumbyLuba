@@ -1,3 +1,7 @@
+import java.io.RandomAccessFile
+import java.nio.channels.FileChannel
+import java.nio.channels.FileLock
+import java.nio.channels.OverlappingFileLockException
 import java.util.Properties
 
 plugins {
@@ -18,8 +22,8 @@ android {
         applicationId = "fr.luba.poc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 186
-        versionName = "1.16.0"
+        versionCode = 187
+        versionName = "1.17.0"
         testInstrumentationRunner = "fr.luba.poc.planning.PlannerDeviceBenchmark"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -87,8 +91,51 @@ dependencies {
 }
 
 // Fast tests are for iterations; deployment keeps the full suite.
+// Planner sweeps on the reference map (every zone, angle or spacing): about 80 % of the test time, excluded by
+// -PlubaQuickTests, run on their own by tools/check.sh planner and kept in the full suite.
+val plannerSweeps = listOf("**/ReferenceMapPlannerTest*", "**/ReferenceMapPlannerZamboniSpiralTest*", "**/ReferenceTransitTest*",
+    "**/ReferenceSimulationTest*", "**/ZamboniQaTest*", "**/ZamboniQaSpacingTest*", "**/ZamboniManualAngleReproTest*", "**/ZamboniReferenceTest*", "**/ZamboniOrderPropertyTest*",
+    "**/OrientationAcceptanceTest*", "**/OrientationReferenceTest*", "**/SpiralReferenceTest*", "**/SpiralDirectionTest*",
+    "**/StartTransitTest*", "**/TurnStyleReferenceTest*")
+// Test slots shared by every worktree of the machine: sessions that ran their full suite at the same time loaded
+// 10 cores up to 43 and made each run two to four times slower (30 to 60 minutes instead of about 19). A test task waits for a
+// free slot (lock files in /tmp/dumbyluba-test-slots, released at the end of the build, or by the system if Gradle
+// dies). One slot by default: a single suite already fills the 10 cores; -PtestSlots=N changes it.
+abstract class TestSlots : BuildService<TestSlots.Params>, AutoCloseable {
+    interface Params : BuildServiceParameters { val slots: Property<Int> }
+    private var held: Pair<FileChannel, FileLock>? = null
+    @Synchronized fun acquire(log: org.gradle.api.logging.Logger) {
+        if (held != null) return
+        val dir = File("/tmp/dumbyluba-test-slots").apply { mkdirs() }
+        var warned = false
+        while (true) {
+            for (i in 0 until parameters.slots.get()) {
+                val channel = RandomAccessFile(File(dir, "slot-$i.lock"), "rw").channel
+                val lock = try { channel.tryLock() } catch (_: OverlappingFileLockException) { null }
+                if (lock != null) { held = channel to lock; return }
+                channel.close()
+            }
+            if (!warned) { log.lifecycle("Waiting for a free test slot (other sessions are running their tests)…"); warned = true }
+            Thread.sleep(5_000)
+        }
+    }
+    override fun close() { held?.let { (channel, lock) -> lock.release(); channel.close() }; held = null }
+}
+val testSlots = gradle.sharedServices.registerIfAbsent("dumbylubaTestSlots", TestSlots::class) {
+    parameters.slots.set(providers.gradleProperty("testSlots").orNull?.toInt() ?: 1)
+}
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
-    maxParallelForks = 2
+    // Two processes: the route preparations of each one already use up to 8 threads (PreparationPool), so the
+    // 10 cores are full. Measured on 2026-10-29: 5 processes, with or without capping the pool, made the long
+    // sweep classes (reference map, Zamboni) up to three times slower and the full run longer (28 to 31 minutes).
+    // Without the sweeps (-PlubaQuickTests), four: the longest classes there wait in real time (gateway sockets,
+    // robot bench), so 2 / 3 / 4 / 5 processes took 4:23 / 3:53 / 2:58 / 3:30 (measured on 2026-10-29).
+    val quick = providers.gradleProperty("lubaQuickTests").isPresent
+    maxParallelForks = providers.gradleProperty("testForks").orNull?.toInt() ?: if (quick) 4 else 2
+    // 1 GB per fork instead of 512 MB (fewer G1 cycles on the large sweeps).
+    maxHeapSize = "1g"
+    usesService(testSlots)
+    doFirst { testSlots.get().acquire(logger) }
     providers.gradleProperty("plannerBenchmarkOutput").orNull?.let { systemProperty("plannerBenchmarkOutput", it) }
     providers.gradleProperty("plannerBenchmarkStrategies").orNull?.let { systemProperty("plannerBenchmarkStrategies", it) }
     providers.gradleProperty("plannerBenchmarkIndexed").orNull?.let { systemProperty("plannerBenchmarkIndexed", it) }
@@ -109,9 +156,8 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
         ?: if (providers.gradleProperty("uiShots").isPresent) "en" else "fr")
     // Opt-in screenshots: -PuiShots=output/directory
     providers.gradleProperty("uiShots").orNull?.let { systemProperty("uiShots", it); systemProperty("robolectric.graphicsMode", "NATIVE"); systemProperty("roborazzi.test.record", "true") }
-    if (providers.gradleProperty("lubaQuickTests").isPresent) {
-        exclude("**/ReferenceMapPlannerTest*", "**/ReferenceTransitTest*", "**/ReferenceSimulationTest*")
-    }
+    if (quick) exclude(plannerSweeps)
+    if (providers.gradleProperty("lubaPlannerSweeps").isPresent) include(plannerSweeps)
 }
 
 // ART safeguard: a method with more than ~256 Dalvik registers (large Compose function) was
@@ -120,8 +166,14 @@ val checkFoldDexRegisters by tasks.registering(Exec::class) {
     group = "verification"
     description = "Refuse l'APK fold si une méthode de l'app dépasse 224 registres Dalvik."
     val apk = layout.buildDirectory.file("outputs/apk/fold/app-fold.apk")
+    val script = rootProject.file("tools/check-dex-registers.py")
     inputs.file(apk)
-    commandLine("python3", rootProject.file("tools/check-dex-registers.py").absolutePath, apk.get().asFile.absolutePath, "224")
+    inputs.file(script)
+    // Up to date while the APK and the script are unchanged: no new read of the same APK at each build.
+    val checked = layout.buildDirectory.file("reports/dex-registers/checked.txt")
+    outputs.file(checked)
+    commandLine("python3", script.absolutePath, apk.get().asFile.absolutePath, "224")
+    doLast { checked.get().asFile.writeText("APK checked\n") }
 }
 afterEvaluate {
     checkFoldDexRegisters.configure { dependsOn("packageFold") }

@@ -2,6 +2,7 @@ package fr.luba.poc.simulation
 
 import fr.luba.poc.diagnostics.MapNavFollower
 import fr.luba.poc.diagnostics.MotionProgressGuard
+import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.Point
 import java.util.Random
 import kotlin.math.*
@@ -52,12 +53,26 @@ object RouteExecutionModel {
         val calibration: DeadReckoning.Calibration? = null,
         /** Deviation of the robot's true centre from the route (bench ground truth): maximum and RMS, all positions. */
         val trueWorst: Double = 0.0, val trueRms: Double = 0.0, val trueWhere: String = "",
+        /** Per manoeuvre metrics of the [RouteManoeuvres] passed to [drive] (rolling U-turns, loops, other curves). */
+        val turns: List<TurnStats> = emptyList(),
     ) {
         val meanSpeed get() = meters / seconds
         override fun toString() = ("%.0f s, %.3f m/s, max deviation %.3f m (%d > 30 cm), RMS %.3f m, %d pivots (%d in stripe), " +
             "pivot %.0f s, stop %.0f s, heading not measured %.0f s, slow %.0f s, %d ranges, max ends %.2f m, %d retries, %d blockages, worst %s")
             .format(seconds, meanSpeed, worst, violations, rmsStraight, pivots, midPivots, pivotSeconds, stoppedSeconds,
                 unconfirmedSeconds, slowSeconds, ranges, endErrors.maxOrNull() ?: 0.0, approaches, blocked, where)
+    }
+
+    /**
+     * Metrics of one manoeuvre window ([RouteManoeuvres.Manoeuvre]), true robot centre (bench ground truth): [seconds] from the
+     * robot passing the first curved vertex to the last one, [afterSeconds] for the first metre after it,
+     * [medianSpeed] on the arc, true deviation median / p90 / max inside the window, [afterMax] over the first metre
+     * after the exit, in-place [pivots] started inside the window.
+     */
+    data class TurnStats(val window: RouteManoeuvres.Manoeuvre, val seconds: Double, val afterSeconds: Double, val medianSpeed: Double,
+                         val deviations: List<Double>, val trueMax: Double, val afterMax: Double, val pivots: Int) {
+        val p90 get() = TurnBench.quantile(deviations, 0.9)
+        val median get() = TurnBench.quantile(deviations, 0.5)
     }
 
     private fun lateral(p: Point, e: SimEdge): Double {
@@ -81,7 +96,9 @@ object RouteExecutionModel {
               /** Slide map known to the tracking (prediction and corner vertices), null: none. */
               slideField: SlideField? = null,
               /** Slides measured during the mission (learning of [SlideField]). */
-              learn: (SlideSample) -> Unit = {}): Run {
+              learn: (SlideSample) -> Unit = {},
+              /** Manoeuvre windows to measure ([RouteManoeuvres.find]); empty: none. */
+              windows: List<RouteManoeuvres.Manoeuvre> = emptyList()): Run {
         require(edges.isNotEmpty())
         val random = Random(robot.seed)
         // Dynamics shared with the obstacle simulation ([SimulatedRobot]).
@@ -109,6 +126,46 @@ object RouteExecutionModel {
         var squares = 0.0; var samples = 0
         var trueWorst = 0.0; var trueSquares = 0.0; var trueSamples = 0; var trueWhere = ""
         val nominal = PathFollower.linearFor(speedPercent)
+        // Manoeuvre windows: state of the window being driven (entered when the true centre passes its first curved vertex).
+        class Acc(val window: RouteManoeuvres.Manoeuvre) {
+            var enteredMs = -1L; var exitedMs = -1L; var afterMs = -1L
+            val speeds = mutableListOf<Double>(); val deviations = mutableListOf<Double>()
+            var trueMax = 0.0; var afterMax = 0.0; var pivots = 0
+        }
+        val accs = windows.map { Acc(it) }
+        var accIndex = 0
+        var currentIndex = 0
+        var pivotObserved = false
+        var trueDeviation = 0.0
+        fun observeWindows(pivotStarted: Boolean) {
+            while (accIndex < accs.size && accs[accIndex].afterMs >= 0) accIndex++
+            if (accIndex >= accs.size) return
+            val acc = accs[accIndex]; val w = acc.window
+            val p = Point(x, y)
+            val d = trueDeviation
+            if (acc.enteredMs < 0) {
+                if (currentIndex >= w.first - 1 && currentIndex <= w.last && PathFollower.progressOf(p, edges[w.first]) >= 0.0 &&
+                    Geometry.distance(p, edges[w.first].a, edges[w.first].b) < 0.5) acc.enteredMs = ms
+                else if (currentIndex > w.last + 1) { acc.enteredMs = ms; acc.exitedMs = ms; acc.afterMs = ms }
+                if (acc.enteredMs < 0) return
+            }
+            if (acc.exitedMs < 0) {
+                acc.speeds += body.speedMps; acc.deviations += d; acc.trueMax = maxOf(acc.trueMax, d)
+                if (pivotStarted) acc.pivots++
+                if (currentIndex > w.last && PathFollower.progressOf(p, edges[w.last]) >= 1.0) acc.exitedMs = ms
+                return
+            }
+            // First metre after the exit: route length from the exit vertex to the true centre (followed edge).
+            var along = Double.POSITIVE_INFINITY; var nearest = Double.POSITIVE_INFINITY; var before = 0.0
+            for (k in (w.last + 1)..minOf(maxOf(currentIndex, w.last + 1), edges.lastIndex)) {
+                val dist = Geometry.distance(p, edges[k].a, edges[k].b)
+                if (dist < nearest) { nearest = dist; along = before + PathFollower.progressOf(p, edges[k]).coerceIn(0.0, 1.0) * edges[k].meters }
+                before += edges[k].meters
+                if (before > 2.0) break
+            }
+            if (along < 1.0) acc.afterMax = maxOf(acc.afterMax, d)
+            else acc.afterMs = ms
+        }
         fun step(command: Pair<Int, Int>) {
             body.step(command.first, command.second)
             x = body.x; y = body.y; heading = body.heading
@@ -119,6 +176,8 @@ object RouteExecutionModel {
                 limited -> unconfirmedMs += 200
                 command.first < nominal / 2 -> slowMs += 200
             }
+            if (accs.isNotEmpty()) observeWindows(command.first == 0 && command.second != 0 && !pivotObserved).also {
+                pivotObserved = command.first == 0 && command.second != 0 }
             if (ms % 1000 == 0L) {
                 published = publish(); fixAt = ms
                 reckoning.fix(published, heading + random.nextGaussian() * robot.headingNoise, ms)
@@ -151,7 +210,9 @@ object RouteExecutionModel {
                         PathFollower.progressOf(measured, e) * e.meters)
                 }
                 val current = edges[follower.index]
+                currentIndex = follower.index
                 follower.deviation(Point(x, y)).let { d ->
+                    trueDeviation = d
                     if (d > trueWorst) {
                         trueWorst = d
                         val e = edges[follower.index]
@@ -201,6 +262,9 @@ object RouteExecutionModel {
         return Run(ms / 1000.0, edges.sumOf { it.meters }, worst, violations, where,
             if (samples == 0) 0.0 else sqrt(squares / samples), pivots, midPivots,
             pivotMs / 1000.0, stoppedMs / 1000.0, unconfirmedMs / 1000.0, slowMs / 1000.0, ranges, endErrors, approaches, blocked,
-            reckoning.calibration, trueWorst, if (trueSamples == 0) 0.0 else sqrt(trueSquares / trueSamples), trueWhere)
+            reckoning.calibration, trueWorst, if (trueSamples == 0) 0.0 else sqrt(trueSquares / trueSamples), trueWhere,
+            accs.filter { it.enteredMs >= 0 && it.exitedMs > it.enteredMs }.map { a ->
+                TurnStats(a.window, (a.exitedMs - a.enteredMs) / 1000.0, (maxOf(a.afterMs, a.exitedMs) - a.exitedMs) / 1000.0,
+                    TurnBench.quantile(a.speeds, 0.5), a.deviations, a.trueMax, a.afterMax, a.pivots) })
     }
 }

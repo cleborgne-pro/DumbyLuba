@@ -124,7 +124,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         val robot=mutable.value.camera.robot ?: mutable.value.selected ?: return
         viewModelScope.launch(Dispatchers.IO) {
             val result=runCatching {
-                val commands=Commands(api.userAccount())
+                val commands=commandsFor(robot)
                 api.invoke(when(kind){CameraCommand.VIDEO_ON -> commands.video(true);CameraCommand.VIDEO_OFF -> commands.video(false);CameraCommand.REFRESH -> commands.refreshFpv();CameraCommand.HEARTBEAT -> commands.sync(syncType=3)},robot.name,robot.id)
             }
             camera { it.copy(lastCommand=tr("${kind.label} via the cloud: ", "${kind.label} par le cloud : ")+if(result.isSuccess) tr("sent", "envoyé") else failure(result.exceptionOrNull()!!)) }
@@ -142,11 +142,35 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         load()
     }
     fun refresh()=work {load()}
-    private fun load(){val a=api.devices();val found=CloudRobotFilter.split((0 until a.length()).map{a.getJSONObject(it)}.map { CloudRobot(it.getString("deviceName"),it.getString("iotId"),it.getString("productKey")) });val robots=found.robots
+    /** Commands for [robot]: account number and navigation receiver of its model (name and product key). */
+    private fun commandsFor(robot:CloudRobot)=Commands.forRobot(robot.name,robot.productKey,api.userAccount())
+    private fun load(){
+        // Device page logged (IoT domain, HTTP and API codes, total, records), refused or not: DumbyLuba#3.
+        val page=try { api.devicePage() } catch(e:CloudResponseException) {
+            event("cloud_device_page",tr("Account device page refused", "Page des appareils du compte refusée"),e.fields);throw e }
+        event("cloud_device_page",tr("Account device page: ${page.records.length()} device(s)", "Page des appareils du compte : ${page.records.length()} appareil(s)"),page.fields)
+        val a=page.records
+        val found=CloudRobotFilter.split((0 until a.length()).map{a.getJSONObject(it)}.map { CloudRobot(it.getString("deviceName"),it.getString("iotId"),it.getString("productKey")) });val robots=found.robots
         // Devices left out, anonymous (product key and short name prefix) for the diagnostics export: DumbyLuba#3.
         found.skipped.forEach { event("cloud_device_skipped",tr("Account device not recognized as a mower", "Appareil du compte non reconnu comme tondeuse"),it.fields) }
+        val status=if(found.total==0) ownedDevicesStatus(found) else found.status
         val selected=robots.firstOrNull { it.id == preferences.getString("robot",null) } ?: robots.firstOrNull()
-        mutable.value=mutable.value.copy(robots=robots,selected=selected,telemetry=fr.luba.poc.protocol.Telemetry(),details=if(selected?.id==mutable.value.selected?.id) mutable.value.details else RobotDetails(),connected=true,map=selected?.let{cache.read(it.id)} ?: RobotMap(),lastKnown=selected?.let{positionStore.read(it.id)});status(found.status)}
+        mutable.value=mutable.value.copy(robots=robots,selected=selected,telemetry=fr.luba.poc.protocol.Telemetry(),details=if(selected?.id==mutable.value.selected?.id) mutable.value.details else RobotDetails(),connected=true,map=selected?.let{cache.read(it.id)} ?: RobotMap(),lastKnown=selected?.let{positionStore.read(it.id)});status(status)}
+    /**
+     * Empty device page: the account's owned devices (read-only `device/list`) tell whether a robot is bound to the older
+     * Aliyun cloud, which that page does not list. Logged anonymously; any failure keeps [found]'s status, logged too.
+     */
+    private fun ownedDevicesStatus(found:CloudRobotFilter.Result):String {
+        val owned=try { CloudOwnedDevices.parse(api.ownedDevices()) } catch(e:CancellationException) { throw e } catch(e:Exception) {
+            event("cloud_device_list",tr("Owned devices not read: ${failure(e)}", "Appareils possédés non lus : ${failure(e)}"),
+                (e as? CloudResponseException)?.fields ?: mapOf("endpoint" to MammotionCloud.DEVICE_LIST,"error" to e.javaClass.simpleName))
+            return found.status
+        }
+        val missing=CloudOwnedDevices.missingRobots(owned,found.robots)
+        event("cloud_device_list",tr("Owned devices: ${owned.size}, ${missing.size} robot(s) missing from the device page", "Appareils possédés : ${owned.size}, ${missing.size} robot(s) absent(s) de la page des appareils"),
+            CloudOwnedDevices.fields(owned,missing))
+        return CloudOwnedDevices.status(found,missing)
+    }
     fun logout(){job?.cancel();api.logout();preferences.edit().clear().apply();val saved=accountStore.read();mutable.value=CloudUi(accountSaved=saved!=null,accountEmail=saved?.email.orEmpty());status(tr("Session deleted", "Session supprimée"))}
     /**
      * Entering local mode: camera stopped and session deleted (the saved credentials are kept for a later return to
@@ -184,7 +208,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         mutable.value=mutable.value.copy(accountReadErrors=errors,accountReadAt=System.currentTimeMillis())
         read(robot,false)
     }
-    private fun failure(e:Throwable)=when(e){is CloudResponseException -> "code ${e.code}";is MqttException -> "MQTT code ${e.reasonCode}";is CloudActionException -> e.message.orEmpty();else -> e.message?.takeIf { it.startsWith("Mammotion") || it.startsWith("MQTT") || it.startsWith("Broker") } ?: e.javaClass.simpleName}
+    private fun failure(e:Throwable)=when(e){is CloudResponseException -> "code ${e.code}"+(if(e.endpoint.isEmpty()) "" else " (${e.endpoint})");is MqttException -> "MQTT code ${e.reasonCode}";is CloudActionException -> e.message.orEmpty();else -> e.message?.takeIf { it.startsWith("Mammotion") || it.startsWith("MQTT") || it.startsWith("Broker") } ?: e.javaClass.simpleName}
     private suspend fun read(robot:CloudRobot,readMap:Boolean) {
         preferences.edit().putString("robot",robot.id).apply()
         val sameRobot=mutable.value.selected?.id==robot.id
@@ -194,10 +218,10 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         var requestedAt=Long.MAX_VALUE
         val link=connectMqtt(robot)
         try {
-            val commands=Commands(api.userAccount());val transfer=MapTransfer(3, cache.read(robot.id)?.station, requestTimeoutMs=10_000, frameTimeoutMs=8_000, maxAttempts=3)
+            val commands=commandsFor(robot);val transfer=MapTransfer(3, cache.read(robot.id)?.station, requestTimeoutMs=10_000, frameTimeoutMs=8_000, maxAttempts=3)
             var completedAt: Long? = null
             if(readMap) mutable.value=mutable.value.copy(map=RobotMap(source=tr("Cloud read of ${robot.name}…", "Lecture cloud de ${robot.name}…")))
-            fun send(bytes:ByteArray){api.invoke(bytes,robot.name,robot.id)}
+            fun send(bytes:ByteArray){api.invoke(bytes,robot.name,robot.id,navReceiver=commands.navReceiver)}
             send(commands.sync(syncType=3));send(commands.reports(false,account=true));if(readMap)send(commands.mapHashes())
             requestedAt=System.currentTimeMillis()
             fun notices() { transfer.notices().forEach { n -> handler.post { if(log.healthy) log.append(n.kind,n.detail,n.fields) } } }
@@ -350,7 +374,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
     fun cancelNativeReturn() {
         val robot=mutable.value.selected ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val result=runCatching { api.invoke(Commands(api.userAccount()).cancelReturnToDock(),robot.name,robot.id) }
+            val result=runCatching { val commands=commandsFor(robot);api.invoke(commands.cancelReturnToDock(),robot.name,robot.id,navReceiver=commands.navReceiver) }
             result.onSuccess {
                 event("native_return_cancel",tr("Native return cancellation sent through the account", "Annulation du retour natif envoyée par le compte"),mapOf("via" to "cloud"))
                 returnTracker?.let { it.cancelRequested(now());setReturn(it.value) }
@@ -360,8 +384,8 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         }
     }
     private suspend fun followReturn(robot:CloudRobot) {
-        val commands=Commands(api.userAccount())
-        fun send(bytes:ByteArray,native:Boolean=false){api.invoke(bytes,robot.name,robot.id,native)}
+        val commands=commandsFor(robot)
+        fun send(bytes:ByteArray,native:Boolean=false){api.invoke(bytes,robot.name,robot.id,native,commands.navReceiver)}
         val absorber=Absorber(robot)
         var reconnects=0
         while(true) {
@@ -482,7 +506,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         }
     }
     private suspend fun followFirmware(robot:CloudRobot,tracker:FirmwareUpdateTracker) {
-        val commands=Commands(api.userAccount())
+        val commands=commandsFor(robot)
         val absorber=Absorber(robot)
         var lastCheck=0L
         var lastStatusAt=absorber.details.value.statusAt ?: 0

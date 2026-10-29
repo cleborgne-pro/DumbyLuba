@@ -61,6 +61,9 @@ class MammotionCloudTest {
         val e = assertThrows(IllegalStateException::class.java) { api.login("moi@example.com", "faux") }
         assertEquals("Mammotion : e-mail ou mot de passe refusé (code 401)", e.message)
         assertEquals(401, (e.cause as CloudResponseException).code)
+        // Path only in the error, never the query of the sign-in (credentials).
+        assertEquals("Mammotion HTTP/API 401 (/oauth2/token)", e.cause!!.message)
+        assertEquals("id.mammotion.com", (e.cause as CloudResponseException).host)
         assertEquals(1, server.requests.size)
         assertFalse(api.connected()); assertNull(store.read())
         // Application refusal (HTTP 200, Mammotion code) and empty session.

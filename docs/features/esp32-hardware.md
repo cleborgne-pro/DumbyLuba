@@ -1,12 +1,12 @@
-# ESP32 hardware: gateway, diagnostics and inductively charged enclosure
+# ESP32 hardware: gateway, diagnostics and contact-charged enclosure
 
 The repository contains two PlatformIO firmwares for an ESP32 board and a printable waterproof enclosure, charged
-wirelessly when the robot is at the base.
+through two plates and two spring blades when the robot is at the base.
 
 | | |
 |---|---|
 | **Firmwares** | [`firmware/esp32-gateway`](../../firmware/esp32-gateway/README.md) (gateway) · [`firmware/esp32-diag`](../../firmware/esp32-diag/README.md) (board diagnostics) |
-| **Enclosure** | [`hardware/luba-esp32-qi`](../../hardware/luba-esp32-qi/README.md): STL, parametric CAD, 3D viewer |
+| **Enclosure** | [`hardware/luba-esp32-dock`](../../hardware/luba-esp32-dock/README.md): STL, parametric CAD, 3D viewer |
 | **Status** | Gateway built and tested on the board (23 native core tests; update over Wi-Fi tested on the board on Oct 15), **not yet tried with the robot** (robot held by the Redmi during the tests); enclosure designed, **not yet mounted on the robot** |
 
 ## Boards
@@ -17,14 +17,14 @@ wirelessly when the robot is at the base.
   been tried yet** (not received): the firmware builds for it, nothing more is known. The diagnostics firmware stays
   T-Call only (PlatformIO `esp32dev`). Both use NimBLE-Arduino.
 - Olimex board: 18650 cell on a 2-pin, 2.0 mm connector (probably JST PH, to check), charged at about 100 mA (BL4054B,
-  about 34 h for an empty 3,400 mAh cell) from either USB-C port or a 5 V Qi receiver. **The board has no cell
+  about 34 h for an empty 3,400 mAh cell) from either USB-C port (the enclosure feeds the 5 V of the dock contacts into one of them). **The board has no cell
   protection: use a protected 18650**, and **check the polarity with a multimeter** before plugging it in. No
   temperature input on the charger; board specified up to 65 °C ambient. Details: [firmware README](../../firmware/esp32-gateway/README.md#olimex-board-battery-and-wiring).
 - Toolchains: the gateway is built with **arduino-esp32 3.3.12 (ESP-IDF 5.5.5) and NimBLE-Arduino 2.5.2** through the
   community platform **pioarduino 55.03.312-1** (pinned in `platformio.ini`; PlatformIO Core 6.2.0 or later); the
   diagnostics firmware stays on `espressif32@6.9.0` (arduino-esp32 2.0.17, IDF 4.4.7, NimBLE-Arduino 1.4.3).
 - The enclosure holds the **Olimex ESP32-S3-DevKit-Lipo-EA**, the board the gateway firmware targets with the
-  environment `s3lipo` (`ota-s3lipo` over Wi-Fi): see [Inductively charged enclosure](#inductively-charged-enclosure).
+  environment `s3lipo` (`ota-s3lipo` over Wi-Fi): see [Contact-charged enclosure](#contact-charged-enclosure).
 
 ## Installing PlatformIO
 
@@ -143,39 +143,47 @@ cd firmware/esp32-diag
 python3 tools/latency.py dumbyluba-esp32.local --duration 300
 ```
 
-## Inductively charged enclosure
+## Contact-charged enclosure
 
 - Waterproof enclosure glued behind the camera of the LUBA 2 AWD, below the top of the camera and next to the rain
-  sensor.
-- A **fixed mount** under the garage roof carries the Qi transmitter. Hung from two M6 rods, it can be adjusted to
-  the millimeter (one turn of the nut = 1 mm) so that it sits 2.5 mm above the lid when the robot docks in reverse:
-  4.9 mm between the coils (Qi range 2 to 8 mm). The robot must therefore come back to the same height within about
-  ±3 mm, which remains to be measured on site.
-- The enclosure now holds an **Olimex ESP32-S3-DevKit-Lipo-EA** (ESP32-S3-WROOM-1U N8R8 with a u.FL socket, two
+  sensor. Design record: [CONTACT_CHARGING_DESIGN.md](../CONTACT_CHARGING_DESIGN.md) (decision of 2026-10-27, with the
+  comparison against the former fixed transmitter).
+- Two **stainless A4 plates** (54 × 36 × 1 mm, 20 mm apart) sit flush in the 5 mm lid, each held by a countersunk M3
+  screw with an O-ring under the lid. Two **stainless spring blades** (10 × 0.30 mm, 36 mm free) hang from a **fixed
+  holder** under the garage roof. Hung from two M6 rods, the holder is set to the millimeter (one turn of the nut =
+  1 mm) 3.0 mm above the lid when the robot docks in reverse; a 25° ramp on the lid lifts the blades, which then press
+  the plates with 1.26 N (4.2 mm of flexion). Height window: +2.5 / −2.5 mm; position tolerance ±24 mm along and
+  ±13 mm across. The robot must therefore come back to the same height within about ±2 mm, which remains to be
+  measured on site.
+- Electrical path: 5 V USB charger, PTC fuse at the garage end, 3 m cable, blades, plates, then a **USB-C male
+  adapter** in the board's native USB socket with a **TVS** across VBUS and GND. `power.vin_present` (and the
+  "plugged in" state in the app) shows that the contact is made; no firmware change is needed.
+- The enclosure holds an **Olimex ESP32-S3-DevKit-Lipo-EA** (ESP32-S3-WROOM-1U N8R8 with a u.FL socket, two
   USB-C, Li-ion charger, no battery protection, no mounting holes). The board clips into a cradle printed with the base
-  (corner ledges, end stops, two snap arms), with no soldering. A **protected** 18650 sits in a separate holder with
-  leads and a JST plug: **check its polarity with a multimeter** before plugging it in. A flexible 2.4 GHz FPC antenna
-  on a u.FL cable is bonded inside the end wall, about 24 mm from the Qi patch and 33 mm from the cell, with nothing
-  through the wall. The Qi patch receiver plugs into one USB-C socket (native USB); the other, the USB-UART port
-  (CH340X) used for the console and flashing, stays free with the lid open. The inside is 6 mm wider (enclosure
-  82.2 × 136.2 × 32.2 mm). Height, seal, window, coil distance (4.9 mm) and the fixed transmitter mount are unchanged.
-  The enclosure was first drawn for the LILYGO T-Energy S3.
+  (corner ledges, end stops, two snap arms), with no soldering, 8 mm lower than before so that the plate screws have
+  room under the lid. A **protected** 18650 sits in a separate holder with leads and a JST plug: **check its polarity
+  with a multimeter** before plugging it in. A flexible 2.4 GHz FPC antenna on a u.FL cable is bonded inside the end
+  wall, about 19 mm from the nearest plate and 33 mm from the cell, with nothing through the wall. The USB-UART port
+  (CH340X) used for the console and flashing stays free with the lid open. Enclosure 82.2 × 136.2 × 34 mm, 97 mm long
+  with the ramp. The enclosure was first drawn for the LILYGO T-Energy S3.
 - Estimated runtime: about 22–29 h with Wi-Fi without power saving and BLE, not measured; charging runs at about
   100 mA (about 34 h for an empty 3,400 mAh cell). The module is rated for 65 °C ambient, so print the enclosure in
-  light-colored ASA. About €105 to €135 of parts and 300 g of ASA.
+  light-colored ASA. About €95 to €125 of parts and 300 g of ASA.
 - Waterproofing: silicone cord seal in a sized groove (25 % compression), 6 screws outside the seal, drip lip on the
-  lid, ePTFE vent. An optional base plate compensates for the curvature of the hood once measured.
-- Print-ready parts in `stl/` (enclosure base and lid, transmitter mount and its cap, roof bridge; deck shim only if
-  the deck is crowned). 3D viewer in `viewer/luba-esp32-qi.html` (model embedded, three.js loaded from a CDN: a
-  connection is needed when opening it), designed for the Galaxy Z Fold 8 (cover screen, inner screen, Flex mode):
-  modes *On the robot*, *Enclosure*, *+ Qi mount*, exploded view, cross-section, annotated details, a sheet for each
-  part, docking animation, dimensions report. Regenerating the parts (the script refuses to produce a result when a
+  lid, ePTFE vent, plates bonded on a silicone film. An optional base plate compensates for the curvature of the hood
+  once measured.
+- Print-ready parts in `stl/` (enclosure base and lid, blade holder and its cap, roof bridge, entry ramp; deck shim only
+  if the deck is crowned); plates and blades are cut from sheet and strip. 3D viewer in `viewer/luba-esp32-dock.html`
+  (model embedded, three.js loaded from a CDN: a connection is needed when opening it), designed for the Galaxy Z
+  Fold 8 (cover screen, inner screen, Flex mode): modes *On the robot*, *Enclosure*, *+ Blade mount*, exploded view,
+  cross-section, annotated details, a sheet for each part, docking animation (blades shown in their docked pose),
+  dimensions report. Regenerating the parts (the script refuses to produce a result when a force, stress, tolerance,
   clearance or seal check fails):
 
   ```sh
-  python3 -m venv /tmp/cadvenv
-  /tmp/cadvenv/bin/pip install -r hardware/luba-esp32-qi/cad/requirements.txt
-  /tmp/cadvenv/bin/python -I hardware/luba-esp32-qi/cad/generate.py
+  python3 -m venv "$TMPDIR/cadvenv"
+  "$TMPDIR/cadvenv/bin/pip" install -r hardware/luba-esp32-dock/cad/requirements.txt
+  "$TMPDIR/cadvenv/bin/python" -I hardware/luba-esp32-dock/cad/generate.py
   ```
 
-![Enclosure overview](../../hardware/luba-esp32-qi/images/01_overview.png)
+![Enclosure overview](../../hardware/luba-esp32-dock/images/01_overview.png)

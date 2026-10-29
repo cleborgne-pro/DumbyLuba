@@ -38,6 +38,30 @@ class CloudRobotActionsTest {
         assertTrue(refused(nav(NavTaskCtrl.newBuilder().setType(1).setAction(5), MsgDevice.DEV_MAINCTL), nativeReturn = true))
     }
 
+    @Test fun `navigation receiver of the robot model accepted, the other refused, nothing more opened`() {
+        // LUBA 1 (DumbyLuba#3): navigation on the main controller.
+        val luba1 = Commands.forRobot("MA5000DEMO0001", "a1FbaU4Bqk5")
+        assertEquals(MsgDevice.DEV_MAINCTL, luba1.navReceiver)
+        fun allowed(bytes: ByteArray, receiver: MsgDevice, nativeReturn: Boolean = false) =
+            runCatching { CloudReadOnly.requireAllowed(bytes, nativeReturn, receiver) }.isSuccess
+        fun reads(commands: Commands) = listOf(commands.mapHashes(), commands.mapHashesAck(2, 1), commands.mapData(42L), commands.cancelReturnToDock())
+        reads(luba1).zip(reads(c)).forEachIndexed { i, (luba1Bytes, luba2Bytes) ->
+            assertTrue("LUBA 1 read #$i", allowed(luba1Bytes, MsgDevice.DEV_MAINCTL))
+            assertFalse("LUBA 1 read #$i checked with the LUBA 2 receiver", allowed(luba1Bytes, MsgDevice.DEV_NAVIGATION))
+            assertTrue("LUBA 2 read #$i", allowed(luba2Bytes, MsgDevice.DEV_NAVIGATION))
+            assertFalse("LUBA 2 read #$i checked with the LUBA 1 receiver", allowed(luba2Bytes, MsgDevice.DEV_MAINCTL))
+        }
+        assertTrue(allowed(luba1.returnToDock(), MsgDevice.DEV_MAINCTL, nativeReturn = true))
+        assertFalse(allowed(luba1.returnToDock(), MsgDevice.DEV_MAINCTL))
+        // Same refusals as on a LUBA 2: native tasks, leaving the base, map writing, motion.
+        listOf(luba1.taskControl(1), luba1.taskControl(2), luba1.taskControl(4), luba1.leaveDock(), luba1.startMapRecording(0),
+            luba1.deleteMapElement(0, 42L), luba1.saveMapTask(), luba1.prepareMowing(fr.luba.poc.mowing.MowConfig(listOf(1))),
+            luba1.movement(100, 0), luba1.manualBlades(true, 60))
+            .forEachIndexed { i, bytes -> assertFalse("LUBA 1 refused #$i", allowed(bytes, MsgDevice.DEV_MAINCTL, nativeReturn = true)) }
+        // A main-controller message that is not navigation stays refused.
+        assertFalse(allowed(luba1.stop(), MsgDevice.DEV_MAINCTL, nativeReturn = true))
+    }
+
     // --- Return tracking ------------------------------------------------------------------------
 
     @Test fun `return tracked until the charging contact`() {

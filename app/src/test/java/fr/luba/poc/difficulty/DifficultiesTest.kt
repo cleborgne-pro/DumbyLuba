@@ -127,6 +127,33 @@ class DifficultiesTest {
         assertTrue(PresumedObstacles.contactsOf(contacts, "presume-unknown", now).isEmpty())
     }
 
+    /**
+     * Border contact ([fr.luba.poc.simulation.EdgeContactKind.LIMIT]): the contact recorded on receipt is re-typed
+     * [DifficultyKind.EDGE] under the same id; it stays on the heatmap but never makes a presumed obstacle. A contact
+     * against an object at the edge keeps [DifficultyKind.CONTACT] and is remembered for 4 h.
+     */
+    @Test fun borderContactIsRetypedAndMakesNoPresumedObstacle() {
+        val received = contact("r", now - 60_000, 5.0, 9.8)
+        val edge = DifficultyEvent("e", now - 55_000, DifficultyKind.EDGE, 5.0, 9.6, code = -1014, obstacleX = 5.0, obstacleY = 9.75,
+            contactAtMs = received.contactAtMs, note = "Contact en bordure")
+        val log = DifficultyLog.refine(listOf(received), edge)
+        assertEquals(1, log.size)
+        assertEquals("same entry, re-typed", "r", log.single().id)
+        assertEquals(DifficultyKind.EDGE, log.single().kind)
+        assertEquals(received.atMs, log.single().atMs)
+        assertTrue(PresumedObstacles.clusters(log, now).isEmpty())
+        assertTrue(PresumedObstacles.obstacles(log, emptyList(), now).isEmpty())
+        assertTrue("on the heatmap", DifficultyField(log, now).score(Point(5.0, 9.75)) > 0.2)
+        // Object at the edge: the contact stays and is avoided for 4 h.
+        assertEquals(1, PresumedObstacles.obstacles(listOf(received), emptyList(), now).size)
+        // Without a contact on receipt (lock without a code): a new border entry; a later contact refine does not take it back.
+        val alone = DifficultyLog.refine(emptyList(), edge)
+        assertEquals(DifficultyKind.EDGE, alone.single().kind)
+        assertEquals(2, DifficultyLog.refine(alone, contact("n", now - 50_000, 5.0, 9.8)).size)
+        assertEquals(DifficultyKind.EDGE, DifficultyKind.of("edge"))
+        assertEquals(log, DifficultyJson.decode(DifficultyJson.encode(log)))
+    }
+
     @Test fun logDeduplicatesAndJsonRoundTrips() {
         val stop = DifficultyEvent("s", now, DifficultyKind.BLOCKED, 3.0, 4.0, code = 1201, note = "Erreur robot", source = "tonte")
         val log = DifficultyLog.add(emptyList(), stop)

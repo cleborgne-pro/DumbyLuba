@@ -166,6 +166,258 @@ void test_follower_pivots_at_the_vertex_of_a_sharp_corner_and_not_before() {
   TEST_ASSERT_TRUE(atCorner.angular >= PathFollower::MIN_PIVOT);
 }
 
+// Edges of an arc of `radius` turning `degrees` (+ left) from `start` heading `heading`, one vertex every 4°
+// (PathFollowerTest.arcEdges).
+static std::vector<SimEdge> arcEdges(Point start, double heading, double radius, double degrees) {
+  const double sign = degrees >= 0 ? 1.0 : -1.0;
+  const double h = toRadians(heading);
+  const Point centre(start.x - sign * radius * std::sin(h), start.y + sign * radius * std::cos(h));
+  const int steps = (int)std::ceil(std::fabs(degrees) / 4.0);
+  const double a0 = std::atan2(start.y - centre.y, start.x - centre.x);
+  std::vector<Point> points;
+  for (int k = 0; k <= steps; k++) {
+    const double a = a0 + toRadians(degrees * k / steps);
+    points.emplace_back(centre.x + radius * std::cos(a), centre.y + radius * std::sin(a));
+  }
+  return chain(points, true);
+}
+
+// Parity vectors of the curve tracking (PathFollowerTest, "curve commands match the gateway parity vectors"): rolling U
+// of 0.35 m, S-bend of 0.5 m, exit onto a straight line, one follower fed in order; commands within one unit.
+void test_follower_curve_parity_vectors() {
+  const auto left = arcEdges(Point(0, 0), 0.0, 0.35, 180.0);
+  const auto right = arcEdges(left.back().b, 180.0, 0.5, -90.0);
+  std::vector<SimEdge> edges = {edge(Point(-2.0, 0.0), Point(0.0, 0.0), true)};
+  edges.insert(edges.end(), left.begin(), left.end());
+  edges.insert(edges.end(), right.begin(), right.end());
+  const Point end = right.back().b;
+  edges.push_back(edge(end, Point(end.x, end.y + 2.0), true));
+  TEST_ASSERT_EQUAL(70, (int)edges.size());
+  PathFollower follower(edges, 0, (int)edges.size(), 0.12);
+  auto onLeft = [](double deg, double r) { return Point(r * std::sin(toRadians(deg)), 0.35 - r * std::cos(toRadians(deg))); };
+  const Point l = left.back().b;
+  auto onRight = [&](double deg) {
+    return Point(l.x + 0.5 * std::cos(toRadians(-90.0 - deg)), l.y + 0.5 + 0.5 * std::sin(toRadians(-90.0 - deg)));
+  };
+  struct Case {
+    Point p;
+    double heading, deviation;
+    bool calibrated;
+    int linear, angular, index;
+  };
+  const std::vector<Case> cases = {
+      {Point(-0.5, 0.02), 2.0, 0.0, true, 314, -47, 0},
+      {Point(-0.1, -0.03), 0.0, 0.0, true, 131, 67, 2},
+      {onLeft(10.0, 0.33), 13.0, 0.0, true, 131, 152, 9},
+      {onLeft(45.0, 0.33), 48.0, 0.0, true, 131, 141, 18},
+      {onLeft(90.0, 0.39), 93.0, 0.0, true, 125, 189, 29},
+      {onLeft(135.0, 0.33), 138.0, 0.13, true, 124, 152, 41},
+      {onLeft(170.0, 0.33), 173.0, 0.0, false, 87, 7, 48},
+      {onRight(5.0), 175.0, 0.0, true, 131, -122, 51},
+      {onRight(45.0), 135.0, 0.0, true, 166, -186, 61},
+      {onRight(85.0), 95.0, 0.0, true, 178, -83, 69},
+      {Point(end.x + 0.01, end.y + 0.3), 92.0, 0.0, true, 185, -18, 69},
+      {Point(end.x + 0.01, end.y + 0.6), 92.0, 0.0, true, 263, -18, 69},
+      {Point(end.x + 0.01, end.y + 1.2), 92.0, 0.0, true, 315, -18, 69},
+  };
+  for (const auto &c : cases) {
+    const auto command = follower.command(c.p, c.heading, 315, 351, 0.11, 0.00105, 80, c.deviation, c.calibrated);
+    NEAR_MSG(c.linear, command.linear, 1.0, "linear");
+    NEAR_MSG(c.angular, command.angular, 1.0, "angular");
+    TEST_ASSERT_EQUAL(c.index, follower.index());
+  }
+  NEAR(0.134146, PathFollower::curveSpeed(164.0, 351, 0.12), 1e-6);
+  NEAR(0.093902, PathFollower::curveSpeed(164.0, 450, 0.12, false), 1e-6);
+  NEAR(0.21, PathFollower::exitLimit(0.55, 0.12, 0.3), 1e-9);
+}
+
+// A robot on a 0.35 m arc along its tangent gets the arc's rotation at its speed (feed-forward), no pivot.
+void test_follower_curve_feed_forward_keeps_the_tangent_reference() {
+  std::vector<SimEdge> edges = {edge(Point(-2.0, 0.0), Point(0.0, 0.0), true)};
+  const auto u = arcEdges(Point(0, 0), 0.0, 0.35, 180.0);
+  edges.insert(edges.end(), u.begin(), u.end());
+  edges.push_back(edge(Point(0.0, 0.7), Point(-2.0, 0.7), true));
+  PathFollower follower(edges, 0, (int)edges.size(), 0.15);
+  const Point p(0.35 * std::sin(toRadians(45.0)), 0.35 - 0.35 * std::cos(toRadians(45.0)));
+  const auto c = follower.command(p, 45.0, 315, PathFollower::angularLimit(63), 0.12, 0.00095);
+  TEST_ASSERT_TRUE(c.linear > 0);
+  TEST_ASSERT_FALSE(follower.pivoting());
+  const double kappa = 4.0 / (2 * 0.35 * std::sin(toRadians(2.0)));
+  NEAR(c.linear * 0.00095 * kappa / 0.12, c.angular, 4.0 * PathFollower::STEER_GAIN / 0.12);
+}
+
+// Rolling U of 0.35 m between two 2 m passes (CurveTrackingEdgeCasesTest.rollingU).
+static std::vector<SimEdge> rollingU() {
+  std::vector<SimEdge> edges = {edge(Point(-2.0, 0.0), Point(0.0, 0.0), true)};
+  const auto u = arcEdges(Point(0, 0), 0.0, 0.35, 180.0);
+  edges.insert(edges.end(), u.begin(), u.end());
+  edges.push_back(edge(Point(0.0, 0.7), Point(-2.0, 0.7), true));
+  return edges;
+}
+
+static Point onU(double degrees) { return Point(0.35 * std::sin(toRadians(degrees)), 0.35 - 0.35 * std::cos(toRadians(degrees))); }
+
+// Polygonal bend of `count` edges of `length` turning `turn` degrees left at each vertex, between two 2 m lines
+// (CurveTrackingEdgeCasesTest.polygonBend); `atLeast`: every bend edge at least `length` long in floating point.
+static std::vector<SimEdge> polygonBend(double length, double turn, int count, bool atLeast = false) {
+  std::vector<Point> points = {Point(-2.0, 0.0), Point(0.0, 0.0)};
+  double heading = 0.0;
+  for (int k = 0; k < count; k++) {
+    heading += turn;
+    const Point from = points.back();
+    double l = length;
+    Point next;
+    while (true) {
+      next = Point(from.x + l * std::cos(toRadians(heading)), from.y + l * std::sin(toRadians(heading)));
+      if (!atLeast || from.distance(next) >= length) break;
+      l = std::nextafter(l, 1.0);
+    }
+    points.push_back(next);
+  }
+  heading += turn;
+  const Point last = points.back();
+  points.emplace_back(last.x + 2.0 * std::cos(toRadians(heading)), last.y + 2.0 * std::sin(toRadians(heading)));
+  return chain(points, true);
+}
+
+// Robot on the middle of edge `index` of a bend, `offset` degrees off it: steering of the command (no pivot).
+static int steerOnBend(const std::vector<SimEdge> &edges, int index, double offset) {
+  const SimEdge &e = edges[index];
+  const Point middle((e.a.x + e.b.x) / 2, (e.a.y + e.b.y) / 2);
+  PathFollower follower(edges, 0, (int)edges.size(), 0.15);
+  const auto c = follower.command(middle, PathFollower::headingOf(e) + offset, 315, PathFollower::angularLimit(63));
+  TEST_ASSERT_FALSE(follower.pivoting());
+  TEST_ASSERT_TRUE(c.linear > 0);
+  return c.angular;
+}
+
+static bool noStop(const std::vector<SimEdge> &edges) {
+  const auto stops = PathFollower::stopVertices(edges, 0, (int)edges.size());
+  for (size_t k = 0; k + 1 < edges.size(); k++)
+    if (stops[k]) return false;
+  return true;
+}
+
+// Arcs are made of edges under 15 cm (CURVE_ARC_EDGE_M): bends of 15 cm edges exactly, and chamfered corners of 16.5 cm
+// edges, keep the chord (steering saturated at half of the limit); 14.9 cm edges are curves (CurveTrackingEdgeCasesTest).
+void test_follower_curve_arc_edge_threshold() {
+  const int angular = PathFollower::angularLimit(63);
+  NEAR(0.15, PathFollower::CURVE_ARC_EDGE_M, 0.0);
+  const auto exact = polygonBend(0.15, 10.0, 9, true);
+  for (int k = 1; k < 10; k++) TEST_ASSERT_TRUE(exact[k].meters() >= 0.15 && exact[k].meters() < 0.15 + 1e-12);
+  TEST_ASSERT_TRUE(noStop(exact));
+  TEST_ASSERT_EQUAL(angular / 2, steerOnBend(exact, 4, -6.0));
+  const auto under = polygonBend(0.149, 10.0, 9);
+  TEST_ASSERT_TRUE(noStop(under));
+  const int curved = steerOnBend(under, 4, -6.0);
+  TEST_ASSERT_TRUE(curved > angular / 2 && curved <= (int)std::lround(PathFollower::CURVE_STEER_LIMIT * angular));
+  const auto chamfer = polygonBend(0.165, 22.5, 3);
+  TEST_ASSERT_TRUE(noStop(chamfer));
+  for (int k = 1; k <= 3; k++) TEST_ASSERT_EQUAL(angular / 2, steerOnBend(chamfer, k, 6.0));
+}
+
+// Inside an arc (within 15 cm of the line) the robot pivots only beyond 40 degrees of heading error; 20 cm away from it
+// or on a straight line, beyond 25 degrees as before (CurveTrackingEdgeCasesTest).
+void test_follower_curve_pivot_threshold() {
+  const auto edges = rollingU();
+  const int linear = 315, angular = PathFollower::angularLimit(63);
+  {
+    PathFollower follower(edges, 0, (int)edges.size(), 0.15);
+    const auto c = follower.command(onU(90.0), 90.0 - 35.0, linear, angular);
+    TEST_ASSERT_FALSE(follower.pivoting());
+    TEST_ASSERT_TRUE(c.linear > 0 && c.angular > 0);
+  }
+  {
+    PathFollower follower(edges, 0, (int)edges.size(), 0.15);
+    follower.command(onU(90.0), 90.0 + 35.0, linear, angular);
+    TEST_ASSERT_FALSE(follower.pivoting());
+  }
+  {
+    PathFollower follower(edges, 0, (int)edges.size(), 0.15);
+    const auto c = follower.command(onU(90.0), 90.0 - 42.0, linear, angular);
+    TEST_ASSERT_TRUE(follower.pivoting());
+    TEST_ASSERT_EQUAL(0, c.linear);
+    TEST_ASSERT_TRUE(c.angular > 0);
+  }
+  {
+    PathFollower follower(edges, 0, (int)edges.size(), 0.15);
+    follower.command(Point(0.55, 0.35), 90.0 + 30.0, linear, angular);
+    TEST_ASSERT_TRUE(follower.pivoting());
+  }
+  {
+    PathFollower follower(edges, 0, (int)edges.size(), 0.15);
+    follower.command(Point(0.25, 0.35), 90.0 + 30.0, linear, angular);
+    TEST_ASSERT_FALSE(follower.pivoting());
+  }
+  {
+    const std::vector<SimEdge> straight = {edge(Point(0, 0), Point(10, 0), true)};
+    PathFollower follower(straight, 0, 1, 0.15);
+    follower.command(Point(3.0, 0.0), 30.0, linear, angular);
+    TEST_ASSERT_TRUE(follower.pivoting());
+  }
+}
+
+// After the arc the straight line is tracked on the chord (no rotation when on it and along it), held at the speed of
+// the arc over 0.3 m, raised over 0.5 m, then at the set speed (CurveTrackingEdgeCasesTest).
+void test_follower_curve_exit_hold() {
+  const auto edges = rollingU();
+  const int linear = 315, angular = PathFollower::angularLimit(63);
+  const double mpu = 0.00095, dpu = 0.12;
+  const SimEdge &exit = edges.back();
+  double sum = 0.0, length = 0.0;
+  for (int j = (int)edges.size() - 2; length < PathFollower::CURVE_WINDOW_M; j--) {
+    sum += PathFollower::turnDegrees(edges[j], edges[j + 1]);
+    length += edges[j].meters();
+  }
+  const double hold = PathFollower::curveSpeed(sum / std::min(length, PathFollower::CURVE_WINDOW_M), angular, dpu);
+  TEST_ASSERT_TRUE(hold < linear * mpu);
+  auto at = [&](double behind) {
+    PathFollower follower(edges, 0, (int)edges.size(), 0.15);
+    for (size_t k = 0; k + 1 < edges.size(); k++) follower.command(edges[k].b, PathFollower::headingOf(edges[k]), linear, angular);
+    const auto c = follower.command(Point(exit.a.x - behind, exit.a.y), 180.0, linear, angular);
+    TEST_ASSERT_FALSE(follower.pivoting());
+    return c;
+  };
+  for (double behind : {0.05, 0.2, 0.29}) {
+    const auto c = at(behind);
+    TEST_ASSERT_EQUAL(0, c.angular);
+    NEAR(hold / mpu, c.linear, 1.5);
+  }
+  NEAR(PathFollower::exitLimit(0.55, hold, linear * mpu) / mpu, at(0.55).linear, 1.5);
+  TEST_ASSERT_EQUAL(linear, at(0.85).linear);
+}
+
+// Uncalibrated rotation: the arc is driven at UNCALIBRATED_TURN_SHARE of the calibrated curve speed, with a smaller
+// feed-forward rotation (CurveTrackingEdgeCasesTest).
+void test_follower_curve_uncalibrated_rotation() {
+  const auto edges = rollingU();
+  const int linear = 315, angular = PathFollower::angularLimit(63);
+  PathFollower a(edges, 0, (int)edges.size(), 0.15), b(edges, 0, (int)edges.size(), 0.15);
+  const auto calibrated = a.command(onU(60.0), 60.0, linear, angular, 0.12, 0.00095, PathFollower::MIN_LINEAR, 0.0, true);
+  const auto careful = b.command(onU(60.0), 60.0, linear, angular, 0.12, 0.00095, PathFollower::MIN_LINEAR, 0.0, false);
+  TEST_ASSERT_TRUE(calibrated.linear < linear);
+  NEAR(PathFollower::UNCALIBRATED_TURN_SHARE * calibrated.linear, careful.linear, 2.0);
+  TEST_ASSERT_TRUE(careful.angular < calibrated.angular);
+  NEAR(PathFollower::UNCALIBRATED_TURN_SHARE * PathFollower::curveSpeed(164.0, 351, 0.12),
+       PathFollower::curveSpeed(164.0, 351, 0.12, false), 1e-12);
+}
+
+// A zero-length edge at the entry of the arc changes nothing (CurveTrackingEdgeCasesTest).
+void test_follower_curve_zero_length_edge() {
+  const auto u = rollingU();
+  std::vector<SimEdge> withZero = {u[0], edge(u[0].b, u[0].b, true)};
+  withZero.insert(withZero.end(), u.begin() + 1, u.end());
+  for (double degrees : {1.0, 3.0, 10.0, 45.0, 90.0, 135.0}) {
+    PathFollower plain(u, 0, (int)u.size(), 0.15), zero(withZero, 0, (int)withZero.size(), 0.15);
+    const auto a = plain.command(onU(degrees), degrees, 315, PathFollower::angularLimit(63));
+    const auto b = zero.command(onU(degrees), degrees, 315, PathFollower::angularLimit(63));
+    TEST_ASSERT_FALSE(zero.pivoting());
+    TEST_ASSERT_TRUE(b.linear > 0 && b.angular > 0 && !b.done);
+    TEST_ASSERT_EQUAL(a.linear, b.linear);
+    TEST_ASSERT_EQUAL(a.angular, b.angular);
+  }
+}
+
 void test_follower_pivot_never_below_the_useful_minimum() {
   const std::vector<SimEdge> edges = {edge(Point(0, 0), Point(0, 3))};
   PathFollower follower(edges, 0, 1, 0.15);
@@ -1263,6 +1515,13 @@ int main(int, char **) {
   RUN_TEST(test_blade_gate_old_completion_cannot_confirm_new_gate);
   RUN_TEST(test_follower_advances_without_pivot_on_tiny_edges);
   RUN_TEST(test_follower_pivots_at_the_vertex_of_a_sharp_corner_and_not_before);
+  RUN_TEST(test_follower_curve_parity_vectors);
+  RUN_TEST(test_follower_curve_feed_forward_keeps_the_tangent_reference);
+  RUN_TEST(test_follower_curve_arc_edge_threshold);
+  RUN_TEST(test_follower_curve_pivot_threshold);
+  RUN_TEST(test_follower_curve_exit_hold);
+  RUN_TEST(test_follower_curve_zero_length_edge);
+  RUN_TEST(test_follower_curve_uncalibrated_rotation);
   RUN_TEST(test_follower_pivot_never_below_the_useful_minimum);
   RUN_TEST(test_follower_tight_rounded_turn_becomes_a_single_stop);
   RUN_TEST(test_follower_arrives_at_the_corner_at_approach_speed);

@@ -50,7 +50,7 @@ Stops triggered by a guard (below) use the same sequence without closing the lin
 | Freshness | state and position less than 2 s old in every moving mode; telemetry watchdog from 5 to 30 s (10 s by default, Service → Advanced settings → **Telemetry validity delay**, 1 s steps, changeable with the robot disconnected) |
 | Battery | 5 % reserve when mowing; 30 % minimum for the joystick, tests and the diagnostic campaign |
 | Self-check | only states 0 and 10 are nominal; 11 = locked after STOP; 23 = outside the Mammotion app's working hours; 25 = collision lock; 40, 41, 42, 99 = positioning lost (joystick allowed, [details](#positioning-lost-self-check-41)); any other or missing value = active protection |
-| Bumper | contact (1014) = stop then [back-off and bypass](obstacles.md); stuck fault (1207) never taken for a contact. **Only obstacle detection**: the ultrasonic sensors are not read |
+| Bumper | contact (1014) = stop then [back-off and bypass](obstacles.md); stuck fault (1207) never taken for a contact; health bits 0–2 of `sensor_status` not 0 = refusal or stop, except an "alert" (1) read from the connection on with the robot at rest, kept as its resting value until it changes ([X series](supported-models.md#bumper-alert-at-rest-of-the-x-series)). **Only obstacle detection**: the ultrasonic sensors are not read |
 | Progress | stop if there is no progress for 15 s, or less than 3 cm in 3 s |
 | Deviation | stop beyond 30 cm of deviation from the route (60 cm during a pivot and the reconvergence after it); during mowing, a route exit is recovered by a back-off and a link ([real mowing](real-mowing.md#leaving-the-trajectory-back-off-and-resume)) |
 | Transient protection | non-nominal self-check during mowing: STOP, then resume only if it returns to 0/10 and stays there for 3 s (at most 30 s, 5 min for a positioning loss, 5 times per mission, never on lock 11 or 23; [details](real-mowing.md#transient-protection-pause-then-resume)) |
@@ -134,7 +134,11 @@ inside their limits (chassis across the border), with bumper and lift sensors cl
 
 A real contact is still handled: bumper or lift alert stops the joystick and the move, the contact code (-1014) gives
 the back-off and the new path of the move. Inside the zones, during mowing and for routes with blades, 25 stays the
-collision lock described above. Whether the robot itself accepts the speed commands under 25 remains to be checked
+collision lock described above. **During a route** (Unreleased), the same condition (centre beyond the zones and
+passages or less than 35 cm inside, bumper and lift bits clear, no contact code within 2 s) makes a
+[border contact](obstacles.md#contact-at-the-border-of-the-zone): the lock is not ignored, the robot backs off at least
+30 cm under it, the route waits for the lock to clear, then resumes on the same line without an estimated obstacle.
+A bumper or lift bit set, or unknown sensors, keeps the contact handling. Whether the robot itself accepts the speed commands under 25 remains to be checked
 on the robot: if it refuses them, the progress guard stops the move ("no progress").
 
 **At a no-go zone** (2026-10-25): the robot also raises 25 when part of its chassis enters a no-go zone (pivot at a

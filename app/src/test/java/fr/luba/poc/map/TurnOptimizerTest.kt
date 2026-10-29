@@ -1,6 +1,8 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.obstacles.RobotEnvelope
+import fr.luba.poc.simulation.DeadReckoning
+import fr.luba.poc.simulation.PathFollower
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -28,7 +30,7 @@ class TurnOptimizerTest {
         return TurnOptimizer.TurnContext(0.4, 0.3, drivable = { envelope.pathCollision(it) == null }, roomy = { roomy.pathCollision(it) == null })
     }
 
-    @Test fun `neighbouring passes keep the pivots, the U is too tight to be followed and reversing is not offered`() {
+    @Test fun `neighbouring passes keep the pivots when fast, the U is too tight to be followed and reversing is not offered`() {
         val all = candidates(0.4)
         val pivots = all.of(TurnKind.PIVOTS)
         assertTrue(pivots.possible)
@@ -36,13 +38,16 @@ class TurnOptimizerTest {
         assertEquals(listOf(Point(10.0, 0.0), Point(10.0, 0.4)), pivots.points)
         assertFalse(all.of(TurnKind.U_ARC).possible)
         assertFalse(all.of(TurnKind.MULTI_POINT).possible)
-        // Open ground: the rounded loop fits but is longer and turns almost twice as much.
+        // Open ground: the rounded loop fits but is longer; it turns nothing in place.
         val loop = all.of(TurnKind.LOOP)
         assertTrue(loop.refusal, loop.possible)
         assertEquals(0.0, loop.pivotDegrees, 1e-6)
         assertTrue(loop.durationS > pivots.durationS)
         assertEquals(TurnKind.PIVOTS, TurnOptimizer.best(all, TurnStyle.FAST)?.kind)
-        assertEquals(TurnKind.PIVOTS, TurnOptimizer.best(all, TurnStyle.LAWN)?.kind)
+        // Lawn friendly: since the curves are planned at the speed the tracking drives them (turn tracking, step C), the
+        // loop costs about 6 s more than the pivots and spares their 180° in place, so it wins.
+        assertTrue("${loop.durationS} against ${pivots.durationS}", loop.durationS < pivots.durationS + 7.0)
+        assertEquals(TurnKind.LOOP, TurnOptimizer.best(all, TurnStyle.LAWN)?.kind)
     }
 
     @Test fun `passes two follow radii apart get a rolling U-turn when the lawn is spared`() {
@@ -60,13 +65,14 @@ class TurnOptimizerTest {
         assertEquals(10.35, wide.points.maxOf { it.x }, 1e-9)
         val pivots = all.of(TurnKind.PIVOTS)
         assertTrue(u.wear < pivots.wear / 2)
-        // Curve speed of the tracking: about as long as the two pivots and their 0.7 m link (within 15 %).
-        assertTrue(kotlin.math.abs(u.durationS - pivots.durationS) < pivots.durationS * 0.15)
+        // Curve speed of the tracking ([fr.luba.poc.simulation.PathFollower.curveSpeed], exit of the arc included):
+        // shorter than the two pivots, their stops and their 0.7 m link.
+        assertTrue("${u.durationS} against ${pivots.durationS}", u.durationS < pivots.durationS)
         assertEquals(TurnKind.U_ARC, TurnOptimizer.best(all, TurnStyle.LAWN)?.kind)
-        // Fast: duration first, the lawn only breaks near ties (here the U wins by its 112° less in place).
+        // Fast: duration first, the U wins.
         val fast = TurnOptimizer.best(all, TurnStyle.FAST)!!
         assertEquals(all.filter { it.possible }.minOf { it.score(TurnStyle.FAST) }, fast.score(TurnStyle.FAST), 1e-9)
-        assertTrue(fast.durationS <= pivots.durationS * 1.15)
+        assertEquals(TurnKind.U_ARC, fast.kind)
     }
 
     @Test fun `at the pivot reserve of the boundary the U starts earlier and its arc sweeps the shortened pass ends`() {
@@ -104,5 +110,27 @@ class TurnOptimizerTest {
         val pivots = TurnPlan(TurnKind.PIVOTS, emptyList(), durationS = 12.0, wear = 180.0)
         assertTrue(tight.score(TurnStyle.LAWN) > pivots.score(TurnStyle.LAWN) - 1e-9 || tight.score(TurnStyle.FAST) > pivots.score(TurnStyle.FAST))
         assertEquals(TurnKind.PIVOTS, TurnOptimizer.best(listOf(tight, pivots), TurnStyle.FAST)?.kind)
+    }
+
+    /**
+     * The duration model is the tracking's: a half circle of the follow radius at [PathFollower.curveSpeed] of the
+     * planner speed, and the straight line after it held at that speed over [PathFollower.CURVE_EXIT_HOLD_M] then raised
+     * over [PathFollower.CURVE_EXIT_RAMP_M] ([PathFollower.exitLimit]).
+     */
+    @Test fun `drive uses the tracking curve speed`() {
+        val r = TurnOptimizer.FOLLOW_RADIUS_M
+        val arc = (0..45).map { k -> val a = Math.toRadians(-90.0 + 4.0 * k); Point(r * kotlin.math.cos(a), r + r * kotlin.math.sin(a)) }
+        val chord = arc[0].distance(arc[1])
+        val speed = PathFollower.curveSpeed(4.0 / chord, PathFollower.angularLimit(63), DeadReckoning.DEFAULT_DEGREES_PER_UNIT)
+        assertTrue(speed < 0.3)
+        val arcOnly = TurnOptimizer.drive(arc, 0.3)
+        assertEquals(45 * chord / speed, arcOnly.durationS, 0.05 * arcOnly.durationS)
+        assertEquals(0.0, arcOnly.pivotDegrees, 1e-9)
+        // Then 2 m straight back: slower than 2 m at the set speed by about the hold and half of the ramp.
+        val withExit = TurnOptimizer.drive(arc + Point(-2.0, 2 * r), 0.3)
+        val exit = withExit.durationS - arcOnly.durationS
+        val hold = PathFollower.CURVE_EXIT_HOLD_M; val ramp = PathFollower.CURVE_EXIT_RAMP_M
+        assertTrue("$exit s", exit > 2.0 / 0.3 + hold / speed - hold / 0.3)
+        assertTrue("$exit s", exit < 2.0 / 0.3 + (hold + ramp) / speed)
     }
 }

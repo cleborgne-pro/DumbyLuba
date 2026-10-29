@@ -8,7 +8,7 @@ with the remaining route. Fixed obstacles can be saved on the phone so that late
 | **Access** | Automatic during a mission; Service → Garden and history → **Obstacles** (list, difficulties, photos, simulation); Service → Supervised tests → **Obstacle tests**; map layers **Obstacles** and **Difficulties** |
 | **Status** | Implemented and simulated; reversing and contact during the back-off still to be validated on the robot, blades stopped first |
 | **Detection** | **bumper only**: the ultrasonic sensors are not read (no distance in the known protocol), the obstacle is detected on contact |
-| **Code** | `simulation/ObstacleBypass.kt`, `ObstacleEncounterSimulation.kt`, `obstacles/` (`Obstacles.kt`, `ObstacleStore.kt`, `FollowObstacleGuard.kt`, `ObstacleCourse.kt`, `TeachSafety.kt`, `BorderFrontal.kt`), `difficulty/`, `map/DifficultyLayers.kt`, `map/ObstacleSheet.kt`, `ui/ObstaclesPanel.kt`, `ui/DifficultiesPanel.kt`, `ui/ObstacleSimPanel.kt` |
+| **Code** | `simulation/ObstacleBypass.kt`, `EdgeContact.kt`, `ObstacleEncounterSimulation.kt`, `obstacles/` (`Obstacles.kt`, `ObstacleStore.kt`, `FollowObstacleGuard.kt`, `ObstacleCourse.kt`, `TeachSafety.kt`, `BorderFrontal.kt`), `difficulty/`, `map/DifficultyLayers.kt`, `map/ObstacleSheet.kt`, `ui/ObstaclesPanel.kt`, `ui/DifficultiesPanel.kt`, `ui/ObstacleSimPanel.kt` |
 | **References** | [Bypass: how it works and its limits](../OBSTACLE_BYPASS.md) · [Obstacle tests](../OBSTACLE_TESTS.md) · [Encountered obstacles and difficulties](../DIFFICULTIES.md) · [Local replanning](../LOCAL_REPLANNING.md) · [Robot camera](camera.md) |
 
 <p align="center">
@@ -21,7 +21,8 @@ with the remaining route. Fixed obstacles can be saved on the phone so that late
 Applies to mowing, signal surveys, station routes and go-to-point moves.
 
 1. **Stop**: immediate STOP (send queue purged), blades stopped and confirmed, two stationary positions.
-2. **Estimated obstacle** in front of the bumper: radius 0.2 m, margin 0.3 m. It applies to the current mission,
+2. **Estimated obstacle** in front of the bumper: radius 0.2 m, margin 0.3 m (0.2 m for an
+   [object at the border](#contact-at-the-border-of-the-zone)). It applies to the current mission,
    then for 4 h as a presumed obstacle (resume and later mowing runs); it can be saved permanently from its record on
    the map or from Service → Obstacles. A contact that the robot republishes with a different timestamp is not a second contact.
 3. **Back-off** in a straight line along the traveled track, heading unchanged, ≈ 10 cm/s, from 30 cm to 1 m. The
@@ -53,13 +54,47 @@ Applies to mowing, signal surveys, station routes and go-to-point moves.
    **Obstacle encountered** notification (warning level, one per robot, updated on each contact) gives the contact
    position and the photo ([notifications](notifications.md)).
 
+### Contact at the border of the zone
+
+Unreleased. Request of 2026-10-28: "sometimes the robot is dragged near the limit, leaves its line, bumps into the
+limit, detects an obstacle and bypasses it; it should just back off and resume". Before any bypass, the Fold classifies
+the contact from the stopped pose (`simulation/EdgeContact.kt`, one rule for local tracking, both gateways and the
+obstacle simulation):
+
+| Kind | When | Response |
+|---|---|---|
+| **Limit** | collision lock (self-check 25) without a contact code, bumper and lift sensors clear (`sensor_status & 7 == 0`), robot centre beyond the zones and passages or less than 35 cm inside them (the rule that already frees the joystick); **or** bumper code with the front edge (bumper centre or a front corner) between 15 cm inside and 40 cm beyond the drawn border, heading within 75° of the border, after a drift of at least 8 cm towards it (centre at the contact, or over the last 1.5 m of trail, closer to the border than the planned line; a pivot slide counts) | **back-off and resume**: no estimated obstacle, no bypass (the 8 bypasses are untouched), no photo, no obstacle proposal |
+| **Object at the border** | bumper code with the front edge at most 60 cm inside the border (the 50 cm rule of the blade-stopped links plus tracking), not a limit | obstacle path, estimated margin 0.2 m instead of 0.3 m, remembered 4 h like any contact |
+| **Object** | everything else: mid-zone contact, lock without code with a bumper or lift bit set or sensors unknown, lock inside the zone, map incomplete | unchanged |
+
+Limit response: STOP and blades stopped confirmed under the lock, straight back-off of **at least 30 cm** along the
+trail (straight 30 cm checked on the map when the trail comes from another direction, after a pivot), wait for the
+robot to release the lock, then the blade-stopped link of a [trajectory exit](real-mowing.md#leaving-the-trajectory-back-off-and-resume)
+back onto the **same route**, up to 4 m further if the direct link fails, as long as that link stays within 2 m
+(longer, the obstacle path applies, see below). No back-off possible: the obstacle path
+applies as before. A **second** limit contact less than 1.5 m from a previous one in the same mission is an object at
+the border (no longer a transient drift), and so is a limit contact less than 1.5 m from an obstacle estimated earlier
+in the mission (the object probably runs along the border, and the resume link would have to go around it: 52 m
+blades stopped in a replay before this rule). A resume link longer than **2 m** drops the limit response for the
+obstacle path (not counted as a limit contact). Beyond **4** limit contacts per mission, the stop is kept. Status "Border
+contact: back-off, then the route resumes"; log `route_edge_contact` (kind, code, self-check, sensors, pose, signed
+distances to the border, drift, cause `lock_at_limit` or `coded_with_drift`, back-off, link, skipped cutting, count,
+same spot); task history: a "Bumper contact" incident. On the map the contact recorded on receipt is re-typed
+**Border contact** ([difficulties](../DIFFICULTIES.md)): on the heatmap, never a presumed obstacle.
+
+Kept as before: a lock without code **at a no-go zone** still stops the mission (`route_exclusion_latch`, joystick to
+take it out): the no-go is often a real hazard and on 2026-10-25 nothing behind the robot allowed a back-off. Bumper and
+lift bits, lift codes, the 30 cm deviation stop and the physical envelope are not relaxed. Taking a real object for a
+limit costs one more bump at 10 cm/s, blades stopped, then the second-contact rule sends it down the obstacle path.
+
 **Collision lock (self-check 25).** On contact, the LUBA 2 often publishes `self_check 25` in the same report, one
 second before code -1014 appears in its error history. Tracking then stops the robot immediately and waits up to 2 s
 for the contact code; once the contact is received, the sequence above applies. The back-off (step 3) is allowed
 under this lock, since it moves the robot away from the object. The route only resumes once the robot has released
 the lock (3 s stable, 30 s at most); otherwise the stop is maintained, with the instruction to free the robot.
 Without a contact code within 2 s, the lock is now treated **as a contact** (0.49.1): back-off, wait for the lock to
-be released, obstacle estimated in front of the robot and bypass. Before, the mission waited 30 s for the robot to
+be released, obstacle estimated in front of the robot and bypass; at the limit of the zone, a
+[border contact](#contact-at-the-border-of-the-zone) instead (Unreleased). Before, the mission waited 30 s for the robot to
 clear its protection by itself, which it does not do as long as it stays against the object (Oct 15, 17:36: mowing
 stopped).
 The stop (step 1) is also confirmed under this lock: until then, confirming the two stationary positions required a
@@ -86,7 +121,14 @@ stop mowing ("Local obstacle inside the robot envelope").
 
 **Limits and stops maintained**
 
-- 8 bypasses at most per mission.
+- 8 bypasses at most per mission ([border contacts](#contact-at-the-border-of-the-zone) do not count; 4 of them at most).
+- **Detour budget** (Unreleased): a repair whose links exceed `max(15 m, 3 × cutting skipped)` after a contact on a
+  cutting pass is refused; the segment is then deferred to the end of the mowing like a blockage
+  ([smart resume](mowing-resume.md#smart-resume-after-a-recharge-or-a-blockage)), and if that deferral cannot be routed
+  after the back-off the repair is computed again and kept. Station route, mission without saved progress, or contact
+  on a blade-stopped transit: the repair is kept (deferring cannot shorten the way to its destination). On 2026-10-28,
+  79.2 m of links for 14.1 m skipped at a wood pile in a 2 m corridor, then 73.6 m around a hedge in transit. Log
+  `route_detour_refused`.
 - An object larger than the estimated disc is touched again further on; at the 5th contact within 2.5 m (object too
   large, to be drawn as a no-go zone), or when no detour exists, the segment is deferred to the end of the mowing and
   tried again there, given up if blocked again ([smart resume](mowing-resume.md#smart-resume-after-a-recharge-or-a-blockage)).
@@ -187,14 +229,18 @@ every mowing computation as presumed obstacles.
 The LUBA 2 also only records the contact in **manual mowing mode** (state 20): driven in ready mode (11), a pressed
 bumper left no trace at all (Fold log of 2026-10-22, 16:48-16:49: joystick and slow approach, error history unchanged,
 state 11 throughout). The joystick and the slow approach therefore drive in manual mode with blades OFF, renewed every
-500 ms like routes do; releasing the joystick leaves that mode.
+500 ms like routes do; releasing the joystick leaves that mode. That mode carries the cutting height the robot reports,
+so the deck does not move (60 mm until version 1.16.0,
+[DumbyLuba#2](https://github.com/cleborgne-pro/DumbyLuba/issues/2), see
+[manual control](manual-control.md#cutting-deck-height-while-driving)).
 | **Bypass** | **Start bypass**: choose a saved obstacle (nearest by default); the robot goes to the opposite side (1 m beyond its avoided area) and comes back, blades stopped, at the set **Forward speed**. Start between avoided area + 0.5 m and 10 m from the center. Passed if the robot's side (0.26 m) never reached the obstacle surface; minimum observed gap shown |
 | **Border** | frontal test of an outer border or a no-go zone (see below) |
 
 Common conditions (shown live as preconditions): LUBA 2 (`Luba-VS…` or X series `Luba-VP…`), fresh state (≤ 2 s), battery > 30 %, robot
 ready (state 11), no protection, bumper without alert, blades stopped, no Bluetooth diagnostics, blade test or route
 running, map read. A supervision checkbox is required on each tab, and leaving the page stops the running test. A
-bumper health alert (bits 0–2 of `sensor_status`) aborts the test without a proposal. Details:
+bumper health alert (bits 0–2 of `sensor_status`) aborts the test without a proposal, except the resting value of the
+robot learnt at the connection ([X series](supported-models.md#bumper-alert-at-rest-of-the-x-series)). Details:
 [obstacle tests](../OBSTACLE_TESTS.md).
 
 Obstacles are stored **on the phone only**; no no-go zone is created on the robot. They count in planning with
@@ -267,6 +313,10 @@ Place the object with a tap (drag to move it; two fingers pan and zoom), **Prepa
 **Play** / **Pause**, **Restart** and **End** (plays to the end). The orientation slider is hidden for the round
 shape. A base with its docking axis and a valid plan are required. Map colors: gray prepared route, orange route
 followed (repaired after contact), red object and contacts, circles estimated obstacles.
+
+The contact is classified like in real mowing ([border contacts](#contact-at-the-border-of-the-zone)): a limit
+contact backs off and resumes without an obstacle, an object at the border takes the 0.2 m margin, and a repair over
+the detour budget is noted in the log (kept: the simulation has no saved progress to defer to).
 
 The simulated robot is driven by the **same navigation module as real mowing** (line tracking, predicted pose
 between two positions, pivots at corners, stop and confirmation at every blade state change, safety stop beyond

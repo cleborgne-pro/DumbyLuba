@@ -42,8 +42,16 @@ keys only, no RTK station, pool cleaner or charging pile key. Each device left o
 characters, e.g. `RTK-AB`, otherwise 3 characters, never more than half of the name) and the name length, never the full name, the serial number or the iotId, so the anonymized export keeps
 it. When the account has devices but none is recognized, the status says "N devices in the account, none recognized
 as a Mammotion mower: export the diagnostics (Service → Logs → Export all) and report the model"; an empty account
-says "No device in the account". A robot listed by its product key only gains nothing else: motion stays bound to
+says "No device in the account", or "Your LUBA is on Mammotion's older cloud (Aliyun)…" when the account's owned
+devices list a robot that the device page leaves out ([Mammotion account](mammotion-account.md)). A robot listed by its product key only gains nothing else: motion stays bound to
 the validated name prefixes, so it stays in read-only mode.
+
+**Navigation receiver of the LUBA 1.** The navigation messages (map reading, task stop, return cancellation…) of a
+LUBA 1 are addressed to its main controller (`DEV_MAINCTL`), those of every other model, or of an unknown robot, to the
+navigation board (`DEV_NAVIGATION`), as PyMammotion does (`get_msg_device`). Before this, a LUBA AWD 5000 never
+answered the map reading ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3)). The receiver used is
+written in the `map_start` event of each reading. Not yet checked on a real LUBA 1. See the
+[protocol notes](../MAMMOTION_PROTOCOL.md#map-and-account--020).
 
 ## What read-only mode allows
 
@@ -65,7 +73,8 @@ switches (firmware debug, ZMQ bridge), and any command the list below does not n
 
 1. **Before Bluetooth**: every payload written by the app goes through `RobotBle.send`. For a robot whose name is
    not a validated prefix, `ReadOnlyPolicy` decodes the protobuf message and lets through only an explicit list of
-   read and stop commands; anything else, including unknown or future commands, is dropped, logged as
+   read and stop commands, a navigation one only when addressed to the navigation receiver of the model; anything
+   else, including unknown or future commands, is dropped, logged as
    `read_only_refused` and reported with "Read-only: this robot model is not validated yet…".
 2. **At the entry points**: every route (mowing, survey, move to a point, return to base, base exit), the
    navigation, blade, obstacle and border tests, the joystick and the cutting height already require a validated
@@ -121,8 +130,15 @@ only** (`ModelTrial`, `protocol/ModelSupport.kt`):
 ([DumbyLuba#2](https://github.com/cleborgne-pro/DumbyLuba/issues/2)), so none of its tests could start. When the trial
 is armed while this slot reads 1, that value becomes the robot's resting value for the trial (`Armed.bumperRest`,
 `ModelTrial.sensors`, logged in `model_trial_armed`): the guards of the three tests ignore it, but an error/obstacle
-value (2–7, never accepted) and the collision protection (self-check 25, code 1014) still refuse or stop them. The arming dialog says so and asks to check that the bumper moves freely. The LUBA 2 is not concerned
-(validated model, no trial). The raw value stays shown as is in Service → Sensors.
+value (2–7, never accepted) and the collision protection (self-check 25, code 1014) still refuse or stop them. The arming dialog says so and asks to check that the bumper moves freely. The validated
+LUBA 2 has no trial: its own resting value is learnt at the connection
+([bumper "alert" at rest of the X series](#bumper-alert-at-rest-of-the-x-series)). The raw value stays
+shown as is in Service → Sensors.
+
+**Deck height during the joystick.** On the same LUBA 3, the cutting deck moved while driving with the joystick
+([DumbyLuba#2](https://github.com/cleborgne-pro/DumbyLuba/issues/2)): the manual mode held for the bumper sent 60 mm.
+It now sends the height the robot reports ([manual control](manual-control.md#cutting-deck-height-while-driving)). Not
+tried on a robot yet.
 
 Everything else stays refused, at the entry points and by `RobotBle.send`: routes and mowing, move to a point, return
 to base, base exit, gateway tracking, cutting height, obstacle and border tests, map writing. During the trial the
@@ -198,6 +214,40 @@ Not verified yet, on a real X: no DumbyLuba route or move has been run; the [com
 test is the first thing to run before mowing, as on any robot; the vision module may stop or slow the robot in front
 of an obstacle during a DumbyLuba route (seen by the app as a robot that no longer follows); type 26 zones stay
 avoided and still refuse the mowing computation.
+
+### Bumper "alert" at rest of the X series
+
+The 3000X of [DumbyLuba#1](https://github.com/cleborgne-pro/DumbyLuba/issues/1) reports the bumper slot of
+`sensor_status` (bits 0–2) at 1 ("alert") in every report: on its base, while it drives itself back to it (logs of
+2026-10-20 and 2026-10-28, firmware 1.30.31.19), bumper free, self-check 10 and no contact code in its error history.
+Every guard took it for an alert: joystick ("Control refused: Bumper / lift sensor alert"), routes and mowing
+("Mowing refused: Bumper health alert"), command cutoff and obstacle tests stayed refused, whatever the owner did,
+while the Mammotion app drove the robot normally. These bits are a health state, not a contact: the LUBA 2 reports a
+contact through code 1014 and self-check 25.
+
+On a validated model the app now learns a **resting value** for each connection (`BumperRest`,
+`protocol/BumperRest.kt`): when the slot has read 1 in every report since the connection and a report arrives with
+the robot ready (state 11, on the base included), no collision lock (25), no contact code (1014) received on this
+connection and no motion driven by the app, the guards see that value as clear (`RobotBle.guardSensors`: joystick,
+routes, mowing, moves, tests, unlock, self-check 25 beyond the map). It is logged (`bumper_rest_learnt`, with the raw
+`sensor_status`), Service → Obstacle tests shows "alert 1 (at rest)" and Service → Sensors explains it. What still
+stops and refuses:
+
+- an error/obstacle value (2–7), never learnt: "Bumper error or obstacle (N): free the bumper and check it";
+- a contact (code 1014) and the collision lock (self-check 25), unchanged;
+- any other value read during the connection: the resting value is forgotten until the next connection
+  (`bumper_rest_forgotten`), so an alert that appears afterwards, during a move in particular, stops and refuses as
+  before. An alert (1) that was not learnt (appeared afterwards, or present from the connection but with a collision
+  lock, a contact or the robot not ready) refuses with how to get out of it: "Bumper health alert (1), not taken as
+  the resting value of this connection: check that the bumper moves freely. If the robot reports it all the time,
+  disconnect and reconnect it while it is stopped and ready: a value present from the connection is taken as its
+  resting value".
+
+While a resting value is learnt, routes are tracked by the pilot even with a gateway that offers
+[autonomous tracking](gateway.md#autonomous-tracking-android-and-esp32-gateways): the gateway does not know it and its
+own guards would stop at once. A LUBA 2 AWD whose bumper reads 0 is not affected (nothing is learnt), and the model
+trial of the other models is unchanged. Covered by `BumperRestTest` and the test bench (`RobotBleBumperRestTest`);
+not tried on a 3000X yet.
 
 Cloud failures now name the MQTT reason ("MQTT disconnected", "Cloud queue full") instead of
 `IllegalStateException`.

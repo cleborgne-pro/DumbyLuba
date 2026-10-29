@@ -23,7 +23,7 @@ obstacles and signal surveys. Every mowing, every route and every survey starts 
 
 | Source | How | Use |
 |---|---|---|
-| **Read the robot map** | Bluetooth or gateway ("Reading…" while it runs); not possible during a mission, a Mammotion task, a test, a map read or a simulation | all features |
+| **Read the robot map** | Bluetooth or gateway ("Reading…" while it runs, "Retry the reading" with the reason after a failure); not possible during a mission, a Mammotion task, a test, a map read or a simulation | all features |
 | **Mammotion account map** | cloud, no Bluetooth ([account](mammotion-account.md)); not possible during a simulation | "Viewing and simulation, no mowing" |
 | **Try the demo** / **Back to the real map** | built-in fictional map | explore the app without a robot |
 
@@ -64,6 +64,16 @@ map** stays available. The account map is only shown without a robot link, so it
 **Read the robot map** (direct Bluetooth), and **Account map**. While reading, the panel shows the progress
 ("BLE map · n/N items"); the button is disabled when the robot is not linked or busy (route, mission, manual
 control, test, simulation). The home screen offers the same reading under the **MY MAP** card.
+
+**Failed reading.** When a reading fails or ends incomplete, its reason stays shown, as a warning note in the panel,
+under the **MY MAP** card and as the subtitle of the reading entry of the **Map** sheet, and the action becomes
+**Retry the reading**, until the next reading, a new connection or the link closing. A robot that never answered
+says so: "Map incomplete: no answer from the robot (map element list requested 5 times, no navigation message
+received), restart the reading" (before, only "Reading…" was seen, [DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3)).
+The log notes the navigation receiver used (`map_start`), the first navigation message of each kind received during
+the reading (`map_nav_rx`), every one the reading does not handle (`map_nav_unhandled`, sub-message name, sender and
+receiver only, at most 40 per reading), and the counts per kind in `map_hash_list_failed`, `map_incomplete` and
+`map_timeout`.
 
 ## Screen
 

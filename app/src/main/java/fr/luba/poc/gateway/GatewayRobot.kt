@@ -321,7 +321,8 @@ class GatewayRobot(
      */
     private fun dockAlone(approach: fr.luba.poc.map.Point): String {
         fr.luba.poc.autonomy.OrphanDock.refusal(observer.view, monotonicMs(), approach)?.let { return "accostage non demandé : $it" }
-        val commands = Commands()
+        // Navigation receiver of the kept robot's model (the official return is a navigation message).
+        val commands = Commands.forRobot(synchronized(lock) { name })
         val height = (observer.view.telemetry.bladeHeightMm ?: 60).let(fr.luba.poc.protocol.CutHeightRange.ANY::clamp)
         // Reports renewed: the position must stay fresh while leaving manual mode.
         writeConfirmed(listOf(commands.reports(true, periodMs = 200), commands.manualMow(0, 0, height)))?.let { return "accostage non demandé : lames OFF $it" }

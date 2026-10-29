@@ -45,6 +45,23 @@ class RobotBleEssaisTest {
         assertEquals(0.0, bench.sim.speed, 0.005)
     }
 
+    /** DumbyLuba#2: a move with blades stopped chooses no height; the deck stays at the reported one, not `NavConfig`'s 60 mm. */
+    @Test fun `go-to-point move keeps the reported deck height`() {
+        bench.sim.heightMm = 35
+        connectedInZone()
+        bench.until(3000, "height reported") { bench.state.telemetry.bladeHeightMm == 35 }
+        val since = bench.now
+        bench.ble.startPointNavigation(Point(6.0, 4.5))
+        assertTrue(bench.state.navTest.status, bench.state.navTest.running)
+        bench.until(5 * 60_000, "destination") { !bench.state.navTest.running }
+        assertEquals(bench.dump(), "PASS", bench.state.navTest.outcome)
+        bench.advance(2000)
+        val heights = bench.sim.handHeightsSince(since)
+        assertTrue(heights.isNotEmpty())
+        assertEquals(heights.toString(), setOf(35), heights.toSet())
+        assertEquals(35, bench.sim.heightMm)
+    }
+
     @Test fun `go-to-point move interrupted, destination kept then resumed until arrival`() {
         connectedInZone()
         val target = Point(6.0, 4.5)
@@ -193,6 +210,25 @@ class RobotBleEssaisTest {
         assertNotNull(bench.state.teach.proposal)
         bench.advance(2000)
         assertEquals(0.0, bench.sim.speed, 0.005)
+    }
+
+    /** DumbyLuba#2: the slow approach (manual mode, blades OFF) keeps the reported deck height up to the contact and the exit. */
+    @Test fun `slow approach keeps the reported deck height`() {
+        bench.sim.heightMm = 50
+        connectedInZone()
+        bench.until(3000, "height reported") { bench.state.telemetry.bladeHeightMm == 50 }
+        bench.sim.obstacle = Point(5.0, 2.7) to 0.15
+        bench.sim.friction = 0
+        val since = bench.now
+        bench.ble.startObstacleTest(approach = true)
+        assertTrue(bench.state.teach.status, bench.state.teach.running)
+        bench.until(40_000, "approach contact") { !bench.state.teach.running }
+        assertEquals(bench.dump(), "CONTACT_DETECTED", bench.state.teach.outcome)
+        bench.advance(1000)
+        val heights = bench.sim.handHeightsSince(since)
+        assertTrue(heights.size >= 2)
+        assertEquals(heights.toString(), setOf(50), heights.toSet())
+        assertEquals(50, bench.sim.heightMm)
     }
 
     /**

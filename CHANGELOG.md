@@ -1228,5 +1228,169 @@ The board clips into a printed cradle without soldering; a protected 18650 sits 
 the cell; the Qi receiver takes the native USB socket and the USB-UART one is left free for flashing. The inside is
 6 mm wider (enclosure 82.2 × 136.2 × 32.2 mm) and the transmitter mount is unchanged. The generator checks the new
 parts, cables and antenna distances. README, STL files, 3D viewer and images are updated. Not mounted on the robot yet.
-See [ESP32 hardware](docs/features/esp32-hardware.md#inductively-charged-enclosure) and the
-[enclosure README](hardware/luba-esp32-qi/README.md).
+See [ESP32 hardware](docs/features/esp32-hardware.md#contact-charged-enclosure) and the
+[enclosure README](hardware/luba-esp32-dock/README.md).
+
+Version 1.17.0 (187): **bumper "alert" at rest of a LUBA 2 AWD 3000X no longer blocks the control**. A 3000X owner
+(`Luba-VP`, firmware 1.30.31.19, app 1.16.0) got bumper alerts with no contact and could not drive the robot at all
+([DumbyLuba#1](https://github.com/cleborgne-pro/DumbyLuba/issues/1)): in the logs of 2026-10-20 and 2026-10-28 the
+bumper slot of `sensor_status` (bits 0–2) reads 1 ("alert") in all 1,663 reports, on the base and while the robot
+drives itself back to it, with self-check 10 and no contact code (1014) in its error history, and the joystick, the
+route ("Mowing refused: Bumper health alert"), the command cutoff test and the obstacle tests were refused every time.
+On a validated model the app now learns a resting value on each connection (`protocol/BumperRest.kt`): when the slot
+reads 1 from the connection on and a report arrives with the robot ready, no collision lock (25), no contact code and
+no motion driven by the app, every guard sees it as clear (`RobotBle.guardSensors`). An error/obstacle value (2–7), a
+contact (1014) and the collision lock (25) still refuse and stop; any other value read during the connection forgets
+the resting value until the next connection, so an alert that appears, while driving in particular, stops and
+refuses as before, and its refusal now says to check the bumper and to reconnect the robot stopped if the alert stays.
+While a resting value is learnt, routes are tracked by the pilot rather than handed to the gateway, whose guards do
+not know it. Logged (`bumper_rest_learnt`, `bumper_rest_forgotten`), shown in Service → Obstacle tests ("alert 1 (at
+rest)") and Service → Sensors. The LUBA 2 AWD whose bumper reads 0 is unchanged, and so is the model trial of the
+other models (DumbyLuba#2). 14 new tests (`BumperRestTest`, `RobotBleBumperRestTest`). Not tried on a 3000X yet. See
+[Bumper "alert" at rest of the X series](docs/features/supported-models.md#bumper-alert-at-rest-of-the-x-series).
+
+**Cutting deck kept at its height while driving with the joystick.** On a LUBA 3 AWD, the deck moved while
+driving with the joystick ([DumbyLuba#2](https://github.com/cleborgne-pro/DumbyLuba/issues/2)). To receive the bumper
+contact, the joystick holds the manual mowing mode with blades stopped (`mow_ctrl_by_hand`, renewed every 500 ms), and
+that command always carries `cut_knife_height`, which the robot applies: it was the last height requested by the app,
+60 mm after a connection, so a deck set elsewhere went to 60 mm at the first gesture. The joystick and its exit on
+release, the STOP, the slow approach and the stationary bumper test now send the height the robot reports
+(`HoldHeight`, `RobotBle.holdHeightMm`). The moves with blades stopped had the same fault through the 60 mm default of
+`NavConfig` (move to a point and its resume, obstacle bypass, frontal border test, map sync): they keep the
+reported height too; the cutting test while moving keeps its chosen height. Reported height
+unknown or outside the connected model's range: the last height requested in the app (height setting, blade test,
+route), or 60 mm, brought into that range, never an exception. A height setting, a blade test, a route or a cutting
+test in progress keeps sending its own target, STOP included. 9 new tests: 5 in `HoldHeightTest`, and on the bench
+(deck at 35-50 mm) joystick with release and STOP, height setting then joystick, move to a point and slow approach;
+the joystick, move and approach ones failed before the fix, with 60 mm sent. See [manual control](docs/features/manual-control.md#cutting-deck-height-while-driving).
+Checked on the test bench only, not tried on a robot yet.
+
+**ESP32 enclosure charged by contacts at the base.** The wireless charging of the ESP32 enclosure is
+dropped (decision of 2026-10-27, design record [docs/CONTACT_CHARGING_DESIGN.md](docs/CONTACT_CHARGING_DESIGN.md)).
+Two stainless A4 plates (54 × 36 × 1 mm, 20 mm apart) sit flush in a 5 mm lid without a window, each held by a
+countersunk M3 screw with an O-ring under the lid and a ring terminal; two stainless spring blades (1.4310, 10 × 0.30 mm,
+36 mm free, knee R4 and a 6 mm nose) hang from a new blade holder under the garage roof, on the same M6 rods and roof
+bridge (`05_roof_bridge.stl` byte for byte identical). A 25° entry ramp (new `07_entry_ramp.stl`) bonded to the lid end
+lifts the blades, which press the plates with 1.26 N (4.2 mm of flexion, holder 3.0 mm above the lid, set with a
+gauge). Height window +2.5 / −2.5 mm, tolerances ±24 mm along and ±13 mm across. The 5 V of a USB charger goes through a
+PTC at the garage end, the blades and plates, then a USB-C male adapter in the board's native socket with a TVS across
+VBUS and GND. The board sits 8 mm lower (snap arms 12 mm), the flange screws become M3 × 14, the receiver patch, foam and
+transmitter are gone, and the enclosure sits about 41 mm behind the camera. The generator recomputes and blocks on the
+blade forces (0.4–2.5 N with ±20 % stiffness), the stress (0.7 of the yield at the geometric hard stop), the window, the
+buckling load, the overlap of each blade on its own plate over the stop tolerances and its distance to the other plate,
+the plate layout (screw heads, seal, vent, lid left under the plates, O-ring squeeze), a scan of the knee rolled over
+the lid, plates, screw heads and ramp (steps, slopes), the ramp depth and bond, the robot passing under the rigid holder
+at the top of the window, the holder (PG7 wall, slot, clamp screws recessed, camera gap), the roof clearance, the rod
+travel, the lid height and every part, wire and envelope against the enclosure and each other. The folder is renamed
+`hardware/luba-esp32-dock` (viewer `luba-esp32-dock.html`, mode "+ Blade mount", details "Contact charging" and "Blade
+holder", blades shown in their docked pose), the six README images are retaken by the new `cad/render_images.py`, and the
+README gives the shopping list (about €95–125), cutting, assembly, bench tests, setting, multimeter checks, power budget
+and the points to check. Firmware unchanged: `power.vin_present` already shows the contact (comments updated only).
+**Nothing was built or tried on the robot.** See [ESP32 hardware](docs/features/esp32-hardware.md#contact-charged-enclosure)
+and the [enclosure README](hardware/luba-esp32-dock/README.md).
+
+**LUBA 1: navigation messages addressed to the main controller** ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3)).
+Every navigation message (map reading and its acknowledgements, routes, task control, return to base, leaving the
+base, map writing) was addressed to `DEV_NAVIGATION`; PyMammotion (`get_msg_device`) does so only for the LUBA 2 and
+later models and keeps `DEV_MAINCTL` for the LUBA 1. In the logs of the issue, a LUBA AWD 5000 (firmware 1.10.5.246,
+direct Bluetooth) confirmed the 15 map requests but never sent a navigation frame back. The receiver now follows the
+detected model (`Commands.navReceiverFor`): `DEV_MAINCTL` for a LUBA 1, `DEV_NAVIGATION` for every other model and for
+an unknown robot (unchanged). It is chosen at the Bluetooth connection, for each account robot (name and product key)
+and for the docking of the Android gateway; the ESP32 gateway is unchanged (validated LUBA 2 only). The read-only
+barrier and the cloud barrier accept a navigation message only when it is addressed to the receiver of the model, and
+the `map_start` event logs the receiver used. New tests: receiver per model, both barriers per model, and a LUBA 1 on the
+test bench whose simulated firmware only answers `DEV_MAINCTL` reads its map. Not yet checked on a real LUBA 1. See
+[supported models](docs/features/supported-models.md) and the [protocol notes](docs/MAMMOTION_PROTOCOL.md).
+
+**Mammotion account number removed from the logs** ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3)).
+The robot echoes the Mammotion account number in the `subtype` field of every protobuf reply, and the decoded form of
+each received message kept it in clear: a public export carried it in 380 `protobuf_decoded` lines. The anonymized
+exports now replace `subtype`, `user_account` / `userAccount` and `preemptAccount` in the decoded messages (sensor
+probe `lastPerception` included), in any JSON field (number or string) and in free text (`userAccount=…`,
+`subtype: …`); `ANONYMIZED.json` counts them as "account number". At the source, the `protobuf_decoded` event and the
+sensor probe no longer write `subtype` at all (raw logs included) and note `accountEcho` instead. New test with a
+fictitious number. See [logs and data](docs/features/logs-and-data.md#anonymized-export).
+
+**Failed map reading shown until the next one, and navigation messages logged** ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3)).
+A LUBA 1 map reading failed after 25 s ("Map incomplete: map element list not received after 5 requests") but the
+user only saw "Reading…": the reason went to the transient status line. It now stays as a warning note in the
+*No map on this phone* panel, under the **MY MAP** card and in the **Map** sheet, with **Retry the reading**, until
+the next reading, a new connection or the link closing. When not a single navigation message came during the reading
+the reason says that the robot did not answer ("no answer from the robot (map element list requested 5 times, no
+navigation message received)"). The log adds the navigation receiver and the gateway flag to `map_start`, the first
+navigation message of each kind of the reading (`map_nav_rx`), every one the reading does not handle
+(`map_nav_unhandled`: sub-message name, sender, receiver, attribute; never its content; at most 40), and the counts
+per kind in `map_hash_list_failed`, `map_incomplete` and `map_timeout`. New tests in `MapTransferTest` and on the test
+bench (failure kept 60 s, cleared by a new reading). See [map](docs/features/map.md#loading-a-map).
+
+**Mammotion account: device page logged, robot on the older Aliyun cloud explained** ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3)).
+"No device in the account" meant an empty `records` list from `/v1/user/device/page` (HTTP 200), not a filtering,
+and an error "Mammotion HTTP/API 40400" could not be tied to an endpoint. The device page is now logged
+(`cloud_device_page`: IoT domain, HTTP status, API `code`, `total`, number of records, refused or not), and every cloud
+error names its endpoint path, never its query: "Mammotion HTTP/API 40400 (/v1/user/device/page)", "code 500
+(/device-server/v1/device/work-report/page)". When the page is empty, the app reads once, read-only, the account's
+owned devices (`GET https://domestic.mammotion.com/device-server/v1/device/list`, same Bearer token, `Client-Id` and
+`Client-Type: 1`, reply `data` = list of devices, as PyMammotion `get_user_device_list`) and logs them anonymously
+(`cloud_device_list`: count, devices missing from the page, product key prefixes, model words, short name prefixes).
+A robot listed there but not on the page is bound to Mammotion's older Aliyun cloud, which that page does not list
+(PyMammotion), and the status says "Your LUBA is on Mammotion's older cloud (Aliyun), which this app does not support
+yet; Bluetooth control still works." instead of "No device in the account"; RTK stations and pool cleaners do not
+count, and a failed read keeps the former status. New tests with fictitious replies (`CloudOwnedDevicesTest`, two
+account scenarios). Not checked against the real account of the issue. See
+[Mammotion account](docs/features/mammotion-account.md).
+
+**Contact at the border of the zone: back-off and resume, and a proportionate bypass.** Request of 2026-10-28:
+"sometimes the robot is dragged near the limit, leaves its line, bumps into the limit, detects an obstacle and bypasses
+it; it should just back off and resume". Every contact during a route is now classified on the Fold from the stopped
+pose (`simulation/EdgeContact.kt`, same rule for the local tracking, both gateways and the obstacle simulation).
+**Limit**: collision lock (self-check 25) without a contact code with bumper and lift bits clear and the robot centre
+beyond the zones or less than 35 cm inside them, or a bumper code with the front edge between 15 cm inside and 40 cm
+beyond the drawn border, heading within 75° of it and a drift of at least 8 cm towards it. The robot backs off at
+least 30 cm under the lock, waits for the lock to clear and rejoins the same route with the blade-stopped link of a
+trajectory exit: no estimated obstacle, no bypass (the 8 bypasses are untouched), no photo, no obstacle proposal,
+event `route_edge_contact`, "Bumper contact" in the task history, and the contact recorded on receipt is re-typed
+**Border contact** on the map (heatmap only, never a presumed obstacle). A second limit contact within 1.5 m is an
+object, and so is a limit contact within 1.5 m of an obstacle estimated earlier in the mission (an Enfer replay
+resumed through a 52 m blade-stopped link around it; now three short repairs of 0.8 to 1.6 m); at most 4 per mission;
+without any back-off, or when the resume link would exceed 2 m, the obstacle path applies as before; a lock at a
+no-go zone still stops. **Object at the border** (front edge at most 60 cm inside): obstacle path with an estimated margin of 0.2 m
+instead of 0.3 m. **Detour budget**: after a contact on a cutting pass, a repair whose links exceed
+`max(15 m, 3 × cutting skipped)` defers the segment to the end of the mowing when progress is saved (the repair is
+kept otherwise, for a transit contact, or if the deferral cannot be routed). On 2026-10-28 the wood pile at the border
+of a 2 m corridor cost 79.2 m of links for 14.1 m skipped; the synthetic replay of that corridor goes from 66.2 m to
+9.3 m of links with the 0.2 m margin. Bumper and lift bits, the 30 cm deviation stop and the envelope are unchanged;
+the pivot tolerance in narrow corridors (B3) and a better estimate for a hedge met in transit (52.8 m kept) stay open.
+New tests: `EdgeContactTest`, `EdgeObjectBypassTest`, and cases in `DriftRecoveryTest`, `DifficultiesTest` and
+`ObstacleEncounterSimulationTest`. See [border contact](docs/features/obstacles.md#contact-at-the-border-of-the-zone)
+and the [plan](docs/TRACKING_TURNS_AND_BORDER_CONTACTS.md). Not tried on the robot yet.
+
+**Curves and rolling U-turns followed along the tangent, without pivots and faster.** Request of 2026-10-28: "improve
+the tracking of the computed route further, especially turns and manoeuvres"; that day the rolling U-turns ran at
+0.07 m/s, 14 to 15 s each, with 25 cm at the exit. In a curve the tracking now steers along the tangent of the route
+at the nearest point (the followed edge ran up to 15 cm ahead on the 2.4 cm edges of an arc, so the 25 cm chord led
+the tangent by about 25° and the robot cut inside, then pivoted 3 to 4 times per U), commands the rotation of the curve
+directly (feed-forward, curvature 0.25 s ahead), drives the curve at 60 % of the rotation of the speed setting (22 °/s
+at most, × 0.7 while the gain is not calibrated) instead of 30 %, pivots inside a curve only beyond 40°, and holds the
+curve speed 30 cm after it then speeds up over 50 cm. Only arcs of short edges (under 15 cm) are tracked this way:
+straight passes are unchanged (bit for bit) and the bends of polygonal paths, such as the map sync outlines, keep the
+former tracking. Mirrored line by
+line in the ESP32 gateway (`gw_follow.cpp`, parity vectors in `test_follow`, firmware `gateway-0.5.1`); the Redmi
+gateway shares `PathFollower`. Execution bench at 63 %: 13.5 → 9.3 s per rolling U on Potager, deviation p90
+17.5 → 3.4 cm, max 19 → 5 cm, 3 → 0 pivots per U; the target of 0.65 × the duration is not reached (0.67 to 0.86
+depending on route and speed, the exit costs about 2 s). Whole missions (175 per speed): interrupted 0 / 0 / 3 at
+30 / 50 / 100 % as before, mean maximum deviation 0.177 / 0.178 / 0.209 → 0.114 / 0.131 / 0.186 m, durations −0.3 to
+−1.7 %. The Turn Optimizer plans curves with the same speed (`PathFollower.curveSpeed`): a rolling U costs
+12.8 s against 16.8 s for the pivots at 0.3 m/s, Fast picks it when the passes are 0.7 m apart, Lawn friendly prefers
+the rounded loop to two pivots between neighbouring passes, and the Zamboni of Aire de jeux at 0° finds its order. New
+logs `route_manoeuvres` (U-turns, loops and curves of the route with their planned duration) and `route_curve_stats`
+(duration, median speed and largest deviation of each one, Fold tracking and gateways). Safety thresholds unchanged.
+New tests: `RouteManoeuvresTest`, cases in `PathFollowerTest` and `TurnOptimizerTest`, U checks in
+`RollingTurnExecutionTest`, opt-in bench `TurnExecutionProfileTest`. See
+[TRACKING_EXECUTION.md](docs/TRACKING_EXECUTION.md#curves-tangent-reference-and-feed-forward-2026-10-28) and the
+[plan](docs/TRACKING_TURNS_AND_BORDER_CONTACTS.md). Not tried on the robot yet.
+
+**Checks and test runs**: sessions running their full suite at the same time loaded the 10 cores up to 43 and made every test up to four times slower. A test run now waits for a test slot shared by every worktree of the machine (`-PtestSlots=N`) instead of competing for the processor; `tools/check.sh quick` also leaves out the Zamboni, orientation, spiral, start transit and turn style sweeps (about 80 % of the test time), which `tools/check.sh planner` runs on their own; `tools/check.sh` uses the Fold variant like `tools/deploy.sh` (one variant compiled and tested instead of two); the Gradle build cache is on, so a new worktree reuses what was already compiled and tested. The gateway tests that waited 4 to 8 real seconds now wait up to 15 to 30 (no cost when they pass), and the robot bench also waits for the route preparation threads before advancing its virtual time; both failed on a loaded machine.
+
+**Shorter planner sweeps and selective deployment tests**: `tools/deploy.sh` runs the planner sweeps on the reference map only when the branch touches the planner (`map/`, `planning/`, `simulation/`, `obstacles/`, test resources, build files; `DEPLOY_FULL_TESTS=1` forces them). The reference map check is split by mode (`ReferenceMapPlannerZamboniSpiralTest` for Zamboni and Spiral) and the Zamboni spacing sweeps get their own class (`ZamboniQaSpacingTest`), so that the two test processes share them. Fewer redundant cases, every zone and every dimension kept: the mixed border/no-go passes (2/4, 4/2) at 25 cm only, the Zamboni determinism checked at 25 cm and on the first session, the Zamboni manual angles of the QA reduced to 0° and 151° (every 15° stays in `ZamboniManualAngleReproTest`). The robot bench watchers read every event logged since their previous tick (`RobotBench.newEvents`) instead of the last 20 or 40: on a loaded machine more lines came between two ticks and `RobotBleBlockageTest` missed the "route repaired" event of a bypass that had taken place.
+
+**Faster quick checks and builds**: the event log keeps its current part open between lines and reads the free disk space every 256 KB instead of opening the file, its external copy and the file system statistics for each line; the robot bench waited for this writer during more than half of its tests (`RobotBle*` classes 129 s → 73 s, also less work on the phone). Without the planner sweeps (`-PlubaQuickTests`: `tools/check.sh quick`, deployments that leave the planner alone) the tests run in four processes instead of two, their longest classes waiting in real time: 5:04 → 2:58 for the quick tests. The Dalvik register check of the Fold APK is up to date while the APK is unchanged (an up-to-date build: 14 s → 0.8 s) and, when it runs, skips the library dex files and the disassembly (11 s → 1.7 s, same methods and counts).

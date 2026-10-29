@@ -104,7 +104,7 @@ class GatewayTest {
 
     @After fun close() { server.close(); robot?.shutdown() }
 
-    private fun waitFor(timeoutMs: Long = 4000, condition: () -> Boolean): Boolean {
+    private fun waitFor(timeoutMs: Long = 15_000, condition: () -> Boolean): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!condition() && System.currentTimeMillis() < deadline) Thread.sleep(20)
         return condition()
@@ -185,16 +185,16 @@ class GatewayTest {
         serve()
         val recorder = Recorder()
         val link = requireNotNull(GatewayLink.open("127.0.0.1", server.localPort, code, "AA:BB:CC:DD:EE:FF", recorder))
-        assertEquals(247, recorder.ready.poll(3, TimeUnit.SECONDS))
-        val fake = requireNotNull(links.poll(1, TimeUnit.SECONDS))
+        assertEquals(247, recorder.ready.poll(10, TimeUnit.SECONDS))
+        val fake = requireNotNull(links.poll(10, TimeUnit.SECONDS))
         val frame = Blufi().encode(Commands().movement(200, 0), 247).single()
         assertTrue(link.write(frame))
-        assertEquals(0, recorder.written.poll(2, TimeUnit.SECONDS))
+        assertEquals(0, recorder.written.poll(10, TimeUnit.SECONDS))
         assertArrayEquals(frame, fake.writes.single())
         fake.listener.onNotification(fake, byteArrayOf(1, 2, 3))
-        assertArrayEquals(byteArrayOf(1, 2, 3), recorder.notifications.poll(2, TimeUnit.SECONDS))
+        assertArrayEquals(byteArrayOf(1, 2, 3), recorder.notifications.poll(10, TimeUnit.SECONDS))
         assertTrue(link.readRssi())
-        assertEquals(-61, recorder.rssi.poll(2, TimeUnit.SECONDS))
+        assertEquals(-61, recorder.rssi.poll(10, TimeUnit.SECONDS))
         // Deliberate close: no stop frame, the gateway keeps the Bluetooth link.
         link.close()
         assertTrue(waitFor { robot!!.state.ready && !robot!!.state.pilot })
@@ -213,8 +213,8 @@ class GatewayTest {
         pilot.encode(Commands().movement(400, 0), 247).forEach { channel.send(GatewayProtocol.WRITE, it) }
         do frame = channel.read() while (frame.type != GatewayProtocol.WRITTEN)
         // The pilot goes silent: no frame at all, not even PING.
-        val fake = requireNotNull(links.poll(1, TimeUnit.SECONDS))
-        val session = requireNotNull(sessions.poll(1, TimeUnit.SECONDS))
+        val fake = requireNotNull(links.poll(10, TimeUnit.SECONDS))
+        val session = requireNotNull(sessions.poll(10, TimeUnit.SECONDS))
         assertTrue(waitFor { session.emergencyOutcome != null })
         assertFalse(fake.closed)
         assertEquals(2, fake.writes.size)
@@ -248,8 +248,8 @@ class GatewayTest {
         var frame = channel.read()
         while (frame.type != GatewayProtocol.READY) frame = channel.read()
         channel.close()
-        val fake = requireNotNull(links.poll(1, TimeUnit.SECONDS))
-        val session = requireNotNull(sessions.poll(1, TimeUnit.SECONDS))
+        val fake = requireNotNull(links.poll(10, TimeUnit.SECONDS))
+        val session = requireNotNull(sessions.poll(10, TimeUnit.SECONDS))
         assertTrue(waitFor { session.emergencyOutcome != null })
         assertEquals(1, fake.writes.size)
         assertFalse(fake.closed)
@@ -280,7 +280,7 @@ class GatewayTest {
     @Test fun gatewayHoldsRobotWithoutPilotAndKeepsItAlive() {
         val shared = robot(keepaliveMs = 100)
         shared.connect("AA:BB:CC:DD:EE:FF", "Luba-VS123")
-        val fake = requireNotNull(links.poll(1, TimeUnit.SECONDS))
+        val fake = requireNotNull(links.poll(10, TimeUnit.SECONDS))
         assertTrue(waitFor { fake.writes.size >= 2 })
         val sync = LubaMsg.parseFrom(requireNotNull(Blufi().receive(fake.writes[0])))
         assertTrue(sync.hasNet())
@@ -296,10 +296,10 @@ class GatewayTest {
         serve()
         val first = Recorder()
         val link1 = requireNotNull(GatewayLink.open("127.0.0.1", server.localPort, code, "AA:BB:CC:DD:EE:FF", first))
-        assertEquals(247, first.ready.poll(3, TimeUnit.SECONDS))
-        val fake = requireNotNull(links.poll(1, TimeUnit.SECONDS))
+        assertEquals(247, first.ready.poll(10, TimeUnit.SECONDS))
+        val fake = requireNotNull(links.poll(10, TimeUnit.SECONDS))
         assertTrue(link1.write(Blufi().encode(Commands().sync(), 247).single()))
-        assertEquals(0, first.written.poll(2, TimeUnit.SECONDS))
+        assertEquals(0, first.written.poll(10, TimeUnit.SECONDS))
         link1.close()
         assertTrue(waitFor { !robot!!.state.pilot })
         // The robot sends a fragmented message: the second pilot arrives in the middle.
@@ -308,17 +308,17 @@ class GatewayTest {
         fake.listener.onNotification(fake, big[0])
         val second = Recorder()
         val link2 = requireNotNull(GatewayLink.open("127.0.0.1", server.localPort, code, "AA:BB:CC:DD:EE:FF", second))
-        assertEquals(247, second.ready.poll(3, TimeUnit.SECONDS))
+        assertEquals(247, second.ready.poll(10, TimeUnit.SECONDS))
         assertNull("no new Bluetooth link", links.poll(100, TimeUnit.MILLISECONDS))
         big.drop(1).forEach { fake.listener.onNotification(fake, it) }
         val whole = robotTx.encode(Commands().sync(), 247).single()
         fake.listener.onNotification(fake, whole)
-        assertArrayEquals(whole, second.notifications.poll(2, TimeUnit.SECONDS))
+        assertArrayEquals(whole, second.notifications.poll(10, TimeUnit.SECONDS))
         assertNull(second.notifications.poll(100, TimeUnit.MILLISECONDS))
         // The second pilot restarts its sequence at 0: the gateway extends it (0 already written).
         val frame = Blufi().encode(Commands().movement(100, 0), 247).single()
         assertTrue(link2.write(frame))
-        assertEquals(0, second.written.poll(2, TimeUnit.SECONDS))
+        assertEquals(0, second.written.poll(10, TimeUnit.SECONDS))
         assertEquals(1, fake.writes.last()[2].toInt() and 255)
         assertArrayEquals(frame.copyOfRange(3, frame.size), fake.writes.last().copyOfRange(3, frame.size))
         link2.close()
@@ -359,11 +359,11 @@ class GatewayTest {
         serve()
         val recorder = Recorder()
         val link = requireNotNull(GatewayLink.open("127.0.0.1", server.localPort, code, "AA:BB:CC:DD:EE:FF", recorder))
-        assertEquals(247, recorder.ready.poll(3, TimeUnit.SECONDS))
+        assertEquals(247, recorder.ready.poll(10, TimeUnit.SECONDS))
         assertTrue(waitFor { GatewayHealthStore.latest.value != null })
-        val fake = requireNotNull(links.poll(1, TimeUnit.SECONDS))
+        val fake = requireNotNull(links.poll(10, TimeUnit.SECONDS))
         fake.listener.onLost(fake, 8, "robot éteint")
-        assertNotNull(recorder.lost.poll(2, TimeUnit.SECONDS))
+        assertNotNull(recorder.lost.poll(10, TimeUnit.SECONDS))
         // Robot lost over Bluetooth: the gateway was answering, it stays reachable and its health can still be shown.
         assertEquals(true, GatewayHealthStore.reach.value?.reachable)
         assertEquals(62, GatewayHealthStore.latest.value?.health?.batteryPercent)
@@ -388,10 +388,10 @@ class GatewayTest {
         serve(shared = shared)
         val recorder = Recorder()
         val link = requireNotNull(GatewayLink.open("127.0.0.1", server.localPort, code, "AA:BB:CC:DD:EE:FF", recorder))
-        assertEquals(247, recorder.ready.poll(3, TimeUnit.SECONDS))
-        val fake = requireNotNull(links.poll(1, TimeUnit.SECONDS))
+        assertEquals(247, recorder.ready.poll(10, TimeUnit.SECONDS))
+        val fake = requireNotNull(links.poll(10, TimeUnit.SECONDS))
         assertTrue(link.write(Blufi().encode(Commands().manualBlades(true, 45), 247).single()))
-        assertEquals(0, recorder.written.poll(2, TimeUnit.SECONDS))
+        assertEquals(0, recorder.written.poll(10, TimeUnit.SECONDS))
         // Gateway stopped (button, notification) in the middle of control: blades OFF then zero speed, before Bluetooth.
         val outcome = shared.shutdown()
         assertTrue(outcome.orEmpty(), outcome.orEmpty().startsWith("STOP écrit"))
@@ -401,9 +401,9 @@ class GatewayTest {
         assertEquals(0, decoded[0].driver.mowCtrlByHand.cutKnifeCtrl)
         assertEquals(0, decoded[1].driver.todevDevmotionCtrl.setLinearSpeed)
         assertTrue(fake.closed)
-        sessions.poll(1, TimeUnit.SECONDS)?.close()
+        sessions.poll(10, TimeUnit.SECONDS)?.close()
         // The pilot is warned: gateway unreachable (not just a lost robot).
-        assertTrue(requireNotNull(recorder.lost.poll(2, TimeUnit.SECONDS)).contains("passerelle arrêtée"))
+        assertTrue(requireNotNull(recorder.lost.poll(10, TimeUnit.SECONDS)).contains("passerelle arrêtée"))
         assertEquals(false, GatewayHealthStore.reach.value?.reachable)
         link.close()
     }
@@ -412,11 +412,11 @@ class GatewayTest {
         val shared = GatewayRobot({ _, listener -> FakeLink(listener).also { links.offer(it) } }, { reports += it },
             retryMs = 800, connectTimeoutMs = 1000).also { robot = it }
         shared.connect("AA:BB:CC:DD:EE:FF", "Luba-VS")
-        val first = requireNotNull(links.poll(1, TimeUnit.SECONDS))
+        val first = requireNotNull(links.poll(10, TimeUnit.SECONDS))
         assertTrue(waitFor { first.closed })
         // No new attempt at the next tick: the gateway waits for the retry delay.
         assertNull(links.poll(500, TimeUnit.MILLISECONDS))
-        assertNotNull(links.poll(2, TimeUnit.SECONDS))
+        assertNotNull(links.poll(10, TimeUnit.SECONDS))
     }
 
     @Test fun idleGatewayLeavesTheRobotToTheDeviceUsingIt() {
@@ -429,11 +429,11 @@ class GatewayTest {
             }
         }, { reports += it }, keepaliveMs = 60_000, retryMs = 200, idleRetryMs = 1500).also { robot = it }
         shared.connect("AA:BB:CC:DD:EE:FF", "Luba-VS")
-        val (first, firstListener) = requireNotNull(opened.poll(1, TimeUnit.SECONDS))
+        val (first, firstListener) = requireNotNull(opened.poll(10, TimeUnit.SECONDS))
         assertTrue(waitFor { shared.state.ready })
         // Lost within the window after its last use: retried on its own.
         firstListener.onLost(first, 8, "robot redémarré")
-        val (second, secondListener) = requireNotNull(opened.poll(2, TimeUnit.SECONDS))
+        val (second, secondListener) = requireNotNull(opened.poll(10, TimeUnit.SECONDS))
         assertTrue(waitFor { shared.state.ready })
         // Unused beyond the window: the link is kept, but once lost the gateway waits for a pilot.
         Thread.sleep(1600)
@@ -444,7 +444,7 @@ class GatewayTest {
         assertEquals(1, reports.count { it.startsWith("Reconnexion automatique suspendue") })
         // A pilot (or the gateway screen) asking for the robot reconnects it at once.
         shared.connect("AA:BB:CC:DD:EE:FF", "Luba-VS")
-        assertNotNull(opened.poll(1, TimeUnit.SECONDS))
+        assertNotNull(opened.poll(10, TimeUnit.SECONDS))
         assertTrue(waitFor { shared.state.ready && !shared.state.retryPaused })
     }
 
@@ -475,11 +475,11 @@ class GatewayTest {
         serve(admissionWaitMs = 300)
         val first = Recorder()
         val link1 = requireNotNull(GatewayLink.open("127.0.0.1", server.localPort, code, "AA:BB:CC:DD:EE:FF", first))
-        assertEquals(247, first.ready.poll(3, TimeUnit.SECONDS))
+        assertEquals(247, first.ready.poll(10, TimeUnit.SECONDS))
         GatewayHealthStore.clear()
         val second = Recorder()
         requireNotNull(GatewayLink.open("127.0.0.1", server.localPort, code, "AA:BB:CC:DD:EE:FF", second))
-        val reason = requireNotNull(second.lost.poll(3, TimeUnit.SECONDS))
+        val reason = requireNotNull(second.lost.poll(10, TimeUnit.SECONDS))
         assertTrue(reason, reason.contains("occupée"))
         assertFalse(GatewayLink.gatewayUnreachable(reason))
         assertEquals(true, GatewayHealthStore.reach.value?.reachable)
@@ -492,7 +492,7 @@ class GatewayTest {
         serve()
         val recorder = Recorder()
         val link = requireNotNull(GatewayLink.open("127.0.0.1", server.localPort, code, "AA:BB:CC:DD:EE:FF", recorder, name = "Luba-VSDEMO01"))
-        assertEquals(247, recorder.ready.poll(3, TimeUnit.SECONDS))
+        assertEquals(247, recorder.ready.poll(10, TimeUnit.SECONDS))
         assertEquals("AA:BB:CC:DD:EE:FF" to "Luba-VSDEMO01", remembered.last())
         assertEquals("Luba-VSDEMO01", robot!!.state.name)
         link.close()

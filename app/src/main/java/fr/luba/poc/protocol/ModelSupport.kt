@@ -3,6 +3,7 @@ package fr.luba.poc.protocol
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.proto.DevNetProto.DevNet
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
+import fr.luba.poc.proto.LubaMsgProto.MsgDevice
 import fr.luba.poc.proto.LubaMulProto.SocMul
 import fr.luba.poc.proto.MctrlDriverProto.MctlDriver
 import fr.luba.poc.proto.MctrlNavProto.MctlNav
@@ -141,11 +142,16 @@ object ModelTrial {
  * (hashes, data, acknowledgements), task pause / stop / cancel return (actions 2, 4, 12), camera video and encoder.
  * Map data: only the read requests (`subCmd` 1, action 8) and the frame acknowledgements (`subCmd` 2); recording,
  * erasing or deleting a map element (`subCmd` 0) is refused.
+ * Navigation messages must be addressed to the navigation receiver of the connected model ([Commands.navReceiverFor]:
+ * `DEV_MAINCTL` on a LUBA 1, `DEV_NAVIGATION` otherwise), or to one of these two when the model is not given.
  */
 object ReadOnlyPolicy {
     private val STOP_TASK_ACTIONS = setOf(2, 4, 12)
+    /** Receivers of the navigation messages across the Mammotion models ([Commands.navReceiverFor]). */
+    private val NAV_RECEIVERS = setOf(MsgDevice.DEV_NAVIGATION, MsgDevice.DEV_MAINCTL)
 
-    fun allows(payload: ByteArray): Boolean {
+    /** [navReceiver]: navigation receiver of the connected model, null when unknown (either receiver accepted). */
+    fun allows(payload: ByteArray, navReceiver: MsgDevice? = null): Boolean {
         val message = try { LubaMsg.parseFrom(payload) } catch (_: Exception) { return false }
         return when (message.lubaSubMsgCase) {
             LubaMsg.LubaSubMsgCase.NET -> when (message.net.netSubTypeCase) {
@@ -175,6 +181,7 @@ object ReadOnlyPolicy {
             }
             LubaMsg.LubaSubMsgCase.NAV -> {
                 val nav = message.nav
+                if (navReceiver?.let { message.rcver != it } ?: (message.rcver !in NAV_RECEIVERS)) return false
                 when (nav.subNavMsgCase) {
                     MctlNav.SubNavMsgCase.TODEV_GETHASH, MctlNav.SubNavMsgCase.APP_REQUEST_COVER_PATHS -> true
                     MctlNav.SubNavMsgCase.TODEV_GET_COMMONDATA ->
@@ -197,8 +204,8 @@ object ReadOnlyPolicy {
      * ceilings (command cutoff test, joystick), manual mowing mode and discs (blade test, with its OFF), knife control
      * (alternative blade command). Everything else stays refused: navigation tasks, height setting, map writing.
      */
-    fun allowsTrial(payload: ByteArray): Boolean {
-        if (allows(payload)) return true
+    fun allowsTrial(payload: ByteArray, navReceiver: MsgDevice? = null): Boolean {
+        if (allows(payload, navReceiver)) return true
         val message = try { LubaMsg.parseFrom(payload) } catch (_: Exception) { return false }
         return when (message.lubaSubMsgCase) {
             LubaMsg.LubaSubMsgCase.DRIVER -> when (message.driver.subDrvMsgCase) {

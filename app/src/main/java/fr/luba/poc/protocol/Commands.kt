@@ -9,10 +9,30 @@ import fr.luba.poc.proto.MctrlDriverProto.*
 import fr.luba.poc.proto.MctrlNavProto.*
 import fr.luba.poc.proto.MctrlSysProto.*
 import fr.luba.poc.proto.LubaMulProto.*
+import fr.luba.poc.ui.RobotModel
 
-/** Supervised joystick commands, cutting tests and native firmware missions. */
-class Commands(private val userAccount: Int = 0) {
+/**
+ * Supervised joystick commands, cutting tests and native firmware missions.
+ *
+ * [navReceiver]: receiver of the navigation messages (`MSG_CMD_TYPE_NAV`: map reading and acknowledgements, routes,
+ * task control, return to base, leaving the base, map writing), given by the robot model ([navReceiverFor]).
+ */
+class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = MsgDevice.DEV_NAVIGATION) {
     companion object {
+        /**
+         * Receiver of the navigation messages for [model], as PyMammotion `AbstractMessage.get_msg_device`: the LUBA 1
+         * keeps its navigation on the main controller (`DEV_MAINCTL`), the LUBA 2 and later models
+         * (`DeviceType.is_luba_pro`) have a navigation board (`DEV_NAVIGATION`). In the logs of DumbyLuba#3, a LUBA AWD
+         * 5000 (firmware 1.10.5.246, direct Bluetooth) never answered the map requests addressed to `DEV_NAVIGATION`
+         * while it answered every other channel. Any other or unknown model keeps `DEV_NAVIGATION`, the receiver used so far.
+         */
+        fun navReceiverFor(model: RobotModel): MsgDevice =
+            if (model == RobotModel.LUBA_1) MsgDevice.DEV_MAINCTL else MsgDevice.DEV_NAVIGATION
+
+        /** Commands for the robot [name] (Bluetooth or account name) and, if known, its account [productKey]. */
+        fun forRobot(name: String?, productKey: String? = null, userAccount: Int = 0): Commands =
+            Commands(userAccount, navReceiverFor(RobotModel.detect(name, productKey)))
+
         /** Ceiling of the Mammotion app rocker (PyMammotion `control.py` / `movement.py`:
          * linear_speed == ±1000, angular_speed == ±450). Measured units ≈ 1 mm/s and ≈ 0.1 °/s. */
         const val PROTOCOL_MAX_LINEAR = 1000
@@ -95,7 +115,7 @@ class Commands(private val userAccount: Int = 0) {
             .setDriver(MctlDriver.newBuilder().setCurrentCutterMode(AppGetCutterWorkMode.getDefaultInstance()))
             .build().toByteArray()
 
-    private fun nav(n: MctlNav): ByteArray = envelope(MsgCmdType.MSG_CMD_TYPE_NAV, MsgDevice.DEV_NAVIGATION, System.currentTimeMillis()).setNav(n).build().toByteArray()
+    private fun nav(n: MctlNav): ByteArray = envelope(MsgCmdType.MSG_CMD_TYPE_NAV, navReceiver, System.currentTimeMillis()).setNav(n).build().toByteArray()
     /** Native preparation, conservative manufacturer parameters from upstream. */
     fun prepareMowing(config: fr.luba.poc.mowing.MowConfig): ByteArray = nav(MctlNav.newBuilder()
         .setBidireReqconverPath(NavReqCoverPath.newBuilder().setPver(1).setSubCmd(0)

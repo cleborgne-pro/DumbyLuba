@@ -30,6 +30,11 @@ class EventLog(private val context: Context, private val onError: (String) -> Un
     // Copy readable with `adb pull` (app-specific external folder): test analysis without a manual export.
     private val mirror: File? = try { context.getExternalFilesDir("diagnostics")?.let { File(it, runId) } } catch (_: Exception) { null }
     private var mirrored = 0L
+    // Writer thread only: open streams of the current part and its external copy.
+    private var partStream: FileOutputStream? = null
+    private var partBytes = 0L
+    private var mirrorStream: FileOutputStream? = null
+    private var spaceCheckedAt = -SPACE_CHECK_BYTES
     init {
         submit {
             directory.mkdirs(); run.mkdirs()
@@ -69,19 +74,33 @@ class EventLog(private val context: Context, private val onError: (String) -> Un
             .put("timestamp", System.currentTimeMillis()).put("elapsedRealtimeMs", SystemClock.elapsedRealtime())
             .put("event", kind).put("detail", detail).put("fields", json(fields)).toString() + "\n"
         submit {
-            check(written < 256L * 1024 * 1024 && context.filesDir.usableSpace > 32L * 1024 * 1024) { tr("Log limit reached / not enough disk space", "Limite journal / espace disque insuffisant") }
-            var file = File(run, "%04d.jsonl".format(part))
-            if (file.length() > 8L * 1024 * 1024) { part++; file = File(run, "%04d.jsonl".format(part)) }
+            // Free space read every SPACE_CHECK_BYTES rather than at each line (one statfs per line).
+            val spaceDue = written - spaceCheckedAt >= SPACE_CHECK_BYTES
+            check(written < 256L * 1024 * 1024 && (!spaceDue || context.filesDir.usableSpace > 32L * 1024 * 1024)) { tr("Log limit reached / not enough disk space", "Limite journal / espace disque insuffisant") }
+            if (spaceDue) spaceCheckedAt = written
+            if (partStream != null && partBytes > PART_MAX_BYTES) { closeStreams(); part++ }
             val bytes = line.toByteArray(Charsets.UTF_8)
-            FileOutputStream(file, true).use { stream ->
-                stream.write(bytes); written += bytes.size
-                if (kind in listOf("failure", "campaign_result", "case_result", "stop_request")) stream.fd.sync()
+            // The part stays open between lines (unbuffered: each line reaches the system as before, without an open and
+            // a close per line); a write failure closes it so the next line reopens it.
+            val stream = partStream ?: File(run, "%04d.jsonl".format(part)).let { file ->
+                FileOutputStream(file, true).also { partStream = it; partBytes = file.length() }
             }
+            try {
+                stream.write(bytes); written += bytes.size; partBytes += bytes.size
+                if (kind in SYNCED_KINDS) stream.fd.sync()
+            } catch (error: Exception) { closeStreams(); throw error }
             // The external copy must never make the main log fail.
             try {
-                if (mirror != null && mirrored < MIRROR_MAX_BYTES) { mirror.mkdirs(); File(mirror, file.name).appendBytes(bytes); mirrored += bytes.size }
-            } catch (_: Exception) { mirrored = MIRROR_MAX_BYTES }
+                if (mirror != null && mirrored < MIRROR_MAX_BYTES) {
+                    val copy = mirrorStream ?: FileOutputStream(File(mirror.apply { mkdirs() }, "%04d.jsonl".format(part)), true).also { mirrorStream = it }
+                    copy.write(bytes); mirrored += bytes.size
+                }
+            } catch (_: Exception) { mirrored = MIRROR_MAX_BYTES; runCatching { mirrorStream?.close() }; mirrorStream = null }
         }
+    }
+    private fun closeStreams() {
+        runCatching { partStream?.close() }; partStream = null
+        runCatching { mirrorStream?.close() }; mirrorStream = null
     }
     fun report(id: String, fields: Map<String, Any?>) {
         val content = json(fields).put("appRunId", runId).put("processRunId", processRunId).put("updatedAt", System.currentTimeMillis()).toString(2)
@@ -146,10 +165,13 @@ class EventLog(private val context: Context, private val onError: (String) -> Un
         FileOutputStream(temp).use { it.write(content.toByteArray(Charsets.UTF_8)); it.fd.sync() }
         check(temp.renameTo(file)) { tr("Atomic report not saved", "Rapport atomique non enregistré") }
     }
-    fun close() { executor.shutdown() }
+    fun close() { submit { closeStreams() }; executor.shutdown() }
     companion object {
         private val processRunId = UUID.randomUUID().toString()
         private const val MIRROR_MAX_BYTES = 96L * 1024 * 1024
+        private const val PART_MAX_BYTES = 8L * 1024 * 1024
+        private const val SPACE_CHECK_BYTES = 256L * 1024
+        private val SYNCED_KINDS = setOf("failure", "campaign_result", "case_result", "stop_request")
         fun json(map: Map<String, Any?>): JSONObject = JSONObject().also { result ->
             map.forEach { (key, value) -> result.put(key, when (value) {
                 null -> JSONObject.NULL

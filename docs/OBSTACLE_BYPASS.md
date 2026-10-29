@@ -110,6 +110,51 @@ back-off, since 0.59.0).
 - After a pivot there is no straight track behind the robot: the back-off is then a 30 cm straight line
   (`ObstacleBypass.BLIND_BACK_OFF_M`), its chassis sweep checked against borders, no-go zones and known obstacles.
 
+### Contact at the border: limit, object at the edge (Unreleased)
+
+`simulation/EdgeContact.kt` classifies every contact (bumper code, or lock 25 without a code) from the stopped pose,
+on the Fold, before the bypass; the Redmi and ESP32 gateways are unchanged (they hand back `CONTACT` or
+`FAILED (protection 25)` as before). Plan and figures: [TRACKING_TURNS_AND_BORDER_CONTACTS.md](TRACKING_TURNS_AND_BORDER_CONTACTS.md).
+
+- **Limit** (`EdgeContactKind.LIMIT`): lock 25 without a code with `sensor_status & 7 == 0` and the robot centre beyond
+  the zones and passages or within 35 cm inside (`OffMapLatch.ignored`, the joystick rule); or a coded contact with the
+  front edge (centre or corner) between 15 cm inside and 40 cm beyond the drawn border (`LIMIT_BAND_M`,
+  `BEYOND_MAX_M`), heading within 75° of the border (`APPROACH_DEGREES`) and a drift of 8 cm towards it
+  (`DRIFT_M`: centre or last 1.5 m of trail closer to the border than the nearest point of the planned line).
+  `RobotBle.limitContact`: no obstacle, no `bypassCount`, photo request and teach proposal dropped, back-off of at
+  least 30 cm (`DriftRecovery.plan(afterContact = true)`, `limitStarts`: along the trail, else the blind 30 cm),
+  `awaitCollisionLatchCleared`, then the `DriftRecovery` link onto the same route. Difficulty re-typed
+  `DifficultyKind.EDGE` (no presumed obstacle). Event `route_edge_contact`. No back-off possible, or resume link
+  longer than 2 m (`MAX_LINK_M`, `EdgeContact.longLink`, event `route_edge_contact_fallback`): obstacle path, not
+  counted. A second limit within 1.5 m (`EDGE_SAME_SPOT_M`): object at the edge (`same_spot`); a limit within 1.5 m
+  of the disc of an obstacle discovered during the mission too (`near_obstacle`, `classify(discovered = ...)`). At
+  most 4 per mission (`MAX_PER_MISSION`).
+- **Object at the edge** (`OBJECT_AT_EDGE`): coded contact, front edge at most 0.60 m inside (`OBJECT_BAND_M`), not a
+  limit. Estimated disc margin `CONTACT_EDGE_MARGIN_M` = 0.2 m (clip radius 1.18 → 1.08 m, keep-out 0.93 → 0.83 m), a
+  planning estimate only: bumper, `FollowObstacleGuard` and physical radius unchanged.
+- Lock 25 without a code **at a no-go zone**: unchanged, `route_exclusion_latch` stops the mission.
+
+### Detour budget (Unreleased)
+
+`ObstacleBypass.detourRefusal`: a repair whose links exceed `max(DETOUR_FLOOR_M = 15 m, DETOUR_RATIO = 3 × cutting
+skipped)` is refused when the contact happened on a cutting edge. Real mowing then defers the segment
+(`deferBlockage`, `SmartResume.deferBlocked`) if the mission has saved progress, is not a station route and has
+blockages left; if the deferred remainder cannot be routed after the back-off, the repair is computed again from there
+and kept (`route_detour_kept`). Otherwise, and for a transit contact, the repair is kept: never worse than before.
+Event `route_detour_refused` (links, skipped cutting, budget, deferred). The simulation notes the refusal and keeps the
+repair (no saved progress). Replay `EdgeObjectBypassTest` (two lawns joined by a 2 m corridor along the north border,
+Zamboni, 0.35 m spacing):
+
+| Case | Margin 0.30 m (before) | Margin 0.20 m (object at the edge) |
+|---|---|---|
+| Passes along the corridor, contact 0.34 m from the border | 66.2 m of links (4), 9.4 m skipped: long way round the house, refused by the budget | 9.3 m (4 links, 2 arcs), 7.5 m skipped, accepted; bench replay max deviation 0.19 m |
+| Passes crossing it at 59°, bumper 0.41 m inside | 0.8 m (2), 2.8 m skipped | 0.7 m (2), 2.4 m skipped |
+| Transit link 0.5 m from the border (hedge) | 52.8 m (1) | 52.9 m (1): the disc closes the corridor either way, transit kept |
+
+The 79.2 m of 28/10 are of the same order as the first line: with the former margin, the blade-stopped link after the
+contact could not keep the 50 cm border rule next to the disc and went round. The real zone is not in the repository;
+the crossing-pass geometry alone (the field angle) stays local.
+
 ## Who computes what in real mowing: Fold or gateway
 
 Behaviour matches the simulation: the same tracking blocks (`PathFollower`, `DeadReckoning`, `ReturnDrift`) and
@@ -177,7 +222,8 @@ The stop "Robot envelope outside the safe corridor" when leaving the 14:16 bypas
 
 ## Limits and stops that remain
 
-- 8 bypasses at most per mission (`ObstacleBypass.MAX_BYPASSES`). An object larger than the estimated disc is hit
+- 8 bypasses at most per mission (`ObstacleBypass.MAX_BYPASSES`); border contacts (`EdgeContactKind.LIMIT`) do not
+  count, 4 of them at most. An object larger than the estimated disc is hit
   again further on: each contact adds a disc; a 5th contact within 2.5 m of four already discovered obstacles
   (object too large, to be drawn as a no-go zone, `ObstacleBypass.contactFailure`): in real mowing the segment is now
   deferred to the end of the mowing (`SmartResume.deferBlocked`, see [resume](MOWING_RESUME.md#smart-resume)); the
@@ -234,6 +280,15 @@ Enfer zone of the reference map: 0.6 m triangle on the longest pass, 1 contact, 
 the base approach point.
 
 ## Automatic validation
+
+Border contacts and detour budget (Unreleased): `EdgeContactTest` (19/10 lock after a 24 cm slide → limit; 28/10
+wood pile 0.41 m inside without drift → object at the edge; bumper bits → never a limit; mid-zone → object; second
+limit within 1.5 m → object at the edge; thresholds 0.15 / 0.40 / 0.08 / 75° / 0.60 / 0.35), `DriftRecoveryTest`
+(back-off of at least 30 cm after a border contact, blind 30 cm, refused with the border behind),
+`DifficultiesTest` (re-typed `EDGE`, no presumed obstacle), `ObstacleEncounterSimulationTest`
+(`driftingRobotBumpingTheBorderBacksOffAndResumesWithoutDetour`: pivot slide of 20 cm into a wall along the border,
+1 contact, no obstacle, back-off 30 cm, link 0.2 m, `DONE`; mid-zone objects stay `OBJECT` with no budget refusal),
+`EdgeObjectBypassTest` (table above, budget boundaries, 28/10 figures refused).
 
 `ObstacleBypassTest`: contact on a pass (back-off along the axis, bypass, later passes repaired, replay by the
 execution bench), back-off stopped before a no-go zone and refused off the trace, obstacle added without back-off

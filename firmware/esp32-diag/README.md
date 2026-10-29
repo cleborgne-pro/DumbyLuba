@@ -1,6 +1,6 @@
 # ESP32 diagnostics (LILYGO TTGO T-Call V1.3)
 
-First program for the ESP32 gateway mounted on the LUBA ([enclosure](../../hardware/luba-esp32-qi/README.md)).
+First program for the ESP32 gateway mounted on the LUBA ([enclosure](../../hardware/luba-esp32-dock/README.md)).
 It **does not drive the robot**: it checks the board before the gateway firmware
 ([`firmware/esp32-gateway`](../esp32-gateway/README.md), which reuses the Wi-Fi network saved here) is installed on it.
 The Redmi remains the gateway in service on the robot ([ANDROID_GATEWAY.md](../../docs/ANDROID_GATEWAY.md)).
@@ -56,7 +56,7 @@ Alternatively, on the serial console: `wifi NAME|PASSWORD`.
    `uptime_s` must keep counting and `reset_reason` stay unchanged; `vin_present` goes to `false`.
 3. **Low power**: on battery, `ble off` + `ps max` for 5 min: the board must stay reachable (the
    kept-on output prevents the IP5306 from cutting off).
-4. **Qi charging**: USB-C receiver on the board, pad under 2 to 3 mm of plastic: `vin_present`
+4. **Dock charging**: 5 V brought to the USB-C by the dock contacts (enclosure blades on the plates): `vin_present`
    goes to `true`.
 
 ## Observed on 2026-10-12 (board on USB, no battery)
@@ -66,5 +66,5 @@ Alternatively, on the serial console: `wifi NAME|PASSWORD`.
 - Access point open, Bluetooth active: 13 to 15 devices seen per scan, LUBA not visible
   (held by the Redmi).
 - Commands `ble off`, `ps none`, `ps min`, `ble on` run without a restart.
-- Not checked: connection to the home Wi-Fi (credentials to enter), latency, running on battery, Qi charging.
+- Not checked: connection to the home Wi-Fi (credentials to enter), latency, running on battery, charging through the dock contacts.
 - `temp_c_indicatif`: the internal sensor of the classic ESP32 is unreliable, the value is indicative only.

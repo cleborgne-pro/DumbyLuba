@@ -121,13 +121,14 @@ fun MapSettingsSheet(
     onCorrections: () -> Unit = {},
     recordEnabled: Boolean = false,
     onRecord: () -> Unit = {},
+    mapReadFailure: String? = null,
 ) {
     val colors = MammotionColors
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.Background, scrimColor = Color.Black.copy(alpha = 0.25f)) {
         MapSettingsContent(source, summary, heat, mapLoading, fetchEnabled, accountEnabled, demoEnabled, onSignal, onHeatVisible,
             onLayerBar, onFetch, onAccount, onToggleDemo, onHistory, onCalibration, corrections, correctionsEnabled, onCorrections,
             recordEnabled, onRecord, onBorderTypes = { onDismiss(); BorderTypeRepository.editorOpen = true },
-            onSync = { onDismiss(); fr.luba.poc.mapsync.MapSyncScreen.open = true })
+            onSync = { onDismiss(); fr.luba.poc.mapsync.MapSyncScreen.open = true }, mapReadFailure = mapReadFailure)
     }
 }
 
@@ -156,6 +157,7 @@ fun MapSettingsContent(
     onRecord: () -> Unit = {},
     onBorderTypes: () -> Unit = {},
     onSync: () -> Unit = {},
+    mapReadFailure: String? = null,
 ) {
     val colors = MammotionColors
     val display = MapDisplaySettings.current
@@ -234,8 +236,12 @@ fun MapSettingsContent(
         }
 
         SettingsGroup(tr("Map source", "Source de la carte")) {
-            NavRow(if (mapLoading) tr("Reading…", "Lecture en cours…") else tr("Read the robot map", "Lire la carte du robot"), icon = Icons.Rounded.Bluetooth,
-                subtitle = tr("Bluetooth or gateway", "Bluetooth ou passerelle"), value = tr("Shown", "Affichée").takeIf { source == MapSource.ROBOT },
+            // Failed reading: its reason replaces the subtitle until the next reading (DumbyLuba#3).
+            val failed = mapReadFailure != null && !mapLoading
+            NavRow(when { mapLoading -> tr("Reading…", "Lecture en cours…"); failed -> tr("Retry the robot map reading", "Relancer la lecture de la carte du robot")
+                    else -> tr("Read the robot map", "Lire la carte du robot") }, icon = Icons.Rounded.Bluetooth,
+                subtitle = if (failed) mapReadFailure!! else tr("Bluetooth or gateway", "Bluetooth ou passerelle"),
+                value = tr("Shown", "Affichée").takeIf { source == MapSource.ROBOT && !failed },
                 enabled = fetchEnabled, onClick = onFetch)
             // Local mode: no account map entry.
             if (!fr.luba.poc.auth.AccountMode.observe()) NavRow(tr("Mammotion account map", "Carte du compte Mammotion"), icon = Icons.Rounded.Cloud, subtitle = tr("Viewing and simulation, no mowing", "Consultation et simulation, sans tonte"),

@@ -2,6 +2,8 @@ package fr.luba.poc.protocol
 
 import fr.luba.poc.mowing.MowConfig
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
+import fr.luba.poc.proto.LubaMsgProto.MsgDevice
+import fr.luba.poc.proto.MctrlNavProto.NavGetCommDataAck
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -63,9 +65,59 @@ class ReadOnlyPolicyTest {
         data(commands.endMapRecording(2)).let { assertEquals(listOf(1, 1, 2, 0), listOf(it.pver, it.action, it.type, it.subCmd)) }
         data(commands.cancelMapRecording()).let { assertEquals(listOf(1, 7, 0), listOf(it.pver, it.action, it.subCmd)) }
         data(commands.deleteMapElement(0, 7L)).let { assertEquals(listOf(6, 0), listOf(it.action, it.type)); assertEquals(7L, it.hash) }
-        assertEquals(fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_NAVIGATION, LubaMsg.parseFrom(commands.startMapRecording(0)).rcver)
+        assertEquals(MsgDevice.DEV_NAVIGATION, LubaMsg.parseFrom(commands.startMapRecording(0)).rcver)
+        assertEquals(MsgDevice.DEV_MAINCTL, LubaMsg.parseFrom(Commands.forRobot("Luba-DEMO0001").startMapRecording(0)).rcver)
         listOf({ commands.startMapRecording(6) }, { commands.endMapRecording(-1) }, { commands.deleteMapElement(6, 1L) }, { commands.deleteMapElement(0, 0L) })
             .forEach { build -> assertTrue(runCatching { build() }.isFailure) }
+    }
+
+    @Test fun navigationReceiverFollowsTheRobotModel() {
+        // PyMammotion get_msg_device: DEV_NAVIGATION only for LUBA 2 and later; the LUBA 1 keeps DEV_MAINCTL.
+        assertEquals(MsgDevice.DEV_MAINCTL, Commands.navReceiverFor(fr.luba.poc.ui.RobotModel.LUBA_1))
+        assertEquals(MsgDevice.DEV_NAVIGATION, Commands.navReceiverFor(fr.luba.poc.ui.RobotModel.LUBA_2))
+        assertEquals(MsgDevice.DEV_NAVIGATION, Commands.navReceiverFor(fr.luba.poc.ui.RobotModel.UNKNOWN))
+        val luba1 = Commands.forRobot("Luba-DEMO0001")
+        val luba1ByKey = Commands.forRobot("MA5000DEMO0001", "a1FbaU4Bqk5")
+        val luba2 = Commands.forRobot("Luba-VSDEMO01")
+        val unknown = Commands.forRobot(null)
+        val other = Commands.forRobot("Mower-DEMO")
+        fun receivers(c: Commands) = listOf(c.mapHashes(), c.mapHashesAck(2, 1), c.mapData(42L), c.mapDataAck(NavGetCommDataAck.newBuilder().setAction(8).setHash(42L).setTotalFrame(1).setCurrentFrame(1).build()),
+            c.mowPathHashes(), c.mowPaths(listOf(1L), 7L), c.taskControl(2), c.returnToDock(), c.cancelReturnToDock(), c.leaveDock(),
+            c.prepareMowing(MowConfig(listOf(1))), c.startMapRecording(0), c.saveMapTask()).map { LubaMsg.parseFrom(it).rcver }.distinct()
+        assertEquals(listOf(MsgDevice.DEV_MAINCTL), receivers(luba1))
+        assertEquals(listOf(MsgDevice.DEV_MAINCTL), receivers(luba1ByKey))
+        assertEquals(listOf(MsgDevice.DEV_NAVIGATION), receivers(luba2))
+        assertEquals(listOf(MsgDevice.DEV_NAVIGATION), receivers(unknown))
+        assertEquals(listOf(MsgDevice.DEV_NAVIGATION), receivers(other))
+        // Driver, system and network messages keep their receivers.
+        assertEquals(MsgDevice.DEV_MAINCTL, LubaMsg.parseFrom(luba2.stop()).rcver)
+        assertEquals(MsgDevice.DEV_COMM_ESP, LubaMsg.parseFrom(luba1.sync()).rcver)
+    }
+
+    @Test fun readOnlyPolicyAcceptsTheModelNavigationReceiverOnly() {
+        val luba1 = Commands.forRobot("Luba-DEMO0001")
+        val reads = listOf(luba1.mapHashes(), luba1.mapData(42L), luba1.mowPathHashes(), luba1.taskControl(4), luba1.cancelReturnToDock())
+        reads.forEachIndexed { i, payload ->
+            assertTrue("LUBA 1 read #$i", ReadOnlyPolicy.allows(payload, MsgDevice.DEV_MAINCTL))
+            assertTrue("LUBA 1 read #$i, model not given", ReadOnlyPolicy.allows(payload))
+            assertFalse("LUBA 1 read #$i checked against DEV_NAVIGATION", ReadOnlyPolicy.allows(payload, MsgDevice.DEV_NAVIGATION))
+            assertTrue("LUBA 1 read #$i during a trial", ReadOnlyPolicy.allowsTrial(payload, MsgDevice.DEV_MAINCTL))
+        }
+        listOf(commands.mapHashes(), commands.mapData(42L)).forEach { payload ->
+            assertTrue(ReadOnlyPolicy.allows(payload, MsgDevice.DEV_NAVIGATION))
+            assertFalse(ReadOnlyPolicy.allows(payload, MsgDevice.DEV_MAINCTL))
+        }
+        // Nothing more opened on a LUBA 1: native tasks, return, leaving the base, map writing.
+        listOf(luba1.taskControl(1), luba1.returnToDock(), luba1.leaveDock(), luba1.startMapRecording(0), luba1.saveMapTask(),
+            luba1.prepareMowing(MowConfig(listOf(1))))
+            .forEachIndexed { i, payload ->
+                assertFalse("LUBA 1 refused #$i", ReadOnlyPolicy.allows(payload, MsgDevice.DEV_MAINCTL))
+                assertFalse("LUBA 1 refused during a trial #$i", ReadOnlyPolicy.allowsTrial(payload, MsgDevice.DEV_MAINCTL))
+            }
+        // A map read addressed to another board is refused.
+        val stray = LubaMsg.parseFrom(luba1.mapHashes()).toBuilder().setRcver(MsgDevice.DEV_COMM_ESP).build().toByteArray()
+        assertFalse(ReadOnlyPolicy.allows(stray))
+        assertFalse(ReadOnlyPolicy.allows(stray, MsgDevice.DEV_MAINCTL))
     }
 
     @Test fun mapWritingNeverGoesThroughTheCloud() {

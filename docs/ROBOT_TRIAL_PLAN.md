@@ -154,7 +154,7 @@ grep -hE 'gateway_leg_(start|result|lost)|route_lost_leg_recovery|route_drift_re
 | Robot | 100 % on the base, charged the day before (≥ 95 % read on the Fold) |
 | Fold | ≥ 80 % and a USB cable (it charges over adb); a power bank as backup |
 | Redmi | ≥ 90 %, **write down the level at the start and at each break** (point 4 of the "To validate on the robot" list: battery life and heating during tracking) |
-| ESP32 (B9) | board charged (IP5306, or induction pad) |
+| ESP32 (B9) | board charged (IP5306, or dock contacts) |
 
 Orders of magnitude for planning: robot battery life while mowing measured on Oct 15 at 82 min for 100 %; read the
 current values in Service → Garden and history (Jardin et historique) → Task history (Historique des tâches) →

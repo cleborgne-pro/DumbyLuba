@@ -39,7 +39,19 @@ class PathFollower {
   static constexpr double STOP_MARGIN_M = 0.08;
   static constexpr double RANGE_END_DECELERATION = 0.15;
   static constexpr double CURVE_WINDOW_M = 0.5;
-  static constexpr double CURVE_STEER_SHARE = 0.6;
+  // Curve tracking (turn tracking plan, step C): tangent reference, feed-forward, curve speed and exit.
+  static constexpr double CURVE_TANGENT_DEGREES = 3.0;
+  static constexpr double CURVE_ARC_EDGE_M = 0.15;
+  static constexpr double CURVE_FF_SHARE = 0.6;
+  static constexpr double CURVE_MAX_RATE = 22.0;
+  static constexpr double CURVE_STEER_LIMIT = 0.8;
+  static constexpr double CURVE_LOCAL_M = 0.1;
+  static constexpr double CURVE_LEAD_S = 0.25;
+  static constexpr double CURVE_BLEND_M = 0.1;
+  static constexpr double CURVE_PIVOT_DEGREES = 40.0;
+  static constexpr double CURVE_PIVOT_LATERAL_M = 0.15;
+  static constexpr double CURVE_EXIT_HOLD_M = 0.3;
+  static constexpr double CURVE_EXIT_RAMP_M = 0.5;
   static constexpr double UNCALIBRATED_TURN_SHARE = 0.7;
   static constexpr double CORNER_REACH_M = 0.04;
   static constexpr double CORNER_PLATEAU_M = 0.02;
@@ -64,6 +76,11 @@ class PathFollower {
   static double turnDegrees(const SimEdge &a, const SimEdge &b);
   // Stop vertices of the range [start, end) (index i: vertex at the end of edge i), sized edges.size().
   static std::vector<bool> stopVertices(const std::vector<SimEdge> &edges, int start, int end);
+  // Speed (m/s) of a curve of `curvature` (°/m): CURVE_FF_SHARE of the rotation limit, at most CURVE_MAX_RATE,
+  // UNCALIBRATED_TURN_SHARE of it while the rotation gain is not calibrated; infinite on a straight line.
+  static double curveSpeed(double curvature, int angular, double degreesPerUnit, bool rotationCalibrated = true);
+  // Speed limit (m/s) `behind` metres after the last curved vertex of a curve driven at `hold`.
+  static double exitLimit(double behind, double hold, double setSpeed);
 
   struct Command {
     int linear = 0;
@@ -98,6 +115,13 @@ class PathFollower {
 
  private:
   double slideAlong(int i, double degreesPerUnit, int angular) const;
+  bool arcVertex(int i) const;
+  double vertexTurn(int i) const;
+  int nearestEdge(const Point &position) const;
+  bool stopJustReached(const Point &position) const;
+  double tangentAt(int e, double t) const;
+  double localCurvature(int e, double t, double shift) const;
+  double exitSpeed(int e, double t, double setSpeed, int angular, double degreesPerUnit, bool rotationCalibrated) const;
   bool corner(int i) const { return i + 1 >= end_ || stops_[i]; }
   double lateral(const Point &p, const SimEdge &e) const;
   static double wrap(double degrees);

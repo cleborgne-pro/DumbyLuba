@@ -85,7 +85,7 @@ namespace {
 
 constexpr int PIN_LED = 38;       // green LED, lit when the pin is LOW
 constexpr int PIN_BAT_SENS = 6;   // ADC1 channel 5: cell through 470 k / 150 k (100 nF on the pin)
-constexpr int PIN_PWR_SENS = 5;   // 5 V through 220 k / 470 k: about 3.2 V when USB or the Qi receiver supplies the board
+constexpr int PIN_PWR_SENS = 5;   // 5 V through 220 k / 470 k: about 3.2 V when USB or the dock contacts supply the board
 constexpr int ADC_SAMPLES = 16;
 
 }  // namespace

@@ -19,6 +19,7 @@ delegated to the gateway, go-to-point, native mowing. Never under manual control
 | Lift | 0.8 | "Safety sensor changed", lift or tilt codes (1004, 1030, 2502, 2801, 11131, 11133) |
 | No progress | 0.7 | "No progress for 15 s", "Range too long" |
 | Route deviation | 0.4 | "Route deviation > 30 cm", drift out of the safe zone |
+| Border contact | 0.3 | contact at the limit of the zone after a drift (Unreleased, [border contact](features/obstacles.md#contact-at-the-border-of-the-zone)): the bumper contact recorded on receipt is **re-typed** under the same identifier (`DifficultyLog.refine`), or a new entry for a collision lock without a code; placed at the bumper point. On the heatmap, **never a presumed obstacle** (`PresumedObstacles.clusters` keeps only bumper contacts) |
 
 Stops are classified by their reason (`DifficultyClassifier.fromReason`), errors by their code
 (`fromErrorCode`). The same type within 2 m and 30 s is recorded only once (the stop and the error that

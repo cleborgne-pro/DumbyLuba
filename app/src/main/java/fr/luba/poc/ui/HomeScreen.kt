@@ -244,8 +244,12 @@ fun HomeScreen(
 
             // Robot linked (directly or through the gateway) without a map on this phone: Bluetooth reading from here.
             if (state.ready && !map.complete && !state.mowing.active) {
+                // Failed reading: its reason stays shown until the next reading (DumbyLuba#3).
+                val failure = fr.luba.poc.map.mapReadFailureShown(state)
+                if (failure != null) fr.luba.poc.ui.components.StatusNote(failure, fr.luba.poc.ui.components.NoteTone.WARNING, Modifier.padding(top = Dimens.Sm))
                 TextAction(when {
                     state.mapLoading -> tr("Reading the robot map…", "Lecture de la carte du robot…")
+                    failure != null -> tr("Retry the robot map reading", "Relancer la lecture de la carte du robot")
                     state.viaGateway -> tr("Read the robot map via the gateway", "Lire la carte du robot par la passerelle")
                     else -> tr("Read the robot map over Bluetooth", "Lire la carte du robot en Bluetooth")
                 }, onFetch, Modifier.fillMaxWidth().padding(top = Dimens.Sm), enabled = fr.luba.poc.map.mapFetchAllowed(state, false))

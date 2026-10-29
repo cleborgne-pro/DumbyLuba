@@ -111,6 +111,20 @@ object DriftRecovery {
         return out
     }
 
+    /**
+     * Back-off starts after a contact at the limit of the task area ([EdgeContactKind.LIMIT]): the collision lock only
+     * clears once the robot has moved away, so the current pose is never a start. Points of [starts] at least
+     * [fr.luba.poc.protocol.CollisionLatch.UNLOCK_BACK_OFF_M] behind the robot; without a trail behind it (contact right
+     * after a pivot), the straight [ObstacleBypass.BLIND_BACK_OFF_M] back-off checked on the map ([ObstacleBypass.backOffCandidates]).
+     */
+    fun limitStarts(physical: TrajectoryPlanner, position: Point, headingDegrees: Double, trail: List<Point>): List<Point> {
+        val along = starts(physical, position, headingDegrees, trail).filterNotNull()
+            .filter { it.distance(position) >= fr.luba.poc.protocol.CollisionLatch.UNLOCK_BACK_OFF_M - 1e-9 }
+        if (along.isNotEmpty()) return along
+        return ObstacleBypass.backOffCandidates(physical, position, headingDegrees, ObstacleBypass.straightBehind(position, headingDegrees),
+            ObstacleBypass.BLIND_BACK_OFF_M)
+    }
+
     private fun headingOf(e: SimEdge) = Math.toDegrees(atan2(e.b.y - e.a.y, e.b.x - e.a.x))
 
     /** Route over [LOOKAHEAD_M] after [entry] (edge [entryIndex]) with the tracking tolerance, pivots included. */
@@ -128,10 +142,11 @@ object DriftRecovery {
      * advanced by [skipM] then by the [ENTRY_OFFSETS_M] as long as the link fails; the rest of the route is unchanged.
      * First a link keeping the tracking tolerance up to the entry pivot and over [LOOKAHEAD_M] after it, and meeting a
      * pass near the outline along its axis ([ObstacleBypass.arrivesAligned]), so as not to resume right at the edge or
-     * nose first into the border; failing that, the first safe one.
+     * nose first into the border; failing that, the first safe one. [afterContact]: contact at the limit of the task
+     * area ([EdgeContactKind.LIMIT]), back-off of at least 30 cm first ([limitStarts]).
      */
     fun plan(routes: TrajectoryPlanner, physical: TrajectoryPlanner, path: List<SimEdge>, origins: List<Int>?, index: Int,
-             position: Point, headingDegrees: Double, trail: List<Point>, skipM: Double = 0.0): DriftPlan {
+             position: Point, headingDegrees: Double, trail: List<Point>, skipM: Double = 0.0, afterContact: Boolean = false): DriftPlan {
         require(index in path.indices) { tr("Interrupted edge outside the route", "Arête interrompue hors trajet") }
         require(origins == null || origins.size == path.size)
         require(position.x.isFinite() && position.y.isFinite() && headingDegrees.isFinite()) { tr("Invalid robot pose", "Pose du robot invalide") }
@@ -140,7 +155,9 @@ object DriftRecovery {
         // only if it moves the chassis away from the edge). 2026-10-19 at 14:50, Fosse: self-check 25 during a 150° pivot
         // with a slide towards the border; after the pivot the trail was ahead of the robot, no back-off was possible and
         // the mowing stopped, while the manual resume from the same pose left with a 30 cm escape ahead.
-        val starts = starts(physical, position, headingDegrees, trail).let { if (inside) it else it + null }
+        // After a contact at the limit ([afterContact]): a back-off first, always ([limitStarts]); no escape ahead.
+        val starts: List<Point?> = if (afterContact) limitStarts(physical, position, headingDegrees, trail)
+            else starts(physical, position, headingDegrees, trail).let { if (inside) it else it + null }
         fun noStart() = (if (trail.isEmpty()) tr("Back-off impossible: robot trail missing", "Recul impossible : trace du robot absente")
             else tr("Back-off impossible: chassis outside the zone along the whole trail within %.0f cm behind the robot",
                 "Recul impossible : châssis hors de la zone sur toute la trace à moins de %.0f cm derrière le robot").format(MAX_BACK_OFF_M * 100)) +
@@ -183,6 +200,8 @@ object DriftRecovery {
                 return DriftPlan(backOff, edges, link.map { -1 } + restOrigins, link.sumOf { it.meters }, skipped.coerceAtLeast(0.0))
             }
         }
+        if (afterContact && starts.isEmpty()) throw IllegalArgumentException(tr("Back-off impossible after the border contact: trail missing or chassis blocked behind",
+            "Recul impossible après le contact en bordure : trace absente ou châssis bloqué derrière"))
         if (!inside && starts.size == 1) throw IllegalArgumentException(noStart() + (failure?.message?.let { " ($it)" } ?: ""))
         throw IllegalArgumentException(tr("No safe link to rejoin the route", "Aucun raccord sûr pour rejoindre le trajet") + (failure?.message?.let { " ($it)" } ?: ""))
     }

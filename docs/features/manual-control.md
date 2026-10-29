@@ -8,7 +8,7 @@ Two on-screen joysticks to drive the robot, with no map and no RTK. The blades s
 |---|---|
 | **Access** | Service → Robot → **Manual control**; Map → **Manual**; Home → gamepad icon (same page everywhere) |
 | **Status** | Implemented and used on the real robot; bumper reception and stopping after a real BLE loss still to be validated |
-| **Code** | `manual/Joystick.kt` (response curve, notches), `manual/DriveJoystick.kt` (joysticks and deck), `manual/ManualDrive.kt` (shared control loop), `manual/JoystickPanel.kt`, `manual/ManualSpeed.kt`, `manual/DrivenRecordPage.kt` and `manual/DrivenView.kt` (record by driving page), `map/DrivenRecording.kt`, `ui/RobotPanel.kt` (`ManualPage`), `ble/RobotBle.kt` (`manualInput`, `stopManual`, `stopMammotionTask`, `startDrivenRecording`) |
+| **Code** | `manual/Joystick.kt` (response curve, notches), `manual/DriveJoystick.kt` (joysticks and deck), `manual/ManualDrive.kt` (shared control loop), `manual/JoystickPanel.kt`, `manual/ManualSpeed.kt`, `manual/DrivenRecordPage.kt` and `manual/DrivenView.kt` (record by driving page), `map/DrivenRecording.kt`, `ui/RobotPanel.kt` (`ManualPage`), `ble/RobotBle.kt` (`manualInput`, `stopManual`, `stopMammotionTask`, `startDrivenRecording`), `ble/HoldHeight.kt` (deck height held while driving) |
 
 <p align="center">
   <img src="../images/manual-control.png" width="200" alt="Manual control">
@@ -25,6 +25,20 @@ Two on-screen joysticks to drive the robot, with no map and no RTK. The blades s
    pending movements.
 
 The checkbox and the speed are locked while a joystick is held.
+
+### Cutting deck height while driving
+
+To receive the bumper contact, the joystick drives in manual mowing mode with blades stopped (state 20), renewed every
+500 ms. That command always carries a cutting height, which the robot applies. Until version 1.16.0 it was the last
+height requested by the app since it was opened, 60 mm after a connection: on a LUBA 3 whose deck sat elsewhere, the
+deck moved at the first joystick gesture ([DumbyLuba#2](https://github.com/cleborgne-pro/DumbyLuba/issues/2)). The
+joystick now sends the height the robot reports, so the deck stays where it is; the same goes for its exit from manual
+mode on release and for the STOP (`HoldHeight`, `RobotBle.holdHeightMm`). If the robot has not reported its height yet,
+or reports one outside its model's range, the last height requested in the app (height setting, blade test, route), or
+60 mm, applies, brought into that range. A height setting or a blade test in progress keeps sending its own target. The
+slow approach, the bumper test and the moves with blades stopped follow the same rule
+([obstacles](obstacles.md), [moves](station-and-moves.md#move-to-a-point)). Checked on the test bench
+(simulated robot), not tried on a robot yet.
 
 ### Joysticks (version 1.12.0)
 
@@ -71,7 +85,9 @@ arrives with a slight delay: keep the speed moderate.
 
 - LUBA 2 (`Luba-VS…` or X series `Luba-VP…`) ready (state 11) to start; state 11 or 20 accepted while driving. Fresh state (≤ 2 s),
   battery > 30 %, blades stopped, no protection (self-check 0 or 10; 25 accepted beyond the mapped zones or at a no-go zone, see
-  [safety](safety.md#self-check-25-beyond-the-mapped-zones-version-1110)), no bumper or lift alert, no mission, test, map
+  [safety](safety.md#self-check-25-beyond-the-mapped-zones-version-1110)), no bumper or lift alert (a bumper "alert" read
+  from the connection on, robot at rest, is the robot's resting value:
+  [X series](supported-models.md#bumper-alert-at-rest-of-the-x-series)), no mission, test, map
   reading, height adjustment or Mammotion task cancellation in progress. A refusal reads "Control refused: …".
 - A joystick input not refreshed for 500 ms, a protection, a bumper or lift alert, a robot error, a stale state, a
   link loss or a saturated send queue (more than 4 commands) stops control with a critical alert; it only resumes

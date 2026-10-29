@@ -145,6 +145,54 @@ class CloudViewModelTest {
             lines.map { it.getJSONObject("fields") }.map { Triple(it.getString("productKey"), it.getString("namePrefix"), it.getInt("nameLength")) })
     }
 
+    @Test fun `empty device page, robot owned on the older Aliyun cloud, explained and logged anonymously`() {
+        sessionStore.save(session().toString())
+        server.json(devicesPath, ok(JSONObject().put("records", JSONArray()).put("total", 0)))
+        server.json(MammotionCloud.DEVICE_LIST, ok(JSONArray()
+            .put(JSONObject().put("iotId", "iot-SECRET-1").put("deviceName", "MA5000DEMO000001").put("deviceType", "LUBA").put("productKey", "a1FbaU4Bqk5"))
+            .put(JSONObject().put("iotId", "iot-SECRET-2").put("deviceName", "RTK-DEMO000002").put("deviceType", "RTK"))))
+        val vm = model()
+        vm.refresh()
+        until("Aliyun status") { !vm.state.value.busy && vm.state.value.status.startsWith("Votre LUBA est sur l'ancien cloud Mammotion (Aliyun)") }
+        assertTrue(vm.state.value.robots.isEmpty())
+        val list = server.requests.single { it.path == MammotionCloud.DEVICE_LIST }
+        assertEquals("GET", list.method); assertEquals("domestic.mammotion.com", list.host); assertEquals("1", list.headers["client-type"])
+        assertTrue(list.headers["authorization"].orEmpty().startsWith("Bearer "))
+        until("device page and owned devices logged") { logged("cloud_device_page").isNotEmpty() && logged("cloud_device_list").isNotEmpty() }
+        val page = logged("cloud_device_page").single().getJSONObject("fields")
+        assertEquals("api-iot.mammotion.com", page.getString("host")); assertEquals(200, page.getInt("httpCode"))
+        assertEquals(0, page.getInt("apiCode")); assertEquals(0, page.getInt("total")); assertEquals(0, page.getInt("records"))
+        val owned = logged("cloud_device_list").single()
+        assertFalse(owned.toString(), owned.toString().contains("SECRET") || owned.toString().contains("DEMO0000") || owned.toString().contains("a1FbaU4Bqk5"))
+        assertEquals(2, owned.getJSONObject("fields").getInt("devices")); assertEquals(1, owned.getJSONObject("fields").getInt("missingFromPage"))
+        assertEquals("a1", owned.getJSONObject("fields").getJSONArray("productKeyPrefixes").getString(0))
+    }
+
+    @Test fun `empty device page and owned devices unreadable keep the current status, refused page names its endpoint`() {
+        sessionStore.save(session().toString())
+        server.json(devicesPath, ok(JSONObject().put("records", JSONArray())))
+        server.status(MammotionCloud.DEVICE_LIST, 500)
+        val vm = model()
+        vm.refresh()
+        until("empty account") { !vm.state.value.busy && vm.state.value.status == "Aucun appareil dans le compte" }
+        until("owned devices failure logged") { logged("cloud_device_list").isNotEmpty() }
+        val failure = logged("cloud_device_list").single().getJSONObject("fields")
+        assertEquals(500, failure.getInt("httpCode")); assertEquals(MammotionCloud.DEVICE_LIST, failure.getString("endpoint"))
+        assertEquals("domestic.mammotion.com", failure.getString("host"))
+        // Refused device page (code seen in DumbyLuba#3): the error names the endpoint, logged with the domain.
+        server.json(devicesPath, """{"code":40400,"msg":"not found"}""")
+        vm.refresh()
+        until("refusal") { !vm.state.value.busy && vm.state.value.status.startsWith("Échec cloud") }
+        assertEquals("Échec cloud : Mammotion HTTP/API 40400 (/v1/user/device/page)", vm.state.value.status)
+        until("refused page logged") { logged("cloud_device_page").size == 2 }
+        val refused = logged("cloud_device_page").last().getJSONObject("fields")
+        assertEquals(40400, refused.getInt("apiCode")); assertEquals(200, refused.getInt("httpCode")); assertEquals("api-iot.mammotion.com", refused.getString("host"))
+    }
+
+    /** Lines of the diagnostics log of [kind]. */
+    private fun logged(kind: String) = java.io.File(app.filesDir, "diagnostics").walkTopDown().filter { it.isFile && it.extension == "jsonl" }
+        .flatMap { it.readLines().asSequence() }.map { JSONObject(it) }.filter { it.getString("event") == kind }.toList()
+
     @Test fun `rejected credentials or missing network shown without session`() {
         server.status(TOKEN_PATH, 401)
         val vm = model()
@@ -217,7 +265,7 @@ class CloudViewModelTest {
         preload(report(11, position = true))
         vm.refreshAccount()
         until("reading") { !vm.state.value.busy && vm.state.value.accountReadAt != null && vm.state.value.status.startsWith("Position") }
-        assertEquals(listOf("Historique : code 500"), vm.state.value.accountReadErrors)
+        assertEquals(listOf("Historique : code 500 (/device-server/v1/device/work-report/page)"), vm.state.value.accountReadErrors)
     }
 
     @Test fun `native return refused without robot or without account`() {
@@ -273,7 +321,7 @@ class CloudViewModelTest {
         assertEquals("Retour natif refusé : mise à jour du robot en cours", vm.state.value.nativeReturn.status)
         server.status(invokePath, 500)
         vm.nativeReturnToBase()
-        until("cloud refusal") { vm.state.value.nativeReturn.status == "Retour natif refusé : code 500" }
+        until("cloud refusal") { vm.state.value.nativeReturn.status == "Retour natif refusé : code 500 (/v1/mqtt/rpc/thing/service/invoke)" }
         assertTrue(navActions().isEmpty())
     }
 
@@ -326,7 +374,7 @@ class CloudViewModelTest {
         server.status("/device-server/v1/ota/device/upgrade", 500)
         vm.startFirmwareUpdate()
         until("refusal") { vm.state.value.firmwareUpdate.phase == FirmwarePhase.FAILED }
-        assertEquals("Mise à jour refusée par le cloud : code 500", vm.state.value.firmwareUpdate.status)
+        assertEquals("Mise à jour refusée par le cloud : code 500 (/device-server/v1/ota/device/upgrade)", vm.state.value.firmwareUpdate.status)
         val upgrade = server.requests.single { it.path == "/device-server/v1/ota/device/upgrade" }
         assertEquals("1.13.0", JSONObject(upgrade.body).getString("version"))
     }

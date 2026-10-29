@@ -279,11 +279,12 @@ object TurnOptimizer {
 
     /**
      * [path] driven by the tracking: pivot in place (stop included) at vertices turning more than
-     * [PathFollower.CORNER_DEGREES], speed limited by the curvature elsewhere, as [PathFollower] does.
+     * [PathFollower.CORNER_DEGREES], speed limited by the curvature elsewhere ([PathFollower.curveSpeed]) and after the
+     * exit of a curve ([PathFollower.exitLimit]), as [PathFollower] does.
      */
     fun drive(path: List<Point>, speedMps: Double, robot: RobotEnvelope = RobotEnvelope.LUBA2): Drive {
         val speedPercent = (speedMps / (5 * DeadReckoning.DEFAULT_METERS_PER_UNIT)).roundToInt().coerceIn(10, 100)
-        val turnRate = PathFollower.angularLimit(speedPercent) / 2.0 * DeadReckoning.DEFAULT_DEGREES_PER_UNIT * PathFollower.CURVE_STEER_SHARE
+        val angular = PathFollower.angularLimit(speedPercent)
         val turns = path.indices.map { i ->
             if (i == 0 || i == path.lastIndex) 0.0 else {
                 val h1 = atan2(path[i].y - path[i - 1].y, path[i].x - path[i - 1].x)
@@ -293,11 +294,30 @@ object TurnOptimizer {
         }
         var duration = 0.0; var pivots = 0.0; var wear = 0.0
         val half = robot.halfWidthM
+        // Exit of a curve ([PathFollower.exitLimit]): speed of the last curved edge, distance driven since its end.
+        var hold = Double.POSITIVE_INFINITY; var behind = 0.0
         path.zipWithNext().forEachIndexed { i, (a, b) ->
             val length = a.distance(b)
             val bends = listOf(turns[i], turns[i + 1]).map { if (it > PathFollower.CORNER_DEGREES) 0.0 else it }
             val curvature = bends.average() / max(length, 1e-6)
-            duration += length / min(speedMps, if (curvature > 1e-6) turnRate / curvature else Double.POSITIVE_INFINITY)
+            val speed = min(speedMps, PathFollower.curveSpeed(curvature, angular, DeadReckoning.DEFAULT_DEGREES_PER_UNIT))
+            if (turns[i] > PathFollower.CORNER_DEGREES) hold = Double.POSITIVE_INFINITY
+            if (speed < speedMps || hold.isInfinite()) duration += length / speed
+            else {
+                // Straight edge after a curve: 1 cm steps under the exit limit.
+                val steps = max(1, ceil(length / 0.01).toInt())
+                repeat(steps) { k -> duration += length / steps / min(speed, PathFollower.exitLimit(behind + length * (k + 0.5) / steps, hold, speedMps)) }
+            }
+            if (bends[1] >= 0.5) {
+                // As the tracking: speed of the turns over [PathFollower.CURVE_WINDOW_M] behind this curved vertex.
+                var sum = 0.0; var window = 0.0; var j = i + 1
+                while (j >= 1 && window < PathFollower.CURVE_WINDOW_M) {
+                    if (turns[j] <= PathFollower.CORNER_DEGREES) sum += turns[j]
+                    window += path[j].distance(path[j - 1]); j--
+                }
+                hold = PathFollower.curveSpeed(sum / max(min(window, PathFollower.CURVE_WINDOW_M), 0.2), angular, DeadReckoning.DEFAULT_DEGREES_PER_UNIT)
+                behind = 0.0
+            } else behind += length
         }
         path.indices.forEach { i ->
             val t = turns[i]

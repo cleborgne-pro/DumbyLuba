@@ -16,7 +16,9 @@ import org.json.JSONObject
  * - identifiers: robot names (model prefix kept, `Luba-VS‹1›`), RTK base number, device names and keys, IMEI/IMSI/ICCID,
  *   user and device ids, MAC addresses, names of the other Bluetooth devices paired with the phone;
  * - network: Wi-Fi names and passwords, IP addresses (local, or of a connection error), mobile network credentials;
- * - account: e-mail addresses, tokens;
+ * - account: e-mail addresses, tokens, the Mammotion account number (`subtype` of every protobuf message, which the
+ *   robot echoes back, `user_account` / `userAccount` and the other account fields), in a protobuf dump, a JSON field or
+ *   a free text;
  * - raw data that cannot be filtered: received BLE frames (their decoded form stays), raw ZMQ messages.
  */
 class LogSanitizer {
@@ -60,6 +62,8 @@ class LogSanitizer {
             value.keys().forEach { k -> result.put(k, walk(value.opt(k), k)) }
         }
         value is JSONArray -> JSONArray().also { result -> for (i in 0 until value.length()) result.put(walk(value.opt(i), key)) }
+        // Account number: removed whatever its JSON type (number or string).
+        key in ACCOUNT_KEYS && value != JSONObject.NULL -> { count("account number"); "‹removed›" }
         value !is String -> value
         key in REDACTED_KEYS -> { count(key!!); "‹removed›" }
         key in PROTOBUF_KEYS -> text(protobuf(value))
@@ -69,7 +73,7 @@ class LogSanitizer {
     /** Protobuf text format (`message.toString()`): the value of each sensitive field is replaced. */
     fun protobuf(dump: String): String = PROTOBUF_FIELD.replace(dump) { match ->
         val field = match.groupValues[2]
-        count(if (field in POSITION_FIELDS) "position" else field)
+        count(when (field) { in POSITION_FIELDS -> "position"; in ACCOUNT_FIELDS -> "account number"; else -> field })
         "${match.groupValues[1]}$field: \"‹removed›\""
     }
 
@@ -81,6 +85,7 @@ class LogSanitizer {
         out = IP.replace(out) { m -> count("ip"); "‹ip-${pseudonym("ip", m.value)}›" }
         out = EMAIL.replace(out) { count("email"); "‹email›" }
         out = JWT.replace(out) { count("token"); "‹token›" }
+        out = ACCOUNT_TEXT.replace(out) { m -> count("account number"); "${m.groupValues[1]}‹removed›" }
         return out
     }
 
@@ -94,7 +99,8 @@ class LogSanitizer {
         .put("anonymized", true)
         .put("note", "Personal data removed by the app before export: robot names (model prefix kept), RTK base " +
             "number and position, latitude/longitude, MAC and IP addresses, Wi-Fi and mobile network data, device " +
-            "keys and ids, e-mails, tokens, other paired Bluetooth devices, raw BLE frames and raw ZMQ messages. " +
+            "keys and ids, e-mails, tokens, Mammotion account number, other paired Bluetooth devices, raw BLE frames " +
+            "and raw ZMQ messages. " +
             "Map and positions stay in the robot's local frame. Obstacle photos are not included.")
         .put("replacements", JSONObject(counts as Map<*, *>))
         .put("photosLeftOut", photosLeftOut)
@@ -111,8 +117,18 @@ class LogSanitizer {
         private val JWT = Regex("""eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}""")
 
         private val POSITION_FIELDS = setOf("latitude", "longitude", "lat", "lon")
+        /**
+         * Protobuf fields holding the Mammotion account number: `subtype` of `LubaMsg`, set by the app to
+         * `userInformation.userAccount` and echoed by the robot in every reply (DumbyLuba#3: in clear in the decoded
+         * messages of a public export), and the account of a manual control takeover (`preemptAccount`).
+         */
+        private val ACCOUNT_FIELDS = setOf("subtype", "user_account", "userAccount", "preemptAccount")
+        /** JSON keys of the account number, at any depth of a log line or report. */
+        private val ACCOUNT_KEYS = ACCOUNT_FIELDS + setOf("user_account_id", "userAccountId", "accountId", "accountID", "account_id")
+        /** Account number written in a free text: `userAccount=12345678`, `subtype: 12345678`, `"user_account":"12345678"`, negative values included (the sign is removed with the digits). */
+        private val ACCOUNT_TEXT = Regex("""(?i)(\b(?:subtype|user_?account(?:_?id)?|preempt_?account)"?\s*[:=]\s*"?)-?\d+""")
         /** Fields of the Mammotion protos (app/src/main/proto) whose value identifies the user, the robot or the garden. */
-        private val SENSITIVE_FIELDS = POSITION_FIELDS + setOf(
+        private val SENSITIVE_FIELDS = POSITION_FIELDS + ACCOUNT_FIELDS + setOf(
             "rtk_base_num", "rtk_url", "rtk_username", "rtk_password",
             "wifi_ssid", "ssid", "msgssid", "Confssid", "Memssid", "wifi_password", "password", "username", "apn_name", "wifi_mac",
             "ip", "gateway", "serverIp", "url", "tx_zmq_url", "sub_img_url",
@@ -124,7 +140,7 @@ class LogSanitizer {
         /** Keys of the log fields carrying raw data that cannot be filtered. */
         private val REDACTED_KEYS = setOf("parts", "samples", "network", "password", "token", "accessToken", "refreshToken", "email")
         /** Keys holding a protobuf text dump. */
-        private val PROTOBUF_KEYS = setOf("decoded", "mapNav")
+        private val PROTOBUF_KEYS = setOf("decoded", "mapNav", "lastPerception")
         /** Events listing Bluetooth devices seen or paired with the phone, not only robots. */
         private val OTHER_DEVICE_EVENTS = setOf("scan_advertisement", "scan_result", "bonded_device", "auto_connect", "gateway_robot")
     }

@@ -102,7 +102,7 @@ class RobotBleDiversTest {
         val side = if ((-kotlin.math.sin(h)) * (4.0 - bench.sim.position.x) + kotlin.math.cos(h) * (3.0 - bench.sim.position.y) >= 0) 1.0 else -1.0
         bench.sim.shove(-kotlin.math.sin(h) * 0.45 * side, kotlin.math.cos(h) * 0.45 * side)
         val seen = linkedSetOf<String>()
-        bench.sim.onTick = { bench.state.events.takeLast(40).forEach { e -> if (e.contains("Sortie de trajectoire rattrapée")) seen += "rattrapage" } }
+        bench.sim.onTick = { bench.newEvents().forEach { e -> if (e.contains("Sortie de trajectoire rattrapée")) seen += "rattrapage" } }
         bench.until(60_000, "recovery") { seen.isNotEmpty() }
         bench.until(2 * 60_000, "cutting resumed") { bench.sim.bladesOn && bench.sim.speed > 0.05 }
         assertTrue(bench.state.robotRoute.running)
@@ -193,12 +193,46 @@ class RobotBleDiversTest {
         val mark = bench.mark()
         bench.until(70_000, "read timeout") { !bench.state.mapLoading }
         assertTrue(bench.state.status, bench.state.status.contains("Carte incomplète"))
+        // The failure stays shown where the reading is offered, and says that the robot did not answer (DumbyLuba#3).
+        val failure = requireNotNull(bench.state.mapReadFailure)
+        assertTrue(failure, failure.contains("aucune réponse du robot"))
+        assertEquals(failure, fr.luba.poc.map.mapReadFailureShown(bench.state))
+        assertEquals("Relancer la lecture", fr.luba.poc.map.mapReadAction(bench.state.mapLoading, true, false))
+        bench.advance(60_000)
+        assertEquals(failure, bench.state.mapReadFailure)
         assertTrue(bench.labelsAfter(mark).none { it.startsWith("move") })
+        // A new reading clears it.
+        bench.ble.fetchMap()
+        assertTrue(bench.state.mapLoading); assertNull(bench.state.mapReadFailure)
+        assertNull(fr.luba.poc.map.mapReadFailureShown(bench.state.copy(mapReadFailure = failure)))
+        bench.until(70_000, "second read timeout") { !bench.state.mapLoading }
         // Refused during manual control.
         bench.ble.beginManualGesture(); bench.ble.manualInput(100, 0)
         bench.ble.fetchMap()
         assertFalse(bench.state.mapLoading)
         bench.ble.stopManual()
+    }
+
+    @Test fun `LUBA 1 map read addressed to the main controller, LUBA 2 to the navigation board`() {
+        // LUBA 1 firmware: navigation messages handled only on DEV_MAINCTL (DumbyLuba#3).
+        // Own address: its map cache, saved on an IO thread after the read, must not race with bench.installMap().
+        val luba1 = RobotBench(Point(5.0, 2.0), 90.0, name = "Luba-SIM0001", address = "AA:BB:CC:00:00:02")
+        try {
+            luba1.sim.navReceiver = fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_MAINCTL
+            luba1.sim.loadMap(RobotBench.MAP)
+            luba1.connect()
+            luba1.ble.fetchMap()
+            luba1.until(30_000, "LUBA 1 map read") { luba1.state.mammotionMap.complete && !luba1.state.mapLoading }
+            assertNull(luba1.state.mapReadFailure)
+            val receivers = luba1.sim.received.map { it.second }.filter { it.hasNav() }.map { it.rcver }.distinct()
+            assertEquals(listOf(fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_MAINCTL), receivers)
+        } finally { luba1.close() }
+        connectedInZone()
+        bench.sim.loadMap(RobotBench.MAP)
+        bench.ble.fetchMap()
+        bench.until(30_000, "LUBA 2 map read") { bench.state.mammotionMap.complete && !bench.state.mapLoading }
+        assertEquals(listOf(fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_NAVIGATION),
+            bench.sim.received.map { it.second }.filter { it.hasNav() }.map { it.rcver }.distinct())
     }
 
     @Test fun `robot without known map, BLE map read automatically once per connection`() {

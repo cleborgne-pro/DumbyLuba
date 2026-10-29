@@ -17,11 +17,15 @@ if not tools:
 dexdump = tools[-1]
 worst = []
 with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(apk) as archive:
-    for name in archive.namelist():
-        if not re.fullmatch(r"classes\d*\.dex", name):
-            continue
-        path = archive.extract(name, tmp)
-        text = subprocess.run([dexdump, "-f", "-d", path], capture_output=True).stdout.decode("utf-8", "replace")
+    # Only the dex files that define app classes (their descriptors are in its string table), dumped in parallel and
+    # without the disassembly (-d): the register count is in the method header, and parsing the disassembly of the
+    # library dex files took about 10 of the 14 seconds of the check.
+    paths = [archive.extract(name, tmp) for name in archive.namelist() if re.fullmatch(r"classes\d*\.dex", name)]
+    def defines_app_classes(path):
+        with open(path, "rb") as dex: return b"Lfr/luba/poc/" in dex.read()
+    dumps = [subprocess.Popen([dexdump, path], stdout=subprocess.PIPE) for path in paths if defines_app_classes(path)]
+    for dump in dumps:
+        text = dump.communicate()[0].decode("utf-8", "replace")
         owner = method = None
         for line in text.split("\n"):
             m = re.match(r"\s+#\d+\s+: \(in (L[^;]+;)\)", line)

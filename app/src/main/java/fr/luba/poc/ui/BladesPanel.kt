@@ -210,7 +210,7 @@ private fun StaticBench(robot: RobotBle, state: RobotUi, height: Int, knifeAlt: 
     val modelAllowed = trial.let { fr.luba.poc.protocol.ModelTrial.testAllowed(state.selected?.name, android.os.SystemClock.elapsedRealtime()) }
     SettingsGroup(tr("Preconditions", "Préconditions")) {
         PreconditionList(BladeSafety.checks(state.selected?.name, state.ageMs, t.battery, if (state.bladeTestActive) 11 else t.robotState,
-            if (state.bladeTestActive) 0 else fr.luba.poc.protocol.ModelTrial.sensors(state.selected?.name, t.sensorStatus, android.os.SystemClock.elapsedRealtime()), t.selfCheck, state.campaign.running, height, state.cutHeights, modelAllowed).map { it.label to it.ok })
+            if (state.bladeTestActive) 0 else fr.luba.poc.protocol.BumperRest.guard(state.selected?.name, t.sensorStatus, state.bumperRest, android.os.SystemClock.elapsedRealtime()), t.selfCheck, state.campaign.running, height, state.cutHeights, modelAllowed).map { it.label to it.ok })
     }
     SettingsGroup(tr("Procedure", "Déroulé")) {
         StepLine(1, tr("Check that the blades are stopped", "Vérifier l'arrêt des lames"), tr("OFF sent, then a fresh OFF state is awaited.", "OFF envoyé, puis état OFF frais attendu."))

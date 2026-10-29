@@ -21,10 +21,10 @@ import kotlin.math.atan2
  * end of the mission, edge cases (holes, obstacles, small cells, fine spacing, manual angle, change every session, height
  * passes, cancellation) and persistence (checkpoint store, resume in the middle of an arc).
  */
-class ZamboniQaTest {
+abstract class ZamboniQaFixture {
     @get:Rule val folder = TemporaryFolder()
 
-    private val shapes: List<MapShape> = run {
+    protected val shapes: List<MapShape> = run {
         val json = JSONObject(javaClass.getResourceAsStream("/planner-reference-map.json")!!.bufferedReader().use { it.readText() })
         val array = json.getJSONArray("shapes")
         (0 until array.length()).map { i ->
@@ -33,22 +33,22 @@ class ZamboniQaTest {
                 Point(p.getJSONArray(k).getDouble(0), p.getJSONArray(k).getDouble(1)) }, s.getString("name"))
         }
     }
-    private val map = RobotMap(shapes, true, "reference-station")
-    private val base = MapBase(Point(0.14231226759294913, 1.2859193243581544), "Placée manuellement", 1.5, 152.8624890921028, 1.5)
-    private val zones = shapes.filter { it.kind == ShapeKind.ZONE }
-    private val radius = TurnOptimizer.FOLLOW_RADIUS_M
+    protected val map = RobotMap(shapes, true, "reference-station")
+    protected val base = MapBase(Point(0.14231226759294913, 1.2859193243581544), "Placée manuellement", 1.5, 152.8624890921028, 1.5)
+    protected val zones = shapes.filter { it.kind == ShapeKind.ZONE }
+    protected val radius = TurnOptimizer.FOLLOW_RADIUS_M
 
-    private fun request(ids: List<Long>, spacing: Double = 0.25, style: TurnStyle = TurnStyle.FAST, start: Point = base.point,
+    protected fun request(ids: List<Long>, spacing: Double = 0.25, style: TurnStyle = TurnStyle.FAST, start: Point = base.point,
                         obstacles: List<PlanningObstacle> = emptyList(), bordersFirst: Boolean = true) =
         PlanningRequest(map, ids, start,
             config = PlanningConfig(spacingM = spacing, minimumCoverage = 0.95, boundary = BoundaryMeaning.RECORDED_TRACE,
                 turnStyle = style, bordersFirst = bordersFirst),
             obstacles = obstacles, navigation = PlanningNavigation(emptyList(), base), end = if (start == base.point) null else base.point)
 
-    private fun <T> timed(block: () -> T): Pair<T, Double> { val s = System.nanoTime(); val r = block(); return r to (System.nanoTime() - s) / 1e9 }
+    protected fun <T> timed(block: () -> T): Pair<T, Double> { val s = System.nanoTime(); val r = block(); return r to (System.nanoTime() - s) / 1e9 }
 
     /** Driven paths that the planner's own chassis envelope refuses, checked one by one on a fresh terrain. */
-    private fun envelopeFailures(req: PlanningRequest, p: Preview): List<String> {
+    protected fun envelopeFailures(req: PlanningRequest, p: Preview): List<String> {
         val terrain = PlanningTerrain(req)
         return p.cuttingPaths.withIndex().filter { it.value.size >= 2 }.mapNotNull { (i, path) ->
             terrain.envelope.pathCollision(path)?.let { "path $i (${path.size} points): $it" }
@@ -56,7 +56,7 @@ class ZamboniQaTest {
     }
 
     /** Failures of one Zamboni plan against the zigzag of the same request; empty when every check holds. */
-    private fun check(label: String, req: PlanningRequest, zigzag: CandidateResult, a: CandidateResult, b: CandidateResult,
+    protected fun check(label: String, req: PlanningRequest, zigzag: CandidateResult, a: CandidateResult, b: CandidateResult,
                       spacing: Double, singleZone: Boolean): List<String> {
         val failures = mutableListOf<String>()
         // Zigzag refused as well: problem of the request, not of Zamboni (reported, not counted).
@@ -88,13 +88,27 @@ class ZamboniQaTest {
         return failures
     }
 
+    protected fun inside(zone: MapShape, clearance: Double): Point {
+        val f = GeometryFactory()
+        fun poly(p: List<Point>) = f.createPolygon((p + p.first()).map { Coordinate(it.x, it.y) }.toTypedArray())
+        var free: org.locationtech.jts.geom.Geometry = poly(zone.points).buffer(-clearance)
+        shapes.filter { it.excludes }.forEach { free = free.difference(poly(it.points).buffer(clearance)) }
+        val c = free.interiorPoint.coordinate
+        return Point(c.x, c.y)
+    }
+}
+
+/** Every zone of the reference map at each spacing, and the seven zones in one task: a class of its own, so that the two
+ * test processes share the Zamboni sweeps. */
+class ZamboniQaSpacingTest : ZamboniQaFixture() {
     private fun everyZoneAt(spacing: Double) {
         val failures = mutableListOf<String>()
         for (zone in zones) {
             val name = zone.name.trim(); val req = request(listOf(zone.id), spacing)
             val (zigzag, tz) = timed { RoutePlanning.calculate(req, CoverageMode.LINES).selected }
             val (a, ta) = timed { RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected }
-            val b = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
+            // Determinism (second computation) checked at 25 cm only: the order search does not depend on the spacing.
+            val b = if (spacing == 0.25) RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected else a
             val f = check("$name $spacing", req, zigzag, a, b, spacing, true)
             failures += f
             println("QA2 ZAMBONI $name $spacing m: ${a.status}, coverage %.3f %% (zigzag %.3f %%), runs ${a.preview?.runs?.size} (zigzag ${zigzag.preview?.runs?.size}), mission %.0f s (zigzag %.0f s), computation %.1f s (zigzag %.1f s)%s".format(
@@ -120,6 +134,28 @@ class ZamboniQaTest {
         assertTrue(f.joinToString("\n"), f.isEmpty())
     }
 
+    @Test(timeout = 3_600_000) fun sevenZonesAt35CmAndFromInsideAZone() {
+        val failures = mutableListOf<String>()
+        val piscine = zones.single { it.name.trim() == "Piscine" }
+        for ((label, req) in listOf("ALL 0.35" to request(zones.map { it.id }, 0.35),
+                "ALL robot in Piscine" to request(zones.map { it.id }, start = inside(piscine, 1.0), bordersFirst = false))) {
+            val zigzag = RoutePlanning.calculate(req, CoverageMode.LINES).selected
+            val a = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
+            val b = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
+            val f = check(label, req, zigzag, a, b, req.config.spacingM, false)
+            failures += f
+            val entry = { r: CandidateResult -> r.preview?.cuttingPaths?.first()?.first()?.distance(req.start) ?: Double.NaN }
+            val zone = { r: CandidateResult -> r.preview?.pathZoneIds?.firstOrNull() }
+            println("QA2 ZAMBONI $label: ${a.status}, entry %.2f m from the start in zone ${zone(a)} (zigzag %.2f m in zone ${zone(zigzag)}), mission %.0f s (zigzag %.0f s) $f".format(
+                entry(a), entry(zigzag), a.metrics?.durationSeconds ?: 0.0, zigzag.metrics?.durationSeconds ?: 0.0))
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+}
+
+/** Edge cases, orientation, height passes, cancellation and persistence of the Zamboni mode. */
+class ZamboniQaTest : ZamboniQaFixture() {
+
     /** The app always sends Lawn friendly with Zamboni (the toggle is disabled): the toggle must not change the plan. */
     @Test(timeout = 1_800_000) fun lawnFriendlyToggleDoesNotChangeAZamboniPlan() {
         for (zone in zones.filter { it.name.trim() in listOf("Potager", "Figuier", "Jardin d’Eden") }) {
@@ -130,14 +166,6 @@ class ZamboniQaTest {
     }
 
     /** A point inside [zone], away from its holes. */
-    private fun inside(zone: MapShape, clearance: Double): Point {
-        val f = GeometryFactory()
-        fun poly(p: List<Point>) = f.createPolygon((p + p.first()).map { Coordinate(it.x, it.y) }.toTypedArray())
-        var free: org.locationtech.jts.geom.Geometry = poly(zone.points).buffer(-clearance)
-        shapes.filter { it.excludes }.forEach { free = free.difference(poly(it.points).buffer(clearance)) }
-        val c = free.interiorPoint.coordinate
-        return Point(c.x, c.y)
-    }
 
     @Test(timeout = 1_800_000) fun holesObstaclesAndARobotStartInsideTheZone() {
         val failures = mutableListOf<String>()
@@ -237,7 +265,8 @@ class ZamboniQaTest {
         val failures = mutableListOf<String>()
         for (zone in zones) {
             val name = zone.name.trim()
-            for (angle in listOf(0, 37, 90, 151)) {
+            // An axis-aligned and an oblique angle: ZamboniManualAngleReproTest covers every angle in 15° steps.
+            for (angle in listOf(0, 151)) {
                 val req = request(listOf(zone.id)).let { it.copy(config = it.config.copy(orientation = OrientationMode.MANUAL, manualAngleDeg = angle)) }
                 val z = runCatching { RoutePlanning.calculate(req, CoverageMode.LINES).selected }.getOrNull()
                 val r = try { RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected } catch (e: IllegalArgumentException) {
@@ -254,7 +283,7 @@ class ZamboniQaTest {
             for (session in 1..3) {
                 val req = request(listOf(zone.id)).let { it.copy(config = it.config.copy(orientation = OrientationMode.EACH_SESSION), orientationMemory = memory) }
                 val next = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
-                val again = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
+                val again = if (session == 1) RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected else next
                 val p = next.preview!!
                 if (!next.valid || next.metrics?.geometricViolations != 0) failures += "$name session $session: ${next.status}"
                 if (next.planHash != again.planHash) failures += "$name session $session: not deterministic"
@@ -361,21 +390,4 @@ class ZamboniQaTest {
     }
 
     /** The seven zones in one task at 35 cm, and at 25 cm with the robot inside Piscine: start nearest, end at the base. */
-    @Test(timeout = 3_600_000) fun sevenZonesAt35CmAndFromInsideAZone() {
-        val failures = mutableListOf<String>()
-        val piscine = zones.single { it.name.trim() == "Piscine" }
-        for ((label, req) in listOf("ALL 0.35" to request(zones.map { it.id }, 0.35),
-                "ALL robot in Piscine" to request(zones.map { it.id }, start = inside(piscine, 1.0), bordersFirst = false))) {
-            val zigzag = RoutePlanning.calculate(req, CoverageMode.LINES).selected
-            val a = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
-            val b = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
-            val f = check(label, req, zigzag, a, b, req.config.spacingM, false)
-            failures += f
-            val entry = { r: CandidateResult -> r.preview?.cuttingPaths?.first()?.first()?.distance(req.start) ?: Double.NaN }
-            val zone = { r: CandidateResult -> r.preview?.pathZoneIds?.firstOrNull() }
-            println("QA2 ZAMBONI $label: ${a.status}, entry %.2f m from the start in zone ${zone(a)} (zigzag %.2f m in zone ${zone(zigzag)}), mission %.0f s (zigzag %.0f s) $f".format(
-                entry(a), entry(zigzag), a.metrics?.durationSeconds ?: 0.0, zigzag.metrics?.durationSeconds ?: 0.0))
-        }
-        assertTrue(failures.joinToString("\n"), failures.isEmpty())
-    }
 }

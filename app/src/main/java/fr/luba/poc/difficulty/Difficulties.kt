@@ -22,7 +22,12 @@ enum class DifficultyKind(val code: String, private val labelEn: String, private
     SLIP("slip", "Wheel slip", "Patinage", 0.6),
     LIFT("lift", "Lift", "Soulèvement", 0.8),
     NO_PROGRESS("no_progress", "No progress", "Absence de progression", 0.7),
-    DEVIATION("deviation", "Route deviation", "Écart au trajet", 0.4);
+    DEVIATION("deviation", "Route deviation", "Écart au trajet", 0.4),
+    /**
+     * Contact at the limit of the task area ([fr.luba.poc.simulation.EdgeContactKind.LIMIT]): the robot drifted onto
+     * the border, nothing to avoid. Shown on the heatmap, never a presumed obstacle ([PresumedObstacles]).
+     */
+    EDGE("edge", "Border contact", "Contact en bordure", 0.3);
 
     /** Display label in the current language. */
     val label: String get() = tr(labelEn, labelFr)
@@ -287,18 +292,26 @@ object DifficultyLog {
      * refines it after the back-off and the wait for the photo, up to 25 s, sometimes more than 30 s later).
      */
     fun sameContact(a: DifficultyEvent, b: DifficultyEvent): Boolean =
-        a.kind == DifficultyKind.CONTACT && b.kind == DifficultyKind.CONTACT && a.point.distance(b.point) <= DUPLICATE_M &&
-            (abs(a.atMs - b.atMs) <= DUPLICATE_MS ||
-                (a.contactAtMs != null && b.contactAtMs != null && abs(a.contactAtMs - b.contactAtMs) <= DUPLICATE_MS))
+        a.kind == DifficultyKind.CONTACT && b.kind == DifficultyKind.CONTACT && sameEncounter(a, b)
+
+    /** Kinds of a bumper contact: recorded as [DifficultyKind.CONTACT] on receipt, re-typed [DifficultyKind.EDGE] once classified. */
+    private val CONTACT_KINDS = setOf(DifficultyKind.CONTACT, DifficultyKind.EDGE)
+
+    /** Same encounter whatever the kind: within [DUPLICATE_M], logged within [DUPLICATE_MS] or with the same contact time. */
+    fun sameEncounter(a: DifficultyEvent, b: DifficultyEvent): Boolean =
+        a.point.distance(b.point) <= DUPLICATE_M && (abs(a.atMs - b.atMs) <= DUPLICATE_MS ||
+            (a.contactAtMs != null && b.contactAtMs != null && abs(a.contactAtMs - b.contactAtMs) <= DUPLICATE_MS))
 
     /**
      * Contact already logged when the bumper code arrived (same contact within [DUPLICATE_M] and [DUPLICATE_MS]):
      * replaced by its version refined after the stop (stationary position, bypass side, note), under the same id and
-     * the same contact time (record and photo unchanged). Other kind or new contact: [add].
+     * the same contact time (record and photo unchanged). A [DifficultyKind.EDGE] event re-types that contact the same
+     * way (border contact: it leaves the presumed obstacles). Other kind or new contact: [add].
      */
     fun refine(events: List<DifficultyEvent>, event: DifficultyEvent): List<DifficultyEvent> {
-        if (event.kind != DifficultyKind.CONTACT) return add(events, event)
-        val i = events.indexOfFirst { sameContact(it, event) }
+        if (event.kind !in CONTACT_KINDS) return add(events, event)
+        // A border contact re-types the contact recorded on receipt (same id): no presumed obstacle is left behind.
+        val i = events.indexOfFirst { (it.kind == DifficultyKind.CONTACT || it.kind == event.kind) && sameEncounter(it, event) }
         if (i < 0) return add(events, event)
         val old = events[i]
         val merged = event.copy(id = old.id, atMs = old.atMs, contactAtMs = old.contactAtMs ?: event.contactAtMs, code = event.code ?: old.code,

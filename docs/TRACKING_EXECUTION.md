@@ -98,6 +98,12 @@ combine the longest delay (0.8 s) and a rotation gain off by 25 %.
 beyond 27 cm at 30 and 50 % whatever the robot, nominal robot under 30 cm at 100 %, no blocking and no pivot in the
 middle of a stripe, minimum average speed.
 
+```sh
+# Turn bench (rolling U-turns, loops and curves per manoeuvre; ≈ 1 min): -PexecutionProfileZones=U|Potager|zamboni...
+./gradlew :app:testDebugUnitTest --tests 'fr.luba.poc.simulation.TurnExecutionProfileTest' \
+  -PexecutionProfile=true -i | grep "TURNS SUMMARY"
+```
+
 ## Published point behind the centre of rotation (0.43.2)
 
 The LUBA 2 publishes a point 8 cm behind its center of rotation (`DeadReckoning.PUBLISHED_POINT_BEHIND_M`, measured
@@ -132,6 +138,132 @@ d'Eden route at 50 %, with the slope of Oct 15 (3.5 cm/s downhill at the bottom 
 | With the learned map | 3.5 cm | 18.4 cm | 18.3 cm | 56 | 1379 s |
 
 The maximum remains in the tight curves of the outer lap (see above), where the slope plays no part.
+
+## Curves: tangent reference and feed-forward (2026-10-28)
+
+Request of 2026-10-28: "improve the tracking of the computed route further, especially turns and manoeuvres". Measured
+on the robot that day (Redmi gateway, Zamboni 59°, 1,353 positions): in-place pivots precise (p90 6 cm, no time lost);
+**rolling U-turns of the Turn Optimizer at 0.07 m/s on the arc, deviation median 8.3 / p90 14.3 / max 24.9 cm (peak at
+the exit), about 8 cm over the first metre after it, 14 to 15 s per U**. Plan and diagnosis:
+[TRACKING_TURNS_AND_BORDER_CONTACTS.md](TRACKING_TURNS_AND_BORDER_CONTACTS.md#4-step-c--turns-rolling-u-and-tight-curves).
+
+What the bench showed (C0, same seeds as below): the speed in curves was capped at 0.6 × half of the rotation limit
+(30 %), the rest being kept for a proportional correction that had to carry the whole curve; the reference heading was
+the chord 25 cm ahead of the followed edge, and on 2.4 cm edges the followed edge is reached up to 15 cm before its end
+(`ARRIVAL_M`), so the reference led the tangent by about 25°: the robot cut inside the arc (≈ 15 cm), then pivoted
+3 to 6 times per U to catch up with the exit heading.
+
+| Change (`PathFollower`, mirrored in `gw_follow.cpp`) | Rule |
+|---|---|
+| Tangent reference (C1) | when the turn of the **arc vertices** (one edge shorter than 15 cm, `CURVE_ARC_EDGE_M`) over the 0.5 m window ahead, plus those skipped between the nearest edge and the followed one, exceeds `CURVE_TANGENT_DEGREES` = 3°, the reference heading is the tangent of the route at the nearest point (each vertex turn spread over 10 cm); lateral offset measured on that edge; straight stretches and the bends of polygonal paths keep the chord, bit for bit (`straight pass is unchanged`); so do the 0.5 m before the stop of a tight rounded turn and the 15 cm after any stop vertex (planned pivot) |
+| Feed-forward (C2) | steer = (error × 1.5 + v × κ) / gain, bounded by 0.8 × the rotation limit; κ = signed curvature over ±10 cm, taken 0.25 s of travel ahead (`CURVE_LEAD_S`: the robot's rotation lags its command by about that much after the compensated delay); S-bends keep their sign |
+| Curve speed (C2) | `curveSpeed` = min(0.6 × rotation limit × calibrated gain, 22 °/s) / κ (`CURVE_FF_SHARE`, `CURVE_MAX_RATE`), × 0.7 while the gain is not calibrated (kept) |
+| No pivot inside an arc (C3) | in a curve and within 15 cm of the line, in-place pivot only beyond 40° (instead of 25°) |
+| Exit of a curve (C3) | speed of the curve kept 0.3 m after its last curved vertex, then raised to the set speed over 0.5 m (`exitLimit`) |
+| One model (C4) | `TurnOptimizer.drive` uses `curveSpeed` and `exitLimit`: a manoeuvre is planned at the speed the tracking drives it |
+
+### Rolling U-turns, before → after
+
+`TurnExecutionProfileTest` (opt-in, `-PexecutionProfile=true`), nominal robot (0.6 s, 0.11 °/s·u), averages per U.
+Duration: from the first to the last curved vertex (true centre), then the first metre after it. Deviation: true
+centre to the route inside the U. The isolated U is one Turn Optimizer U between two 3 m passes 0.75 m apart, with the
+gains already calibrated (a U in the middle of a mission).
+
+| Route, speed | Duration per U | Next metre | Speed on the arc | Deviation median / p90 / max | First metre after | Pivots per U |
+|---|---|---|---|---|---|---|
+| Isolated U, 30 % | 16.0 → 10.8 s | 8.0 → 8.8 s | 0.054 → 0.114 m/s | 14.2 / 15.4 / 15.6 → 3.7 / 4.8 / 4.9 cm | 13.3 → 4.5 cm | 4 → 0 |
+| Isolated U, 63 % (planner default) | 13.2 → 8.8 s | 3.8 → 6.0 s | 0.054 → 0.125 m/s | 16.2 / 17.9 / 18.1 → 0.9 / 2.4 / 2.5 cm | 16.6 → 1.9 cm | 3 → 0 |
+| Isolated U, 100 % | 11.6 → 9.6 s | 2.4 → 5.0 s | 0.072 → 0.125 m/s | 15.8 / 18.9 / 19.1 → 1.4 / 4.7 / 5.0 cm | 17.8 → 0.4 cm | 5 → 0 |
+| Potager, Lawn friendly, 30 % (22 U) | 15.2 → 12.2 s | 8.3 → 9.4 s | 0.054 → 0.096 m/s | 15.3 / 17.2 / 19.7 → 1.0 / 2.8 / 4.1 cm | 18.5 → 4.8 cm | 3.5 → 0 |
+| Potager, Lawn friendly, 63 % | 13.5 → 9.3 s | 3.7 → 5.8 s | 0.054 → 0.124 m/s | 15.5 / 17.5 / 19.2 → 1.6 / 3.4 / 5.3 cm | 17.0 → 5.5 cm | 3.2 → 0 |
+| Potager, Lawn friendly, 100 % | 11.6 → 9.3 s | 2.4 → 4.9 s | 0.063 → 0.127 m/s | 15.1 / 17.7 / 22.1 → 2.2 / 5.0 / 13.6 cm | 21.0 → 6.1 cm | 2.6 → 0 |
+| Aire de jeux, Lawn friendly, 30 % (13 U) | 15.0 → 12.7 s | 9.4 → 10.3 s | 0.054 → 0.091 m/s | 15.2 / 17.5 / 19.5 → 0.8 / 2.5 / 4.4 cm | 18.5 → 4.0 cm | 3.8 → 0 |
+| Aire de jeux, Lawn friendly, 63 % | 13.4 → 9.6 s | 4.8 → 6.6 s | 0.054 → 0.122 m/s | 15.9 / 18.0 / 19.3 → 1.5 / 3.3 / 6.3 cm | 17.7 → 4.3 cm | 4.5 → 0 |
+| Aire de jeux, Lawn friendly, 100 % | 11.9 → 9.4 s | 3.7 → 6.1 s | 0.063 → 0.119 m/s | 15.2 / 17.9 / 20.3 → 2.6 / 4.7 / 7.1 cm | 17.6 → 5.7 cm | 3.8 → 0 |
+| Potager, Zamboni, 30 % (22 U) | 15.7 → 13.2 s | 8.2 → 9.4 s | 0.054 → 0.095 m/s | 14.2 / 16.4 / 18.5 → 1.2 / 2.8 / 4.6 cm | 16.3 → 4.3 cm | 3.0 → 0 |
+| Potager, Zamboni, 63 % | 13.5 → 9.6 s | 3.7 → 5.8 s | 0.054 → 0.131 m/s | 14.4 / 17.6 / 19.0 → 1.6 / 5.1 / 10.1 cm | 17.1 → 11.3 cm | 3.3 → 0 |
+| Potager, Zamboni, 100 % | 11.1 → 9.5 s | 2.4 → 4.9 s | 0.066 → 0.129 m/s | 14.0 / 18.1 / 21.0 → 1.8 / 4.2 / 13.6 cm | 20.0 → 6.1 cm | 2.4 → 0 |
+| Jardin d'Eden, Zamboni, 30 % (11 U) | 15.5 → 13.3 s | 8.2 → 9.1 s | 0.054 → 0.097 m/s | 14.1 / 16.8 / 19.3 → 1.3 / 2.6 / 5.4 cm | 17.8 → 6.2 cm | 3.4 → 0 |
+| Jardin d'Eden, Zamboni, 63 % | 13.8 → 9.9 s | 3.6 → 5.7 s | 0.054 → 0.121 m/s | 14.9 / 17.4 / 19.9 → 1.8 / 4.5 / 8.9 cm | 18.4 → 11.6 cm | 3.6 → 0 |
+| Jardin d'Eden, Zamboni, 100 % | 11.7 → 9.6 s | 2.4 → 4.8 s | 0.063 → 0.120 m/s | 14.4 / 17.9 / 21.7 → 2.4 / 4.6 / 9.1 cm | 20.4 → 6.0 cm | 3.0 → 0 |
+
+All four robots of `RouteExecutionRegressionTest` (delays 0.4 to 0.8 s, gains 0.09 to 0.13, heading off by 20°): no
+pivot inside a U at any speed; largest deviation inside a U 14.3 cm at 63 % (19.4 to 20.4 cm before), 15.4 cm at
+100 % (19.8 to 22.1 cm before). Curves of the outer lap and rounded borders, 63 %, nominal: p90 14.0 to 15.3 cm → 5.3 to
+5.9 cm, max 14.3 to 17.2 cm → 10.8 to 13.9 cm.
+
+Acceptance of the plan: p90 inside the U at most half of the baseline (0.13 to 0.31 of it) and max ≤ 15 cm (nominal,
+every route and speed: 13.6 cm at most); no pivot in an arc. **Duration per U ≤ 0.65 × baseline is not reached**:
+0.67 (isolated U) to 0.72 at 63 %, 0.68 to 0.86 at 30 %, 0.79 to 0.86 at 100 %; with the next metre, a U costs
+17.2 → 15.1 s at 63 % on Potager. The arc speed is set by the share of the rotation limit (0.6, the largest of the
+0.4 / 0.5 / 0.6 sweep, below) and by the 22 °/s cap; the hold after the exit costs about 2 s per U at 63 % (variants
+below). First metre after the U above 6 cm in 5 of the 15 route × speed cases (up to 11.6 cm, Zamboni at 63 %). The
+isolated U with the gains not yet calibrated (first U of a first mission: × 0.7 of the curve speed) stays at 14.4 s
+at 63 % (14.6 s before), but at 1 cm of deviation instead of 17.
+
+### Settings swept
+
+Measured during the development, before the 22 °/s cap and the arc-edge rule. Feed-forward share (exit: no hold, 0.3 m
+ramp), Potager Lawn friendly, nominal robot at 63 %, largest deviation inside a U over the four robots at 100 %:
+
+| `CURVE_FF_SHARE` | Duration per U (63 %) | p90 / max (63 %) | Max, four robots, 100 % |
+|---|---|---|---|
+| 0.4 | 14.3 s | 4.7 / 6.6 cm | 11.5 cm |
+| 0.5 | 10.9 s | 3.8 / 5.7 cm | 16.9 cm |
+| **0.6** (kept) | 8.8 s | 4.2 / 7.1 cm | 20.7 cm |
+| 0.7 (outside the plan, for reference) | 7.7 s | 4.6 / 9.0 cm | 24.3 cm |
+
+Exit of the curve at 0.6 (nominal, 63 %, U then next metre, first metre after the U, Potager / Aire de jeux): no hold
+and no ramp 7.0 + 3.5 s, 13.8 / 13.2 cm and pivots inside the U again; ramp over 0.3 m 8.8 + 3.9 s, 7.2 / 8.0 cm;
+ramp over 0.5 m 8.9 + 4.3 s, 6.6 / 9.2 cm; **hold 0.3 m then ramp 0.5 m (kept, as planned)** 9.1 + 5.7 s, 7.0 / 5.3 cm.
+Feed-forward lead 0.25 s against 0.35 s: no measurable difference (kept 0.25, the measured inertia).
+
+Rotation cap (`CURVE_MAX_RATE`, full bench at 100 %, 175 missions, before the arc-edge rule): none (32 °/s) 6 missions
+beyond 30 cm; 25 °/s 6; **22 °/s 1**; 20 °/s 3; 18 °/s 0. All interrupted missions are the robot with 0.8 s of delay and
+0.09 °/s·u (gain believed 0.108 after calibration) at the exit of a curve. The painted route of 2026-10-10
+(`TrackingPrecisionTest`) went to 28 cm at 100 % without the cap (limit 22 cm) and passes with it.
+
+Arc-edge rule (`CURVE_ARC_EDGE_M`): with every bend counted as a curve, the outlines of the map sync (chamfered corners,
+16.5 cm edges) were driven as curves and the chassis left the recording corridor (`MapSyncBenchTest`, 2 to 3 failures
+out of 4 runs); counting only arcs of edges under 10 cm, the transit links of the bench (14 cm edges) lost the curve
+tracking (6 missions out of 175 beyond 30 cm at 100 %); 15 cm keeps both (3 out of 175, `MapSyncBenchTest` 2 failures
+in 24 runs, against 1 in 10 with the former tracking: that test is not deterministic).
+
+### Whole missions (`ExecutionProfileTest`, 7 zones × 25 robots, Fast routes)
+
+| Speed | Interrupted missions (> 30 cm) | Mean maximum deviation | Worst deviation | Nominal duration | Pivots (nominal) |
+|---|---:|---:|---:|---:|---:|
+| 30 % | 0 → 0 | 0.177 → 0.114 m | 0.212 → 0.166 m | 40,385 → 40,023 s (−0.9 %) | 1,400 → 1,266 |
+| 50 % | 0 → 0 | 0.178 → 0.131 m | 0.209 → 0.223 m | 24,796 → 24,377 s (−1.7 %) | 1,429 → 1,282 |
+| 100 % | 3 → 3 | 0.209 → 0.186 m | 0.372 → 0.314 m | 15,063 → 15,016 s (−0.3 %) | 1,454 → 1,289 |
+
+The gain is in the curves of the outer lap and the rounded borders (Fast routes have no rolling U): the maximum of
+most missions was there.
+
+### The Turn Optimizer follows
+
+`TurnOptimizer.drive` now uses the same curve speed and exit (`PathFollower.curveSpeed`, `exitLimit`): at the planner
+speed (0.3 m/s, 63 %) a rolling U between passes 0.75 m apart, with 0.7 m of each pass, is planned at 12.8 s instead of
+about 19 s, against 16.8 s for the pivots. Consequences: Fast picks the U when passes are at least 0.7 m apart (spacing
+of 0.7 m or more); Lawn friendly picks the rounded loop rather than two pivots between neighbouring passes when it fits
+(loop 6 s longer, 180° less in place); the Zamboni of Aire de jeux at 0° now finds its order (8 cells, 81 m of transit
+against 104 m in Zigzag) instead of falling back to the Zigzag order. No penalty for the rolling U (plan: only if the
+field ratio exceeds 1.3 after this change, `ARC_TIME_FACTOR` not added).
+
+"4.6 s estimated" per U (open point of the plan): neither the planner's flat model (0.3 m/s and 45 °/s: 7.8 s for a U
+of 1.15 m) nor `TurnOptimizer.drive` (about 14 s of arc before, 8 to 9 s now) gives it. The only estimate of that order
+is the one the map screen shows for mowing (`MowingForecaster`: route length at the task speed, adjusted by the
+history factor, "pivots excluded"): 1.15 m at 0.3 m/s is 3.8 s, 4.6 s with a history factor of 1.2. That estimate does
+not model the curves; it is left as is because its history factor already absorbs the real duration of the turns
+(adding the curve time would count it twice), and its task speed (0.3 m/s) is not the tracking's speed setting.
+
+### Logs (C5)
+
+At the start of a route, `route_manoeuvres` lists the manoeuvres found from the edges (`RouteManoeuvres`: rolling U,
+rounded loop, curve; edge range, degrees, metres, planned duration). While it is driven, `route_curve_stats` gives for
+each U, loop or curve of 45° or more: duration, median speed between positions, largest distance to its edges,
+source `local` (Fold tracking) or `gateway` (progress of the Redmi or ESP32 gateway with the published position). No
+frame or `SimEdge` field changed. The same detection measures the bench, so the next field log compares directly.
 
 ## Limits
 

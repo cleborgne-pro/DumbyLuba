@@ -309,25 +309,30 @@ one with the best score for the chosen style:
 
 Each candidate is checked like the passes (safe surface, chassis envelope on every translation and pivot), on the
 U-turn and 0.7 m of each pass around it. Its duration follows the tracking rules (pivots at 27 °/s with a 1.5 s stop,
-speed limited by the curvature on the arcs), its **wear** is an index of the lawn torn by the turns: the degrees pivoted
+speed limited by the curvature on the arcs and held 30 cm after them, the same `PathFollower.curveSpeed` as the
+tracking: a rolling U is planned at 12.8 s against 16.8 s for the pivots at 0.3 m/s), its **wear** is an index of the lawn torn by the turns: the degrees pivoted
 in place, plus those of a rolling turn of radius R weighted by h / (h + R) (h half the chassis width: 0.42 for 0.35 m).
 A manoeuvre whose chassis comes within 5 cm of the boundary is penalized.
 
 - **Fast** (default): duration first; between neighbouring passes (25 cm) only the pivots fit, the route is the one
-  computed before.
+  computed before (a rolling U is picked only when the passes are at least 0.7 m apart).
 - **Lawn friendly**: wear first. In each cell the passes are taken one in three at 25 cm (one in two from 35 cm), so
   that two passes driven one after the other are at least 0.7 m apart, and the zigzag order is kept wherever it costs
   fewer runs and U-turns (long links refused along curved borders). The wear also weighs on the choice of orientation.
+  Where two neighbouring passes must still be joined, the rounded loop now wins over the two pivots when it fits
+  (about 6 s longer, 180° less in place), since curves are costed at the speed they are driven.
 - **Zamboni** mode: always the Lawn friendly objective, with a front-advancing order instead of one pass in three
   (below).
 
-Measured on the seven zones of the reference map (25 cm, recorded boundaries, `TurnStyleReferenceTest`): degrees
-pivoted in place on the passes 70,059° → 33,107°, wear 70,124 → 36,913, 54 rolling U-turns, same surface mowed within
-0.1 %. Driven by the tracking bench (`RollingTurnExecutionTest`, nominal robot, whole mission with its links):
-Potager 351 → 224 s pivoting in place at 30 % (302 → 203 s at 50 %), 2,757 → 2,815 s in all; Aire de jeux 782 → 721 s
-(681 → 644 s), 5,859 → 5,829 s; largest deviation 21 cm, no pivot in the middle of a pass. The tracking still pivots a
-little on some rolling U-turns (its reference heading, 25 cm ahead, turns about 20° on a 0.35 m arc). Not tried on
-the robot: the radius of 0.35 m is close to the ≈ 0.3 m it could not follow on the bench of 2026-10-10.
+Measured on the seven zones of the reference map (25 cm, recorded boundaries, `TurnStyleReferenceTest`, unchanged by the
+curve tracking of 2026-10-28): degrees pivoted in place on the passes 70,059° → 33,107°, wear 70,124 → 36,913,
+54 rolling U-turns, same surface mowed within 0.1 %. Driven by the tracking bench (`RollingTurnExecutionTest`, nominal
+robot, whole mission with its links, with the curve tracking of 2026-10-28): Potager 345 → 173 s pivoting in place at
+30 % (302 → 152 s at 50 %), 2,721 → 2,720 s in all; Aire de jeux 770 → 686 s (681 → 598 s), 5,808 → 5,742 s; largest
+deviation 15 cm, no pivot in the middle of a pass. Since the curve tracking of 2026-10-28 (tangent reference,
+feed-forward), the rolling U-turns are driven without any pivot, at 0.09 to 0.13 m/s, within 4 to 14 cm
+([TRACKING_EXECUTION.md](../TRACKING_EXECUTION.md#curves-tangent-reference-and-feed-forward-2026-10-28)).
+Measured on the robot on 2026-10-28 before that change: 0.07 m/s on the arc, 14 to 15 s per U, 25 cm at the exit.
 
 ## Zamboni (experimental)
 

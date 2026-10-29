@@ -106,7 +106,7 @@ object NavSafety {
         if (robotState != 11) return tr("Robot not ready (MODE_READY=11 expected)", "Robot non prêt (MODE_READY=11 attendu)")
         if (!fr.luba.poc.protocol.SelfCheck.nominal(selfCheck) && !(ignoreOffMapLatch && selfCheck == fr.luba.poc.protocol.CollisionLatch.VALUE))
             return fr.luba.poc.protocol.SelfCheck.refusal(selfCheck)
-        if (sensors == null || sensors and 7 != 0) return tr("Bumper health alert", "Alerte de santé bumper")
+        if (sensors == null || sensors and 7 != 0) return fr.luba.poc.protocol.BumperRest.refusal(sensors)
         if (sensors and (7 shl 9) != 0) return tr("Blades not confirmed OFF by telemetry", "Lames non confirmées OFF par la télémétrie")
         return null
     }
@@ -120,7 +120,7 @@ object NavSafety {
     ): String? {
         if (stateAgeMs == null || stateAgeMs !in 0..2000) return tr("Robot state missing or stale", "État robot absent ou périmé")
         if (battery == null || battery <= batteryFloor) return tr("Battery unknown or ≤$batteryFloor %", "Batterie inconnue ou ≤$batteryFloor %")
-        if (sensors == null || sensors and 7 != 0) return tr("Bumper health alert", "Alerte de santé bumper")
+        if (sensors == null || sensors and 7 != 0) return fr.luba.poc.protocol.BumperRest.refusal(sensors)
         val bladeBits = (sensors shr 9) and 7
         // Mowing: bits at 0 tolerated — the disc may only be driven while moving (firmware 1.30);
         // only an unrecognised raw state stops the walk. Without mowing, any active blade stays fatal.

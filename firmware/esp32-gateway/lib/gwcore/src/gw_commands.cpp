@@ -120,6 +120,8 @@ pb::Bytes Commands::errorQuery(uint64_t nowMs) {
   return envelope(MSG_CMD_TYPE_EMBED_SYS, DEV_MAINCTL, F_SYS, sys, nowMs);
 }
 
+// Navigation receiver DEV_NAVIGATION: only the validated LUBA 2 models (Luba-VS, Luba-VP) reach the autonomous docking
+// (robot.cpp refuses the tracking of a read-only model); a LUBA 1 would need DEV_MAINCTL (app Commands.navReceiverFor).
 pb::Bytes Commands::returnToDock(uint64_t nowMs) {
   pb::Bytes task;
   pb::int32Field(task, 1, 1);  // type

@@ -409,4 +409,117 @@ class PathFollowerTest {
                 Point(x, y).distance(edge.b) <= RangeArrival.ACCEPT_M + 0.02 && x <= 2.0 + 0.15)
         }
     }
+
+    /** Edges of an arc of [radius] turning [degrees] (+ left) from [start] heading [heading], one vertex every 4°. */
+    private fun arcEdges(start: Point, heading: Double, radius: Double, degrees: Double): List<SimEdge> {
+        val sign = if (degrees >= 0) 1.0 else -1.0
+        val h = Math.toRadians(heading)
+        val centre = Point(start.x - sign * radius * sin(h), start.y + sign * radius * cos(h))
+        val steps = ceil(abs(degrees) / 4.0).toInt()
+        val a0 = atan2(start.y - centre.y, start.x - centre.x)
+        return (0..steps).map { k -> val a = a0 + Math.toRadians(degrees * k / steps); Point(centre.x + radius * cos(a), centre.y + radius * sin(a)) }
+            .zipWithNext().map { (a, b) -> SimEdge(a, b, true) }
+    }
+
+    /**
+     * Turn tracking (step C of docs/TRACKING_TURNS_AND_BORDER_CONTACTS.md): on a 0.35 m arc, a robot on the line and
+     * along the tangent gets the rotation of the arc at its speed, without a heading error to correct. The 0.25 m chord
+     * led the tangent by about 20°: the robot settled inside the arc and overshot at its exit (rolling U-turns of
+     * 2026-10-28, 8 cm median, 25 cm at the exit).
+     */
+    @Test fun `curve feed-forward keeps the tangent reference`() {
+        val edges = listOf(SimEdge(Point(-2.0, 0.0), Point(0.0, 0.0), true)) + arcEdges(Point(0.0, 0.0), 0.0, 0.35, 180.0) +
+            listOf(SimEdge(Point(0.0, 0.7), Point(-2.0, 0.7), true))
+        val follower = PathFollower(edges, 0, edges.size, 0.15)
+        // A quarter of the way round the half circle, on the circle, heading along its tangent (45°).
+        val p = Point(0.35 * sin(Math.toRadians(45.0)), 0.35 - 0.35 * cos(Math.toRadians(45.0)))
+        val dpu = DeadReckoning.DEFAULT_DEGREES_PER_UNIT; val mpu = DeadReckoning.DEFAULT_METERS_PER_UNIT
+        val c = follower.command(p, 45.0, 315, PathFollower.angularLimit(63), dpu, mpu)
+        assertTrue("$c", c.linear > 0)
+        assertFalse(follower.pivoting)
+        // Rotation commanded = the arc's at the commanded speed (4° every 2.44 cm), within one 4° vertex of tangent error.
+        val kappa = 4.0 / (2 * 0.35 * sin(Math.toRadians(2.0)))
+        val feedForward = c.linear * mpu * kappa / dpu
+        assertEquals(feedForward, c.angular.toDouble(), 4.0 * PathFollower.STEER_GAIN / dpu)
+        // Speed of the arc: [PathFollower.curveSpeed] with the share of the rotation limit given to the curve.
+        val expected = PathFollower.curveSpeed(kappa, PathFollower.angularLimit(63), dpu) / mpu
+        assertEquals(expected, c.linear.toDouble(), 0.12 * expected)
+        // Much faster than the former governor, 0.6 × half of the rotation limit.
+        assertTrue(c.linear * mpu > 1.5 * PathFollower.angularLimit(63) / 2 * dpu * 0.6 / kappa)
+    }
+
+    /** S-bend: the feed-forward follows the sign of the bend under the robot, it does not cancel over the window. */
+    @Test fun `s-bend does not cancel the feed-forward`() {
+        val left = arcEdges(Point(0.0, 0.0), 0.0, 0.5, 90.0)
+        val right = arcEdges(left.last().b, 90.0, 0.5, -90.0)
+        val edges = listOf(SimEdge(Point(-2.0, 0.0), Point(0.0, 0.0), true)) + left + right +
+            listOf(SimEdge(right.last().b, Point(right.last().b.x + 2.0, right.last().b.y), true))
+        fun at(onLeft: Boolean, degrees: Double): PathFollower.Command {
+            val follower = PathFollower(edges, 0, edges.size, 0.15)
+            val (p, heading) = if (onLeft) Point(0.5 * sin(Math.toRadians(degrees)), 0.5 - 0.5 * cos(Math.toRadians(degrees))) to degrees
+                else Point(1.0 - 0.5 * cos(Math.toRadians(degrees)), 0.5 + 0.5 * sin(Math.toRadians(degrees))) to 90.0 - degrees
+            return follower.command(p, heading, 315, PathFollower.angularLimit(63))
+        }
+        // 10° before the inflection: still turning left; 10° after it: turning right.
+        val before = at(true, 80.0); val after = at(false, 10.0)
+        assertTrue("$before", before.linear > 0 && before.angular > 0)
+        assertTrue("$after", after.linear > 0 && after.angular < 0)
+    }
+
+    /** Straight pass: the command is the one of the proportional tracking, bit for bit (chord reference, ±angular / 2). */
+    @Test fun `straight pass is unchanged`() {
+        val edges = listOf(SimEdge(Point(0.0, 0.0), Point(10.0, 0.0), true), SimEdge(Point(10.0, 0.0), Point(10.0, 10.0), true))
+        val dpu = DeadReckoning.DEFAULT_DEGREES_PER_UNIT; val mpu = DeadReckoning.DEFAULT_METERS_PER_UNIT
+        for ((lateralM, heading) in listOf(0.0 to 0.0, 0.05 to -3.0, -0.12 to 7.0, 0.2 to 12.0, -0.02 to -20.0)) {
+            val follower = PathFollower(edges, 0, edges.size, 0.15)
+            val c = follower.command(Point(3.0, lateralM), heading, 315, 351, dpu, mpu)
+            val error = -Math.toDegrees(atan(lateralM / max(PathFollower.CONVERGE_M, 315 * mpu * PathFollower.CONVERGE_S))) - heading
+            val forward = (315.0 * cos(Math.toRadians(error)).coerceAtLeast(0.0)).roundToInt().coerceIn(PathFollower.MIN_LINEAR, 315)
+            assertEquals("lateral $lateralM, heading $heading", forward to (error * PathFollower.STEER_GAIN / dpu).roundToInt().coerceIn(-175, 175),
+                c.linear to c.angular)
+        }
+    }
+
+    /**
+     * Parity vectors of the curve tracking, the same in the gateway firmware (test_follow,
+     * `test_follower_curve_parity_vectors`): a rolling U of 0.35 m, an S-bend of 0.5 m right after it, then the exit
+     * onto a straight line, one follower fed with poses in order. Commands to within one unit (rounding of the
+     * trigonometry).
+     */
+    @Test fun `curve commands match the gateway parity vectors`() {
+        val left = arcEdges(Point(0.0, 0.0), 0.0, 0.35, 180.0)
+        val right = arcEdges(left.last().b, 180.0, 0.5, -90.0)
+        val edges = listOf(SimEdge(Point(-2.0, 0.0), Point(0.0, 0.0), true)) + left + right +
+            listOf(SimEdge(right.last().b, Point(right.last().b.x, right.last().b.y + 2.0), true))
+        assertEquals(70, edges.size)
+        val follower = PathFollower(edges, 0, edges.size, 0.12)
+        fun onLeft(deg: Double, r: Double) = Point(r * sin(Math.toRadians(deg)), 0.35 - r * cos(Math.toRadians(deg)))
+        fun onRight(deg: Double) = Point(left.last().b.x + 0.5 * cos(Math.toRadians(-90.0 - deg)), left.last().b.y + 0.5 + 0.5 * sin(Math.toRadians(-90.0 - deg)))
+        val end = right.last().b
+        // Pose, heading, deviation, rotation calibrated; expected linear, angular, followed edge.
+        data class Case(val p: Point, val heading: Double, val deviation: Double, val calibrated: Boolean, val linear: Int, val angular: Int, val index: Int)
+        val cases = listOf(
+            Case(Point(-0.5, 0.02), 2.0, 0.0, true, 314, -47, 0),
+            Case(Point(-0.1, -0.03), 0.0, 0.0, true, 131, 67, 2),
+            Case(onLeft(10.0, 0.33), 13.0, 0.0, true, 131, 152, 9),
+            Case(onLeft(45.0, 0.33), 48.0, 0.0, true, 131, 141, 18),
+            Case(onLeft(90.0, 0.39), 93.0, 0.0, true, 125, 189, 29),
+            Case(onLeft(135.0, 0.33), 138.0, 0.13, true, 124, 152, 41),
+            Case(onLeft(170.0, 0.33), 173.0, 0.0, false, 87, 7, 48),
+            Case(onRight(5.0), 175.0, 0.0, true, 131, -122, 51),
+            Case(onRight(45.0), 135.0, 0.0, true, 166, -186, 61),
+            Case(onRight(85.0), 95.0, 0.0, true, 178, -83, 69),
+            Case(Point(end.x + 0.01, end.y + 0.3), 92.0, 0.0, true, 185, -18, 69),
+            Case(Point(end.x + 0.01, end.y + 0.6), 92.0, 0.0, true, 263, -18, 69),
+            Case(Point(end.x + 0.01, end.y + 1.2), 92.0, 0.0, true, 315, -18, 69))
+        for (c in cases) {
+            val command = follower.command(c.p, c.heading, 315, 351, 0.11, 0.00105, 80, c.deviation, c.calibrated)
+            assertEquals("$c: $command", c.linear.toDouble(), command.linear.toDouble(), 1.0)
+            assertEquals("$c: $command", c.angular.toDouble(), command.angular.toDouble(), 1.0)
+            assertEquals("$c", c.index, follower.index)
+        }
+        assertEquals(0.134146, PathFollower.curveSpeed(164.0, 351, 0.12), 1e-6)
+        assertEquals(0.093902, PathFollower.curveSpeed(164.0, 450, 0.12, rotationCalibrated = false), 1e-6)
+        assertEquals(0.21, PathFollower.exitLimit(0.55, 0.12, 0.3), 1e-9)
+    }
 }

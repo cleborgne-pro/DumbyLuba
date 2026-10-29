@@ -6,19 +6,21 @@ import fr.luba.poc.i18n.tr
  * video command. The only navigation exceptions: cancelling the native return (action 12, a stop command,
  * always allowed) and the native return to base (action 5), accepted only on the user's explicit choice in
  * "Charging station" ([nativeReturn]). Native mowing, resume, task pause/cancel and leaving the base stay refused.
+ * Every navigation message must be addressed to [navReceiver], the navigation receiver of the robot model
+ * ([fr.luba.poc.protocol.Commands.navReceiverFor]: `DEV_MAINCTL` on a LUBA 1, `DEV_NAVIGATION` otherwise).
  */
 object CloudReadOnly {
     const val NATIVE_RETURN_ACTION = 5
     const val CANCEL_RETURN_ACTION = 12
-    fun requireAllowed(bytes:ByteArray, nativeReturn:Boolean=false) {
+    fun requireAllowed(bytes:ByteArray, nativeReturn:Boolean=false, navReceiver:MsgDevice=MsgDevice.DEV_NAVIGATION) {
         val m=LubaMsg.parseFrom(bytes)
         val allowed=when(m.msgtype) {
             MsgCmdType.MSG_CMD_TYPE_ESP -> m.hasNet() && m.net.allFields.size==1 && m.net.todevBleSync==3
-            MsgCmdType.MSG_CMD_TYPE_NAV -> m.hasNav() && m.nav.allFields.size==1 && when {
+            MsgCmdType.MSG_CMD_TYPE_NAV -> m.hasNav() && m.rcver==navReceiver && m.nav.allFields.size==1 && when {
                 m.nav.hasTodevGethash() -> m.nav.todevGethash.let { it.pver==1 && it.subCmd in listOf(0,2) }
                 m.nav.hasTodevGetCommondata() -> m.nav.todevGetCommondata.let { it.pver==1 && it.action==8 && it.subCmd in listOf(1,2) }
                 m.nav.hasTodevSvgMsg() -> m.nav.todevSvgMsg.let { it.pver==1 && it.subCmd==2 && !it.hasSvgMessage() }
-                m.nav.hasTodevTaskctrl() -> m.rcver==MsgDevice.DEV_NAVIGATION && m.nav.todevTaskctrl.let { it.allFields.size<=3 && it.type==1 && it.result==0 &&
+                m.nav.hasTodevTaskctrl() -> m.nav.todevTaskctrl.let { it.allFields.size<=3 && it.type==1 && it.result==0 &&
                     (it.action==CANCEL_RETURN_ACTION || (nativeReturn && it.action==NATIVE_RETURN_ACTION)) }
                 else -> false
             }

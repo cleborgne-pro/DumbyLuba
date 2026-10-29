@@ -44,6 +44,9 @@ class ObstacleEncounterSimulationTest {
             sim.contacts.forEach { assertNotNull(it.repair?.backOff) }
             // Actual mowing pilot: the robot stays on the line (published deviation below 20 cm, stop beyond 30).
             assertTrue("$shape $size: deviation %.2f m".format(sim.worstDeviationM), sim.worstDeviationM < 0.2)
+            // Mid-zone object: obstacle path unchanged, within the detour budget, never a border contact.
+            assertTrue(sim.contacts.all { it.edge?.kind == EdgeContactKind.OBJECT })
+            assertTrue(sim.detourRefusals.toString(), sim.detourRefusals.isEmpty())
         }
     }
 
@@ -79,6 +82,44 @@ class ObstacleEncounterSimulationTest {
         sim.finish()
         assertEquals(EncounterPhase.DONE, sim.phase)
         assertTrue(sim.contacts.isEmpty())
+    }
+
+    /**
+     * Pivot slide towards the border (2026-10-19 at 14:50: 24 cm slide during a pivot at the end of a pass, then
+     * "obstacle" and bypass): wall along the north border, the robot slides 20 cm towards it while pivoting at the end
+     * of a pass and its front corner hits it. Border contact: back-off, link to the same route, no obstacle, no detour.
+     */
+    @Test fun driftingRobotBumpingTheBorderBacksOffAndResumesWithoutDetour() {
+        val (map, _) = square()
+        val routes = RoutePlanning.navigation(map, RobotEnvelope.LUBA2.halfWidthM + 0.05, emptyList(), recordedBoundary = true)
+        val wall = ProbeObject(ProbeShape.SQUARE, Point(7.0, 13.5), 3.0)
+        val edges = listOf(SimEdge(Point(7.0, 6.0), Point(7.0, 11.4), true), SimEdge(Point(7.0, 11.4), Point(7.6, 11.4), false),
+            SimEdge(Point(7.6, 11.4), Point(7.6, 6.0), true))
+        // Slope towards the border during the first pivot only (the robot slides about 20 cm; once it has backed off, the ground holds).
+        var top = 0.0
+        val slope: (Point) -> Point = { p -> top = maxOf(top, p.y); if (top >= 11.62 || p.y < top - 0.1) Point(0.0, 0.0) else Point(0.0, 0.12) }
+        val sim = ObstacleEncounterSimulation(routes, routes, edges, wall, listOf(map.shapes[0].points),
+            dynamics = SimulatedRobot.Params(pivotSlide = slope))
+        sim.finish()
+        println("SIM border contact: ${sim.phase} · ${sim.contacts.size} contact(s) · deviation %.2f m · ${sim.log.joinToString(" | ")}".format(sim.worstDeviationM))
+        assertEquals(sim.message, EncounterPhase.DONE, sim.phase)
+        assertEquals(1, sim.contacts.size)
+        val contact = sim.contacts.single()
+        assertEquals(contact.edge.toString(), EdgeContactKind.LIMIT, contact.edge?.kind)
+        assertEquals(1, sim.edgeContacts)
+        assertTrue("no obstacle", sim.discovered.isEmpty())
+        assertNull("no repair, no detour", contact.repair)
+        val resume = requireNotNull(contact.resume)
+        assertTrue("back-off ≥ 30 cm", requireNotNull(resume.backOff).distance(contact.pose.position) >= 0.3 - 1e-6)
+        assertTrue("skipped %.2f m".format(resume.skippedCuttingMeters), resume.skippedCuttingMeters <= 1.0)
+        assertTrue("link %.2f m".format(resume.rejoinMeters), resume.rejoinMeters <= 2.0)
+        assertEquals(edges.last().b, sim.edges.last().b)
+        // The slide itself is the deviation (20 cm); the 30 cm route deviation stop is never reached.
+        assertTrue("deviation %.2f m".format(sim.worstDeviationM), sim.worstDeviationM < 0.3)
+        // Same pass without the slide: no contact.
+        val calm = ObstacleEncounterSimulation(routes, routes, edges, wall, listOf(map.shapes[0].points))
+        calm.finish()
+        assertTrue(calm.contacts.isEmpty())
     }
 
     @Test(timeout = 600000) fun referenceZoneRouteAdaptsAroundAPlacedObject() {

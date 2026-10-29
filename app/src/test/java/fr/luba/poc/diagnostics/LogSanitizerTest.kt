@@ -96,4 +96,32 @@ class LogSanitizerTest {
         assertTrue(sanitizer.counts.isEmpty())
         assertTrue(JSONObject(sanitizer.report(3)).getBoolean("anonymized"))
     }
+
+    @Test fun mammotionAccountNumberIsRemovedFromDecodedMessagesJsonAndText() {
+        // Fictitious account number, echoed by the robot in `subtype` of every reply (DumbyLuba#3).
+        val account = 87654321
+        val reply = LubaMsg.newBuilder().setSubtype(account).setSeqs(12)
+            .setNet(DevNet.newBuilder().setToappNetworkinfoRsp(GetNetworkInfoRsp.newBuilder().setReqIds(1))).build()
+        val sanitizer = LogSanitizer()
+        val decodedLine = sanitizer.line(line("protobuf_decoded", "MSG_CMD_TYPE_ESP seq=12", mapOf("decoded" to reply.toString())))
+        assertFalse(decodedLine, decodedLine.contains("$account"))
+        val decoded = JSONObject(decodedLine).getJSONObject("fields").getString("decoded")
+        assertTrue(decoded, decoded.contains("subtype: \"‹removed›\""))
+        assertTrue(decoded, decoded.contains("seqs: 12"))
+        // JSON field, number or string, at any depth; free text.
+        val json = sanitizer.line(line("cloud_status", "userAccount=$account, subtype: $account", mapOf(
+            "userAccount" to account, "session" to mapOf("user_account" to "$account", "userInformation" to mapOf("userAccount" to "$account")),
+            "subtype" to account, "note" to "{\"user_account\":\"$account\"}", "seq" to 12)))
+        assertFalse(json, json.contains("$account"))
+        val fields = JSONObject(json).getJSONObject("fields")
+        assertEquals("‹removed›", fields.getString("userAccount"))
+        assertEquals("‹removed›", fields.getString("subtype"))
+        assertEquals(12, fields.getInt("seq"))
+        // Sensor probe report: last perception message dumped as protobuf text.
+        val report = sanitizer.document(JSONObject().put("lastPerception", reply.toString()).toString())
+        assertFalse(report, report.contains("$account"))
+        assertTrue(sanitizer.counts.getValue("account number") >= 7)
+        // Other numbers are left alone.
+        assertEquals("firmware 1.10.5.246 seq=12", sanitizer.text("firmware 1.10.5.246 seq=12"))
+    }
 }

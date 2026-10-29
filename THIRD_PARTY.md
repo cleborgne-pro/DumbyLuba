@@ -21,7 +21,7 @@ Mammotion-HA and Mammo are inspected references; none of their files are incorpo
 ## ESP32 firmware and enclosure viewer
 
 - NimBLE-Arduino 1.4.3 (`h2zero/NimBLE-Arduino`, resolved by PlatformIO, Apache 2.0): Bluetooth LE stack of the ESP32 gateway and diagnostics firmware (`firmware/*/platformio.ini`).
-- three.js 0.169.0 (MIT): loaded from the jsDelivr CDN by the enclosure's 3D viewer (`hardware/luba-esp32-qi/viewer/`), not incorporated in the repository.
+- three.js 0.169.0 (MIT): loaded from the jsDelivr CDN by the enclosure's 3D viewer (`hardware/luba-esp32-dock/viewer/`), not incorporated in the repository.
 
 ## Robot camera (Agora)
 

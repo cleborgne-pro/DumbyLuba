@@ -10,9 +10,25 @@ import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
 import kotlin.math.atan2
 
-/** Real map kept: each configuration runs on each of the seven zones. */
+/** Real map kept: each configuration runs on each of the seven zones (Zigzag, Checkerboard, Optimized, full loop, signal grid). */
 @RunWith(Parameterized::class)
-class ReferenceMapPlannerTest(private val zoneName: String, private val zone: MapShape, private val config: Settings) {
+class ReferenceMapPlannerTest(zoneName: String, zone: MapShape, config: ReferenceMapPlannerCases.Settings) : ReferenceMapPlannerCases(zoneName, zone, config) {
+    companion object {
+        @JvmStatic @Parameterized.Parameters(name="{index}: {0} — {2}")
+        fun cases() = ReferenceMapPlannerCases.cases(CoverageMode.entries.toSet() - ReferenceMapPlannerCases.ZAMBONI_SPIRAL)
+    }
+}
+
+/** Same check for the Zamboni and Spiral modes: a class of its own, so that the two test processes share the sweep. */
+@RunWith(Parameterized::class)
+class ReferenceMapPlannerZamboniSpiralTest(zoneName: String, zone: MapShape, config: ReferenceMapPlannerCases.Settings) : ReferenceMapPlannerCases(zoneName, zone, config) {
+    companion object {
+        @JvmStatic @Parameterized.Parameters(name="{index}: {0} — {2}")
+        fun cases() = ReferenceMapPlannerCases.cases(ReferenceMapPlannerCases.ZAMBONI_SPIRAL)
+    }
+}
+
+abstract class ReferenceMapPlannerCases(private val zoneName: String, private val zone: MapShape, private val config: Settings) {
     /** [angle]: single pass direction (manual orientation), [phase]: row phase (shifted rows of "Change every session"). */
     data class Settings(val spacing: Double, val mode: CoverageMode, val margin: Double = 0.6,
         val outer: Int = 1, val noGo: Int = 1, val borders: Boolean = true, val angle: Int? = null, val phase: Double? = null)
@@ -93,7 +109,7 @@ class ReferenceMapPlannerTest(private val zoneName: String, private val zone: Ma
 
     companion object {
         private val shapes: List<MapShape> = run {
-            val json = JSONObject(requireNotNull(ReferenceMapPlannerTest::class.java
+            val json = JSONObject(requireNotNull(ReferenceMapPlannerCases::class.java
                 .getResourceAsStream("/planner-reference-map.json")).bufferedReader().use { it.readText() })
             val array = json.getJSONArray("shapes")
             (0 until array.length()).map { i ->
@@ -106,13 +122,16 @@ class ReferenceMapPlannerTest(private val zoneName: String, private val zone: Ma
                     },shape.getString("name"))
             }
         }
-        @JvmStatic @Parameterized.Parameters(name="{index}: {0} — {2}")
-        fun cases(): List<Array<Any>> {
+        val ZAMBONI_SPIRAL = setOf(CoverageMode.ZAMBONI, CoverageMode.SPIRAL)
+
+        /** Cases of the [modes]; the border and no-go passes cross every spacing only at their extremes (1/1 and 4/4),
+         * the two mixed ones (2/4 and 4/2) at 25 cm: they cost a third of the sweep at 5 cm without finding more. */
+        fun cases(modes: Set<CoverageMode>): List<Array<Any>> {
             val zones = shapes.filter { it.kind == ShapeKind.ZONE }
             check(zones.size == 7)
             val settings = CoverageMode.entries.filter { !it.isSurvey }.flatMap { mode ->
                 listOf(0.05,0.25,0.35).flatMap { spacing ->
-                    listOf(1 to 1,2 to 4,4 to 2,4 to 4).map { (outer,noGo) ->
+                    (if (spacing == 0.25) listOf(1 to 1,2 to 4,4 to 2,4 to 4) else listOf(1 to 1,4 to 4)).map { (outer,noGo) ->
                         Settings(spacing,mode,outer=outer,noGo=noGo)
                     }
                 } + listOf(Settings(0.25,mode,margin=0.3),Settings(0.25,mode,margin=1.0),
@@ -129,7 +148,8 @@ class ReferenceMapPlannerTest(private val zoneName: String, private val zone: Ma
             val gridSettings = listOf(1.0,3.0,8.0).flatMap { spacing ->
                 listOf(0.3,0.6,1.0).map { margin -> Settings(spacing,CoverageMode.SURVEY_GRID,margin,outer=4,noGo=4,borders=false) }
             }
-            return zones.flatMap { zone -> (settings+orientationSettings+tourSettings+gridSettings).map { arrayOf(zone.name,zone,it) } }
+            return zones.flatMap { zone -> (settings+orientationSettings+tourSettings+gridSettings).filter { it.mode in modes }
+                .map { arrayOf(zone.name,zone,it) } }
         }
     }
 }

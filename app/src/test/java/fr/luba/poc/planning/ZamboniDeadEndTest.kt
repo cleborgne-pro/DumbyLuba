@@ -29,7 +29,9 @@ class ZamboniDeadEndTest {
         navigation = PlanningNavigation(emptyList(), base))
 
     @Test(timeout = 600_000) fun aDeadEndIsOrderedLikeZigzagAndWarned() {
-        for (angle in listOf(0, 115, 155)) {
+        // 0° no longer leads to a dead end since the U-turns are costed at the speed the tracking drives them (turn
+        // tracking, step C): the Zamboni order is found there (8 cells, 81 m of transit against 104 m in Zigzag).
+        for (angle in listOf(115, 155)) {
             val zigzag = RoutePlanning.calculate(request(angle), CoverageMode.LINES).selected
             assertTrue("zigzag $angle°: ${zigzag.diagnostics}", zigzag.valid)
             val zamboni = RoutePlanning.calculate(request(angle), CoverageMode.ZAMBONI)
