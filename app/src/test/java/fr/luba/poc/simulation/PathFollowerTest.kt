@@ -1,10 +1,10 @@
 package fr.luba.poc.simulation
 
 import fr.luba.poc.map.*
+import kotlin.math.*
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.*
 
 class PathFollowerTest {
     private fun arc(radius: Double, steps: Int, cutting: Boolean = true): List<SimEdge> =

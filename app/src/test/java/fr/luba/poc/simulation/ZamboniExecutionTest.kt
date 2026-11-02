@@ -11,7 +11,7 @@ import org.junit.Test
  * blockage or a pivot in the middle of a pass. Printed: mission metrics of the plan and execution at 30 and 50 %.
  */
 class ZamboniExecutionTest {
-    @Test(timeout = 900000) fun `zamboni routes are followed without exceeding the deviation limits`() {
+    @Test(timeout = 600000) fun `zamboni routes are followed without exceeding the deviation limits`() {
         val (map, base) = ReferenceRoutes.referenceMap()
         val failures = mutableListOf<String>()
         for (name in listOf("Potager", "Jardin d’Eden")) {

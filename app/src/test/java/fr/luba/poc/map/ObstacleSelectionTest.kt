@@ -33,10 +33,42 @@ class ObstacleSelectionTest {
         assertEquals("pole", (onPole as MapPick.Obstacle).obstacle.id)
     }
 
-    @Test fun presumedCircleOpensItsContact() {
+    @Test fun presumedCircleOpensThePresumedObstacle() {
         val presumed = LocalObstacle("presume-c", ObstacleKind.OTHER, 3.1, 2.0, radiusM = 0.5, marginM = 0.3)
         val hit = ObstacleSelection.pick(Point(3.7, 2.3), 200.0, listOf(contact), listOf(presumed), emptyList(), encountersVisible = true)
-        assertEquals("c", (hit as MapPick.Encounter).event.id)
+        assertEquals("presume-c", (hit as MapPick.Presumed).obstacle.id)
+        // The contact dot itself still opens the contact (photo, details).
+        val onContact = ObstacleSelection.pick(Point(3.0, 2.0), 200.0, listOf(contact), listOf(presumed), emptyList(), encountersVisible = true)
+        assertEquals("c", (onContact as MapPick.Encounter).event.id)
+    }
+
+    @Test fun presumedObstaclesStaySelectableWithTheLayersHiddenWhenRoutesAvoidThem() {
+        // 2026-10-31: presumed obstacles shown in the mowing preview were missing from the map (Obstacles layer off).
+        val presumed = LocalObstacle("presume-c", ObstacleKind.OTHER, 3.1, 2.0, radiusM = 0.5, marginM = 0.3)
+        val avoided = DifficultyUi(events = listOf(contact), presumed = listOf(presumed), avoidPresumed = true)
+        assertTrue(MapExtraLayers.presumedShown(avoided, emptySet()))
+        assertFalse(MapExtraLayers.presumedShown(avoided.copy(avoidPresumed = false), emptySet()))
+        assertTrue(MapExtraLayers.presumedShown(avoided.copy(avoidPresumed = false), setOf(MapExtraLayer.DIFFICULTIES)))
+        val hit = ObstacleSelection.pick(Point(3.5, 2.0), 40.0, listOf(contact), listOf(presumed), emptyList(),
+            encountersVisible = false, presumedVisible = true)
+        assertEquals("presume-c", (hit as MapPick.Presumed).obstacle.id)
+        assertNull(ObstacleSelection.pick(Point(3.5, 2.0), 40.0, listOf(contact), listOf(presumed), emptyList(),
+            encountersVisible = false, presumedVisible = false))
+    }
+
+    @Test fun presumedObstacleIsSavedAtItsCenterWithTheChosenSize() {
+        val presumed = LocalObstacle("presume-c", ObstacleKind.OTHER, 3.2, 2.1, radiusM = 0.45, marginM = 0.3)
+        val saved = ObstacleSelection.fromPresumed(presumed, ObstacleKind.TREE, 0.4, 0.62, "id", 5L, "31/10/2026 10:00")
+        assertEquals("id", saved.id)
+        assertEquals(ObstacleKind.TREE, saved.kind)
+        assertEquals(3.2, saved.x, 1e-9)
+        assertEquals(2.1, saved.y, 1e-9)
+        assertEquals(0.4, saved.radiusM, 1e-9)
+        assertEquals(0.6, saved.marginM, 1e-9)
+        assertEquals("Obstacle rencontré le 31/10/2026 10:00", saved.label)
+        // Saved, it hides the presumed obstacle made by the same contacts.
+        val cluster = fr.luba.poc.difficulty.PresumedObstacles.Cluster(Point(3.2, 2.1), listOf(contact), 0.45)
+        assertTrue(fr.luba.poc.difficulty.PresumedObstacles.covers(saved, cluster))
     }
 
     @Test fun contactIsRegisteredWithTheChosenExclusionSize() {
@@ -73,5 +105,19 @@ class ObstacleSelectionTest {
             MapExtraLayers.close()
             assertNull(MapExtraLayers.openedObstacle.value)
         } finally { MapExtraLayers.latestObstacles = emptyList() }
+    }
+
+    @Test fun tapOnAPresumedObstacleOpensItsSheet() {
+        val presumed = LocalObstacle("presume-c", ObstacleKind.OTHER, 3.1, 2.0, radiusM = 0.5, marginM = 0.3)
+        MapExtraLayers.close()
+        MapExtraLayers.latest = DifficultyUi(events = listOf(contact), presumed = listOf(presumed))
+        try {
+            assertTrue(MapExtraLayers.tap(Point(3.6, 2.0), scale = 40.0))
+            assertEquals("presume-c", MapExtraLayers.openedPresumed.value)
+            assertNull(MapExtraLayers.openedEncounter.value)
+            assertNull(MapExtraLayers.openedObstacle.value)
+            MapExtraLayers.openObstacle("pole")
+            assertNull(MapExtraLayers.openedPresumed.value)
+        } finally { MapExtraLayers.close(); MapExtraLayers.latest = DifficultyUi() }
     }
 }

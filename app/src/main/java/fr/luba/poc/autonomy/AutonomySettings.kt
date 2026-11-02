@@ -1,6 +1,7 @@
 package fr.luba.poc.autonomy
 
 import android.content.Context
+import androidx.core.content.edit
 
 /** Pilot setting: hand routes over to the gateway when it can follow them (default), or follow them here frame by frame. */
 object AutonomySettings {
@@ -10,6 +11,6 @@ object AutonomySettings {
     fun enabled(context: Context): Boolean = context.getSharedPreferences(PREFS, 0).getBoolean(KEY, true)
 
     fun set(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, 0).edit().putBoolean(KEY, enabled).apply()
+        context.getSharedPreferences(PREFS, 0).edit { putBoolean(KEY, enabled) }
     }
 }

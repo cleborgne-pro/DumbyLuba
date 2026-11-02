@@ -4,9 +4,9 @@ import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleDisc
 import fr.luba.poc.obstacles.ObstacleKind
 import fr.luba.poc.obstacles.RobotEnvelope
+import kotlin.math.hypot
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.hypot
 
 class ObstaclePlannerTest {
     private val zone = listOf(Point(0.0, 0.0), Point(16.0, 0.0), Point(16.0, 11.0), Point(0.0, 11.0))

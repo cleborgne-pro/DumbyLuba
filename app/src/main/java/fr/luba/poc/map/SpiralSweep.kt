@@ -1,8 +1,11 @@
 package fr.luba.poc.map
 
+import fr.luba.poc.i18n.tr
+import kotlin.math.*
 import org.locationtech.jts.algorithm.MinimumDiameter
 import org.locationtech.jts.algorithm.Orientation
 import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.LineString
 import org.locationtech.jts.geom.Polygon
@@ -12,9 +15,6 @@ import org.locationtech.jts.operation.buffer.BufferOp
 import org.locationtech.jts.operation.buffer.BufferParameters
 import org.locationtech.jts.operation.distance.DistanceOp
 import org.locationtech.jts.simplify.DouglasPeuckerSimplifier
-import org.locationtech.jts.geom.Geometry as JtsGeometry
-import kotlin.math.*
-import fr.luba.poc.i18n.tr
 
 /**
  * Direction of the Spiral mode ([CoverageMode.SPIRAL]): every chain driven from the edge inwards (as [SpiralSweep] builds
@@ -127,9 +127,10 @@ internal object SpiralSweep {
             } catch (e: TopologyException) { return@flatMap listOf(cell) }
             val refills = polygons(region).map { bestFill(it, spacing, valid) }
 
-            if (refills.isEmpty() || refills.any { it == null || it.lost > 1e-6 }) return@flatMap listOf(cell)
-            val cost = refills.sumOf { it!!.cost } + (refills.size - 1) * MixedSweep.SWITCH_COST_M
-            if (cost < MixedSweep.cost(cell) - 1e-9) refills.flatMap { it!!.cells } else listOf(cell)
+            val fills = refills.filterNotNull()
+            if (fills.isEmpty() || fills.size < refills.size || fills.any { it.lost > 1e-6 }) return@flatMap listOf(cell)
+            val cost = fills.sumOf { it.cost } + (fills.size - 1) * MixedSweep.SWITCH_COST_M
+            if (cost < MixedSweep.cost(cell) - 1e-9) fills.flatMap { it.cells } else listOf(cell)
         }
     }
 
@@ -483,4 +484,3 @@ internal object SpiralSweep {
         return polygons(merged).filter { it.area >= MIN_POCKET_M2 }
     }
 }
-

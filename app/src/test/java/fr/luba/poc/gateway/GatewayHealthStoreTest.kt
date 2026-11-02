@@ -52,4 +52,18 @@ class GatewayHealthStoreTest {
         assertEquals("", GatewayHealthStore.wifiHint(-128, 0))
         assertTrue(GatewayHealthStore.wifiHint(-70, 0).isNotEmpty())
     }
+
+    /** Fold test of 2026-11-02: the ESP32 got −70 dBm where the robot got −56 dBm: its antenna, not the distance. */
+    @Test fun `weak gateway Wi-Fi where the robot receives well points to the gateway antenna`() {
+        val far = GatewayHealthStore.wifiHint(-80, 0, robotDbm = -75)
+        assertTrue(far, far.contains("rapprocher le robot du point d'accès"))
+        val antenna = GatewayHealthStore.wifiHint(-70, 0, robotDbm = -56)
+        assertTrue(antenna, antenna.contains("le robot capte -56 dBm") && antenna.contains("antenne de la passerelle"))
+        GatewayHealthStore.update(GatewayHealth(wifiRssiDbm = -72), t0)
+        GatewayHealthStore.robotWifi(-58, t0 + 10_000)
+        assertTrue(GatewayHealthStore.weakWifiHint(t0 + 20_000).contains("antenne"))
+        // Robot level read far from the gateway's (another place): the usual advice.
+        GatewayHealthStore.robotWifi(-58, t0 + 120_000)
+        assertTrue(GatewayHealthStore.weakWifiHint(t0 + 130_000).contains("point d'accès"))
+    }
 }

@@ -2,6 +2,8 @@ package fr.luba.poc.protocol
 
 import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.Point
+import fr.luba.poc.map.RobotMap
+import fr.luba.poc.simulation.PointPlanner
 
 /**
  * Self-check 25 beyond the mapped zones.
@@ -38,8 +40,8 @@ object OffMapLatch {
      * Robot centre at an edge of its task area: beyond the mapped zones or at a no-go zone. 25 raised there without a
      * contact code means "outside the task area" ([SelfCheck.name]), not a collision.
      */
-    fun atEdge(map: fr.luba.poc.map.RobotMap, p: Point?): Boolean =
-        fr.luba.poc.simulation.PointPlanner.beyondMapped(map, p) || fr.luba.poc.simulation.PointPlanner.atExclusion(map, p)
+    fun atEdge(map: RobotMap, p: Point?): Boolean =
+        PointPlanner.beyondMapped(map, p) || PointPlanner.atExclusion(map, p)
 
     /** Robot at [p] on a section beyond the map of its move ([sections], gateway side: no map there). */
     fun onSections(p: Point?, sections: List<List<Point>>): Boolean =

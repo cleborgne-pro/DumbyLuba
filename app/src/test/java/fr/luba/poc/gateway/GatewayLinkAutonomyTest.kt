@@ -1,6 +1,6 @@
 package fr.luba.poc.gateway
 
-import fr.luba.poc.autonomy.LegFrames
+import fr.luba.poc.ConcurrentMethods
 import fr.luba.poc.autonomy.LegOutcome
 import fr.luba.poc.autonomy.LegProgress
 import fr.luba.poc.autonomy.LegSpec
@@ -9,15 +9,6 @@ import fr.luba.poc.ble.RobotLink
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.SignalSample
 import fr.luba.poc.simulation.SimEdge
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Test
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -25,11 +16,22 @@ import java.util.Collections
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.GeometryFactory
 
 /**
  * The real pilot side ([GatewayLink]) against a real gateway: a Wi-Fi tunnel outage during autonomous tracking is not a
  * link loss — the link is resumed, the tracking state sent again, the outcome delivered.
  */
+@RunWith(ConcurrentMethods::class)
 class GatewayLinkAutonomyTest {
     private val code = "042137"
     private val address = "AA:BB:CC:DD:EE:FF"

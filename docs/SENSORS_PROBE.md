@@ -97,7 +97,7 @@ to base during the capture, ZMQ bridge on.
 - Flags any protobuf field **unknown to the embedded schema**, with its path (`LubaMsg.sys.toapp_report_data.dev`).
 - Counts perception messages (`MSG_CMD_TYPE_PEPT`, `DEV_PERCEPTION`, `MctlPept`) and displays the latest one.
 - Lists fields whose name suggests ultrasound, distance or obstacle.
-- On stop, a `sensor_probe` event summarizes the capture in the log. Full frames remain in `protobuf_decoded`, exportable with "Export log".
+- On stop, a `sensor_probe` event summarizes the capture in the log. During the capture every decoded message is written in full in `protobuf_decoded` (outside a capture the periodic reports are written every 10 s), exportable with "Export log".
 
 ## Recommended test protocol
 

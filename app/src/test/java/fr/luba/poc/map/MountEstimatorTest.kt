@@ -1,11 +1,11 @@
 package fr.luba.poc.map
 
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.sin
+import org.junit.Assert.*
+import org.junit.Test
 
 class MountEstimatorTest {
     private fun angleGap(a: Double, b: Double) = abs(((a - b) % 360 + 540) % 360 - 180)

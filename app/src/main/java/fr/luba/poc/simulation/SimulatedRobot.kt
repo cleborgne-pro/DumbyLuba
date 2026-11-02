@@ -12,13 +12,28 @@ import kotlin.math.*
  *
  * Used by the execution bench (tests) and by the obstacle simulation: the robot is driven there by the actual mowing
  * tracking ([PathFollower], [DeadReckoning]), not by ideal kinematics.
- * Wheel slip not modelled; slope only through a slide during in-place pivots ([Params.pivotSlide]).
+ * Flat ground by default; slope through a slide during in-place pivots ([Params.pivotSlide]) and, for the disturbance
+ * bench, any ground effect while driving ([Params.ground]: wheel slip, cross-slope drift, wheel snagged by a branch).
  */
 class SimulatedRobot(start: RobotPose, private val params: Params = Params()) {
     data class Params(val delayMs: Long = 600, val degPerUnit: Double = 0.11, val metersPerUnit: Double = 0.00108,
                       val tauS: Double = 0.25, val friction: Int = 30, val angularFriction: Int = 20,
                       /** Centre slide (m/s) during an in-place rotation at a point (slope); null: flat ground. */
-                      val pivotSlide: ((Point) -> Point)? = null)
+                      val pivotSlide: ((Point) -> Point)? = null,
+                      /** Ground effect at each integration step ([Ground]); null: firm flat ground. */
+                      val ground: ((Motion) -> Ground)? = null)
+
+    /** State seen by [Params.ground]: actual pose, speeds (m/s, °/s) and time since the start. */
+    data class Motion(val pose: RobotPose, val speedMps: Double, val turnDegreesPerSecond: Double, val elapsedMs: Long)
+
+    /**
+     * Ground effect: [traction] scales the forward motion (1: grip, 0: wheels spinning on the spot), [drift] moves the
+     * centre (m/s, map frame: cross-slope, sideways slip) and [yawDegreesPerSecond] turns the chassis (one wheel held
+     * back by a branch). The tracking only sees the result through the published positions and heading.
+     */
+    data class Ground(val traction: Double = 1.0, val drift: Point = Point(0.0, 0.0), val yawDegreesPerSecond: Double = 0.0) {
+        init { require(traction in 0.0..1.0 && drift.x.isFinite() && drift.y.isFinite() && yawDegreesPerSecond.isFinite()) }
+    }
 
     companion object {
         /** Tracking command period (5 Hz) and integration step. */
@@ -31,6 +46,7 @@ class SimulatedRobot(start: RobotPose, private val params: Params = Params()) {
     var heading = start.headingDegrees; private set
     private var v = 0.0
     private var w = 0.0
+    private var elapsedMs = 0L
     private val pending = ArrayDeque<Pair<Int, Int>>().also { q -> repeat((params.delayMs / PERIOD_MS).toInt()) { q.addLast(0 to 0) } }
 
     val pose get() = RobotPose(Point(x, y), heading)
@@ -52,11 +68,14 @@ class SimulatedRobot(start: RobotPose, private val params: Params = Params()) {
         val k = 1 - exp(-dt / params.tauS)
         repeat(SUBSTEPS) {
             v += (effectiveLinear * params.metersPerUnit - v) * k; w += (effectiveAngular * params.degPerUnit - w) * k
-            val h = heading + w * dt
+            val ground = params.ground?.invoke(Motion(pose, v, w, elapsedMs)) ?: Ground()
+            val h = heading + (w + ground.yawDegreesPerSecond) * dt
             // Slope: the robot turning in place slides (2026-10-15, Jardin d'Eden: 3.5 cm/s at the bottom of the zone).
             val slip = if (abs(w) > 5.0 && abs(v) < 0.03) params.pivotSlide?.invoke(Point(x, y)) else null
-            val nx = x + v * dt * cos(Math.toRadians(h)) + (slip?.x ?: 0.0) * dt
-            val ny = y + v * dt * sin(Math.toRadians(h)) + (slip?.y ?: 0.0) * dt
+            val forward = v * ground.traction * dt
+            val nx = x + forward * cos(Math.toRadians(h)) + ((slip?.x ?: 0.0) + ground.drift.x) * dt
+            val ny = y + forward * sin(Math.toRadians(h)) + ((slip?.y ?: 0.0) + ground.drift.y) * dt
+            elapsedMs += PERIOD_MS / SUBSTEPS
             if (!accept(RobotPose(Point(nx, ny), h))) { halt(); return false }
             heading = h; x = nx; y = ny
         }

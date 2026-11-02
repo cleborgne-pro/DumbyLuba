@@ -226,6 +226,21 @@ class StoreIngestTest(unittest.TestCase):
         self.assertEqual(self.store.latest(now=1001)["sequence"], 1)
         self.assertTrue(self.store.ingest(snapshot(2), now=1002))
 
+    def test_immediate_transaction_holds_the_write_lock_until_commit(self):
+        with self.store.db(immediate=True):
+            other = sqlite3.connect(self.store.path, timeout=0, isolation_level=None)
+            try:
+                with self.assertRaises(sqlite3.OperationalError):
+                    other.execute("BEGIN IMMEDIATE")
+            finally:
+                other.close()
+        other = sqlite3.connect(self.store.path, timeout=0, isolation_level=None)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("ROLLBACK")
+        finally:
+            other.close()
+
     def test_input_is_not_mutated(self):
         value = snapshot()
         before = json.dumps(value, sort_keys=True)

@@ -1,7 +1,9 @@
 package fr.luba.poc.map
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.proto.LubaMsgProto
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlNavProto.*
+import fr.luba.poc.protocol.Commands
 
 /**
  * Bounded reading of the robot map, frame indices 1..total as upstream, one element at a time like the Mammotion app
@@ -108,9 +110,9 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
         else if (seen == 0) { navNotices++; note("map_nav_rx", tr("First navigation message $kind of the reading", "Premier message de navigation $kind de la lecture"), fields) }
     }
 
-    fun accept(message: LubaMsg, commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
+    fun accept(message: LubaMsg, commands: Commands): List<ByteArray> {
         stationReader.accept(message)
-        if (message.msgtype == fr.luba.poc.proto.LubaMsgProto.MsgCmdType.MSG_CMD_TYPE_NAV || message.hasNav()) navReceived(message)
+        if (message.msgtype == LubaMsgProto.MsgCmdType.MSG_CMD_TYPE_NAV || message.hasNav()) navReceived(message)
         if (!message.hasNav() || failure != null) return emptyList()
         val n = message.nav; val out = mutableListOf<ByteArray>()
         if (n.hasToappGethashAck()) { val f = n.toappGethashAck
@@ -151,7 +153,7 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
         }
     }
 
-    private fun boundaryFrame(f: NavGetCommDataAck, commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
+    private fun boundaryFrame(f: NavGetCommDataAck, commands: Commands): List<ByteArray> {
         // Only the reading frames are echoed: any other action belongs to another flow (recording, editing).
         if (f.action != 8) return emptyList()
         val out = mutableListOf(commands.mapDataAck(f))
@@ -173,7 +175,7 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
         return out + store(f, commands)
     }
 
-    private fun store(f: NavGetCommDataAck, commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
+    private fun store(f: NavGetCommDataAck, commands: Commands): List<ByteArray> {
         val out = mutableListOf<ByteArray>()
         val bucket = frames.getOrPut(f.hash) { mutableMapOf() }
         // The robot restarted the element with other metadata (asked again): the new series replaces the old one.
@@ -190,7 +192,7 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
         return out
     }
 
-    private fun drawingFrame(f: svg_message_ack_t, commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
+    private fun drawingFrame(f: svg_message_ack_t, commands: Commands): List<ByteArray> {
         val out = mutableListOf(commands.svgAck(f))
         if (f.result != 0) return out
         // The content never changes the reading progress below, nor stops it.
@@ -272,14 +274,14 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
     }
 
     /** Requests the first element not read yet, or ends the reading. */
-    private fun next(commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
+    private fun next(commands: Commands): List<ByteArray> {
         val h = hashList.firstOrNull { !done(it) }
         if (h == null) { current = null; deadline = null; return emptyList() }
         if (h != current) { current = h; attempts = 0 }
         return request(h, commands)
     }
 
-    private fun request(h: Long, commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
+    private fun request(h: Long, commands: Commands): List<ByteArray> {
         attempts++
         frames.remove(h); drawingFrames.remove(h); svgSeries.remove(h)
         deadline = clock() + requestTimeoutMs
@@ -287,15 +289,16 @@ class MapTransfer(private val syncType: Int = 2, initialStation: MapStation? = n
     }
 
     /** To call regularly (every few hundred ms): asks again what stopped answering, leaves out what never answers. */
-    fun tick(commands: fr.luba.poc.protocol.Commands): List<ByteArray> {
+    fun tick(commands: Commands): List<ByteArray> {
         val limit = deadline ?: return emptyList()
         if (failure != null || clock() < limit) return emptyList()
         if (!rootsComplete) {
             if (rootAttempts >= maxAttempts) {
-                failure = if (navFrames == 0) tr("no answer from the robot (map element list requested $rootAttempts times, no navigation message received)",
+                val message = if (navFrames == 0) tr("no answer from the robot (map element list requested $rootAttempts times, no navigation message received)",
                     "aucune réponse du robot (liste des éléments de carte demandée $rootAttempts fois, aucun message de navigation reçu)")
                 else tr("map element list not received after $rootAttempts requests", "liste des éléments de carte non reçue après $rootAttempts demandes")
-                note("map_hash_list_failed", failure!!, mapOf("attempts" to rootAttempts, "framesReceived" to roots.size, "totalFrames" to total,
+                failure = message
+                note("map_hash_list_failed", message, mapOf("attempts" to rootAttempts, "framesReceived" to roots.size, "totalFrames" to total,
                     "navFrames" to navFrames, "navMessages" to navSummary)); deadline = null
                 return emptyList()
             }

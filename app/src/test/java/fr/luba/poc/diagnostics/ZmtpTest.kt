@@ -9,13 +9,13 @@ import fr.luba.poc.protocol.Commands
 import fr.luba.poc.protocol.ExternalNavigationPolicy
 import fr.luba.poc.protocol.PERCEPTION_TOPIC
 import fr.luba.poc.protocol.PERCEPTION_ZMQ_URL
-import org.junit.Assert.*
-import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.net.ServerSocket
 import java.net.Socket
 import kotlin.concurrent.thread
+import org.junit.Assert.*
+import org.junit.Test
 
 class ZmtpTest {
     /** Fake robot: ZMTP 3.0 NULL greeting, READY [peerType], checks the subscription if PUB, then publishes [messages]. */

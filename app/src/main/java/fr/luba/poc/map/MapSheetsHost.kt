@@ -20,14 +20,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import fr.luba.poc.Clock
+import fr.luba.poc.auth.CloudReturnUi
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.history.TaskHistorySheet
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.planning.*
+import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.*
 import fr.luba.poc.ui.Format
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
+import java.text.SimpleDateFormat
+import java.util.Date
 
 /*
  * Sheets and dialogs opened from the map ([MapScreen]): each one a named composable reading its states from the map
@@ -51,7 +60,7 @@ internal fun MapSignalsSheet(
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Dimens.Lg).padding(bottom = Dimens.Lg),
             verticalArrangement = Arrangement.spacedBy(Dimens.Md)) {
             Text(if (heat) tr("Signals and terrain", "Signaux et relief") else if (state.robotRoute.started) tr("Local mowing", "Tonte locale") else tr("Simulated route", "Trajet simulé"), style = MaterialTheme.typography.headlineSmall)
-            if (heat) SettingsGroup("${if (simulatedSurvey) tr("Simulated heatmap", "Heatmap simulée") else tr("Measured heatmap", "Heatmap mesurée")} · ${tr("${samples.size} readings", "${samples.size} relevés")}") {
+            if (heat) SettingsGroup(title = "${if (simulatedSurvey) tr("Simulated heatmap", "Heatmap simulée") else tr("Measured heatmap", "Heatmap mesurée")} · ${tr("${samples.size} readings", "${samples.size} relevés")}") {
                 SignalReliefControls(signalView, samples, onSignal = { layers.surveySignal = it; layers.showSignalHeat = true },
                     onShading = { layers.reliefShading = it }, mount = if (simulatedSurvey) null else layers.reliefMount,
                     onMount = { layers.reliefMount = it; ReliefSettings.saveMount(context,it) }, on3d = { sheets.relief3dOpen = true },
@@ -59,11 +68,11 @@ internal fun MapSignalsSheet(
                     calibration = layers.tiltCalibration, onCalibrate = if (simulatedSurvey) null else ({ sheets.signalPanel = false; sheets.calibrationOpen = true }))
                 InfoNote(if (simulatedSurvey) tr("Fictional signals and terrain generated during the simulation.", "Signaux et terrain fictifs générés pendant la simulation.")
                     else tr("Robot readings on the driven cells. Relative terrain (no absolute altitude), deduced from the slopes of the phone mounted on the robot; positions less accurate without Fix.", "Mesures du robot sur les cellules parcourues. Relief relatif (sans altitude absolue), déduit des pentes du téléphone posé sur le robot ; positions moins précises sans Fix."))
-                if (simulatedSurvey && sim.error.startsWith(tr("Heatmap save", "Sauvegarde heatmap"))) StatusNote(sim.error, NoteTone.DANGER)
-                if (!simulatedSurvey && state.surveySaveError) StatusNote(tr("Could not save the survey", "Sauvegarde du relevé impossible"), NoteTone.DANGER)
+                if (simulatedSurvey && sim.error.startsWith(tr("Heatmap save", "Sauvegarde heatmap"))) StatusNote(sim.error, tone = NoteTone.DANGER)
+                if (!simulatedSurvey && state.surveySaveError) StatusNote(tr("Could not save the survey", "Sauvegarde du relevé impossible"), tone = NoteTone.DANGER)
                 NavRow(tr("Saved heatmaps", "Heatmaps enregistrées"), icon = Icons.Rounded.WifiTethering, onClick = { simulation.pause(); sheets.signalPanel = false; sheets.signalHistoryOpen = true })
             }
-            if (state.robotRoute.started) SettingsGroup(tr("Local mowing", "Tonte locale")) {
+            if (state.robotRoute.started) SettingsGroup(title = tr("Local mowing", "Tonte locale")) {
                 KeyValueRow(tr("State", "État"), state.robotRoute.status)
                 KeyValueRow(tr("Height", "Hauteur"), "${state.robotRoute.heightMm} mm")
                 KeyValueRow(tr("Recharge", "Recharge"), tr("return ${state.robotRoute.returnPercent} % · resume ${state.robotRoute.resumePercent} %", "retour ${state.robotRoute.returnPercent} % · reprise ${state.robotRoute.resumePercent} %"))
@@ -73,11 +82,11 @@ internal fun MapSignalsSheet(
                 if (state.robotRoute.running) DangerPillButton(tr("Stop", "Arrêter"), onStop, Modifier.fillMaxWidth())
             }
             // The simulated route can be handed to the real robot (same route, same checks).
-            if (sim.engine != null && sim.engine?.preview?.localOnly != true && !demo && !cloud && !state.robotRoute.running) SettingsGroup(tr("Run this route", "Exécuter ce trajet")) {
+            if (sim.engine != null && sim.engine?.preview?.localOnly != true && !demo && !cloud && !state.robotRoute.running) SettingsGroup(title = tr("Run this route", "Exécuter ce trajet")) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
-                    SecondaryPillButton(tr("Follow, blades stopped", "Suivre, lames arrêtées"), { simulation.pause(); onStartRobotRoute(sim.engine!!, false, sim.engine!!.preview.cutHeights.firstOrNull() ?: cuttingHeight) }, Modifier.weight(1f), enabled = state.ready)
+                    SecondaryPillButton(tr("Follow, blades stopped", "Suivre, lames arrêtées"), { sim.engine?.let { engine -> simulation.pause(); onStartRobotRoute(engine, false, engine.preview.cutHeights.firstOrNull() ?: cuttingHeight) } }, Modifier.weight(1f), enabled = state.ready)
                     if (sim.engine?.preview?.mode?.isSurvey != true)
-                        PrimaryPillButton(tr("Mow", "Tondre"), { simulation.pause(); onStartRobotRoute(sim.engine!!, true, sim.engine!!.preview.cutHeights.firstOrNull() ?: cuttingHeight) }, Modifier.weight(1f), enabled = state.ready, icon = Icons.Rounded.PlayArrow)
+                        PrimaryPillButton(tr("Mow", "Tondre"), { sim.engine?.let { engine -> simulation.pause(); onStartRobotRoute(engine, true, engine.preview.cutHeights.firstOrNull() ?: cuttingHeight) } }, Modifier.weight(1f), enabled = state.ready, icon = Icons.Rounded.PlayArrow)
                 }
                 if (!state.ready) InfoNote(tr("Connect the robot to run this route.", "Connectez le robot pour exécuter ce trajet."))
             }
@@ -88,12 +97,12 @@ internal fun MapSignalsSheet(
 /** Encountered obstacles, task history and device status sheets. */
 @Composable
 internal fun MapInfoSheets(
-    sheets: MapSheets, state: RobotUi, telemetry: fr.luba.poc.protocol.Telemetry, source: MapSource, showingRobotRoute: Boolean,
+    sheets: MapSheets, state: RobotUi, telemetry: Telemetry, source: MapSource, showingRobotRoute: Boolean,
     marker: DisplayedRobot?, known: LastKnownPosition?,
     onOpenTask: (String) -> Unit, onOpenAllTasks: () -> Unit, onOpenRobot: () -> Unit,
 ) {
     EncounterSheet(state.difficulties, state.obstaclePhoto.photos, state.obstacles)
-    if (sheets.taskHistory) fr.luba.poc.history.TaskHistorySheet(state.mowingHistory, state.mowingRecord,
+    if (sheets.taskHistory) TaskHistorySheet(state.mowingHistory, state.mowingRecord,
         onOpen = { sheets.taskHistory = false; onOpenTask(it) }, onOpenAll = { sheets.taskHistory = false; onOpenAllTasks() }, onDismiss = { sheets.taskHistory = false })
     if (sheets.statusPanel) DeviceStatusSheet(state, telemetry,
         context = if (showingRobotRoute) tr("Local mowing · ${state.robotRoute.index}/${state.robotRoute.count}", "Tonte locale · ${state.robotRoute.index}/${state.robotRoute.count}")
@@ -160,8 +169,8 @@ internal fun MapSettingsDialogs(
         onCorrections = { sheets.mapActions = false; sheets.correcting = true },
         recordEnabled = state.ready && !demo && !cloud && !simulating && !state.robotRoute.running && !state.mowing.active && state.mammotionMap.complete,
         onRecord = { sheets.mapActions = false; onOpenDrivenRecord() })
-    if (sheets.correcting) androidx.compose.ui.window.Dialog(onDismissRequest = { sheets.correcting = false },
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
+    if (sheets.correcting) Dialog(onDismissRequest = { sheets.correcting = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
             dismissOnBackPress = false, dismissOnClickOutside = false)) {
         MapCorrectionEditor(state.mammotionMap, state.mapCorrections, onSaveCorrections, onClose = { sheets.correcting = false })
     }
@@ -191,7 +200,7 @@ internal fun MapSimulationDialog(
 @Composable
 internal fun MapStationDialogs(
     sheets: MapSheets, actions: MapActionState, prep: RoutePreparationState, state: RobotUi, cloudStation: Boolean,
-    cloudReturn: fr.luba.poc.auth.CloudReturnUi?, cloudRobotName: String?, onCloudReturn: () -> Unit, onCancelCloudReturn: () -> Unit,
+    cloudReturn: CloudReturnUi?, cloudRobotName: String?, onCloudReturn: () -> Unit, onCancelCloudReturn: () -> Unit,
     stationEnabled: Boolean, onBaseAction: (Boolean) -> Unit, onStopMammotionTask: () -> Unit, onDiscardMissionCheckpoint: () -> Unit,
 ) {
     if (sheets.discardConfirm) LubaDialog(onDismissRequest = { sheets.discardConfirm = false }, title = tr("Discard the interrupted task?", "Abandonner la tâche interrompue ?"), content = {
@@ -200,7 +209,7 @@ internal fun MapStationDialogs(
         DangerPillButton(tr("Discard", "Abandonner"), { sheets.discardConfirm = false; actions.resumeError = ""; onDiscardMissionCheckpoint() }, Modifier.fillMaxWidth())
     })
 
-    if (sheets.baseDialog && cloudStation) CloudStationDialog(cloudReturn!!, cloudRobotName, onCloudReturn, onCancelCloudReturn) { sheets.baseDialog = false }
+    if (sheets.baseDialog && cloudStation) cloudReturn?.let { cloudReturnState -> CloudStationDialog(cloudReturnState, cloudRobotName, onCloudReturn, onCancelCloudReturn) { sheets.baseDialog = false } }
     if (sheets.baseDialog && !cloudStation) StationDialog(state, actions.baseBusy, actions.baseSupervised, { actions.baseSupervised = it },
         error = prep.error.takeIf { it.startsWith("Base") },
         leaveEnabled = actions.baseSupervised && stationEnabled && !actions.baseBusy,
@@ -213,7 +222,7 @@ internal fun MapStationDialogs(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceStatusSheet(
-    state: RobotUi, t: fr.luba.poc.protocol.Telemetry, context: String, marker: DisplayedRobot?, known: LastKnownPosition?,
+    state: RobotUi, t: Telemetry, context: String, marker: DisplayedRobot?, known: LastKnownPosition?,
     onOpenRobot: () -> Unit, onDismiss: () -> Unit,
 ) {
     val colors = MammotionColors
@@ -224,13 +233,13 @@ private fun DeviceStatusSheet(
                 Text(tr("Device status", "État de l'appareil"), style = MaterialTheme.typography.headlineSmall)
                 Text(context, style = MaterialTheme.typography.bodyMedium, color = colors.TextSecondary)
             }
-            SettingsGroup(tr("Connection", "Connexion")) {
+            SettingsGroup(title = tr("Connection", "Connexion")) {
                 KeyValueRow("Bluetooth", state.connection.label)
                 KeyValueRow(tr("Bluetooth signal", "Signal Bluetooth"), state.rssi?.let { "$it dBm" } ?: "—")
                 KeyValueRow(tr("Last telemetry", "Dernière télémétrie"), state.telemetry.lastReportAt?.let(Format::time) ?: tr("never received", "jamais reçue"))
                 NavRow(tr("Manage the connection", "Gérer la connexion"), icon = Icons.Rounded.Bluetooth, onClick = onOpenRobot)
             }
-            SettingsGroup(tr("Positioning and battery", "Positionnement et batterie")) {
+            SettingsGroup(title = tr("Positioning and battery", "Positionnement et batterie")) {
                 val quality = positionQuality(t.rtkStatus)
                 KeyValueRow(tr("Positioning", "Positionnement"), quality.label, valueColor = if (quality == PositionQuality.FIX) colors.GreenDeep else colors.Warning)
                 KeyValueRow(tr("Last RTK state", "Dernier état RTK"), t.lastRtkAt?.let(Format::time) ?: "—")
@@ -240,15 +249,15 @@ private fun DeviceStatusSheet(
                     else tr("Only a Fix positioning allows accurate automatic mowing.", "Seul un positionnement Fix permet une tonte automatique précise."))
             }
             known?.let { k ->
-                fun time(at: Long?) = at?.let { java.text.SimpleDateFormat(tr("MM-dd HH:mm:ss", "dd/MM HH:mm:ss"), fr.luba.poc.i18n.I18n.locale).format(java.util.Date(it)) } ?: "—"
-                SettingsGroup(tr("Last known position", "Dernière position connue")) {
+                fun time(at: Long?) = at?.let { SimpleDateFormat(tr("MM-dd HH:mm:ss", "dd/MM HH:mm:ss"), I18n.locale).format(Date(it)) } ?: "—"
+                SettingsGroup(title = tr("Last known position", "Dernière position connue")) {
                     KeyValueRow("Robot", k.robotName)
                     KeyValueRow("Communication", time(k.communicationAt))
                     KeyValueRow(tr("Fix position", "Position Fix"), k.last?.let { p -> time(p.at) } ?: tr("none saved", "aucune enregistrée"))
-                    if (state.positionSaveError) StatusNote(tr("Local save failed: position kept in memory", "Échec de sauvegarde locale : position conservée en mémoire"), NoteTone.DANGER)
+                    if (state.positionSaveError) StatusNote(tr("Local save failed: position kept in memory", "Échec de sauvegarde locale : position conservée en mémoire"), tone = NoteTone.DANGER)
                 }
             }
-            SettingsGroup(tr("Technical details", "Détails techniques")) {
+            SettingsGroup(title = tr("Technical details", "Détails techniques")) {
                 KeyValueRow(tr("Robot state (code)", "État robot (code)"), t.robotState?.toString() ?: "—")
                 KeyValueRow(tr("RTK state / quality", "RTK état / qualité"), "${t.rtkStatus ?: "—"} / ${t.positioningLevel ?: "—"}")
                 KeyValueRow(tr("Position type", "Type de position"), t.positionType?.toString() ?: "—")
@@ -278,7 +287,7 @@ private fun StationDialog(
     val nativeReturning = state.nativeReturnActive || state.telemetry.robotState == 14
     // Charging contact of the BLE report (continuous, stale after 15 s): leave only from the base, recharge only away from it.
     rememberWallClock()
-    val presence = if (state.ready) StationPresence.of(state.telemetry, BLE_CHARGE_MAX_AGE_MS, System.currentTimeMillis()) else StationPresence.UNKNOWN
+    val presence = if (state.ready) StationPresence.of(state.telemetry, BLE_CHARGE_MAX_AGE_MS, Clock.now()) else StationPresence.UNKNOWN
     LubaDialog(onDismissRequest = onDismiss, title = tr("Charging station", "Station de charge"), content = {
         if (presence == StationPresence.ON_BASE) InfoNote(tr("Robot on its base. Leave the station: straight exit driving forward, slowly, " +
             "blades stopped.", "Robot sur sa base. Quitter la station : sortie en marche avant, en ligne droite et lentement, lames arrêtées."))
@@ -295,7 +304,7 @@ private fun StationDialog(
             state.nativeReturnStatus.takeIf { it.isNotBlank() },
             state.taskStopStatus.takeIf { it.isNotBlank() })
         lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary) }
-        if (error != null) StatusNote(error, NoteTone.DANGER)
+        if (error != null) StatusNote(error, tone = NoteTone.DANGER)
     }, footer = {
         if (nativeReturning) DangerPillButton(tr("Stop the Mammotion return", "Arrêter le retour Mammotion"), onStopMammotionTask, Modifier.fillMaxWidth(),
             enabled = state.ready && !state.taskStopPending)

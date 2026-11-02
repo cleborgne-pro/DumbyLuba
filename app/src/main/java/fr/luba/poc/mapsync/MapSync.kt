@@ -6,10 +6,14 @@ import fr.luba.poc.map.MapCorrection
 import fr.luba.poc.map.MapCorrections
 import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.Point
+import fr.luba.poc.map.RecordedBoundary
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
 import fr.luba.poc.map.kind
 import fr.luba.poc.obstacles.RobotEnvelope
+import kotlin.math.ceil
+import kotlin.math.hypot
+import kotlin.math.max
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
@@ -156,7 +160,8 @@ object MapSyncPlanner {
         val detail = when (action) {
             SyncAction.CREATE -> tr("Missing from the Mammotion map · $size", "Absente de la carte Mammotion · $size")
             SyncAction.REPLACE -> {
-                val (added, removed) = balance(previous!!.points, shape.points)
+                // A replacement always carries the Mammotion element it replaces ([previous]).
+                val (added, removed) = previous?.let { balance(it.points, shape.points) } ?: (0.0 to 0.0)
                 tr("Corrected on the phone · +${MapCorrections.squareMeters(added)} / −${MapCorrections.squareMeters(removed)} · now $size",
                     "Corrigée sur le téléphone · +${MapCorrections.squareMeters(added)} / −${MapCorrections.squareMeters(removed)} · désormais $size")
             }
@@ -194,7 +199,7 @@ object MapSyncPlanner {
         val params = BufferParameters(8, BufferParameters.CAP_ROUND, BufferParameters.JOIN_ROUND, 3.0)
         // Corners rounded to the chassis pivot radius, like the mowing border loops ([RecordedBoundary.ringRoundingM]):
         // the robot turns while it drives instead of pivoting in a corner, where its envelope would leave the safe surface.
-        val r = fr.luba.poc.map.RecordedBoundary.ringRoundingM(robot)
+        val r = RecordedBoundary.ringRoundingM(robot)
         val moved = if (kind == SyncKind.ZONE)
             BufferOp.bufferOp(BufferOp.bufferOp(area, -(offset + r), params), r, params)
             else BufferOp.bufferOp(BufferOp.bufferOp(BufferOp.bufferOp(area, offset, params), r, params), -r, params)
@@ -227,7 +232,7 @@ object MapSyncPlanner {
             .map { Coordinate(it.x, it.y) }.toTypedArray())
         val nearest = org.locationtech.jts.operation.distance.DistanceOp.nearestPoints(ring, factory.createPoint(Coordinate(start.x, start.y)))[0]
         val dx = start.x - nearest.x; val dy = start.y - nearest.y
-        val d = kotlin.math.hypot(dx, dy)
+        val d = hypot(dx, dy)
         if (d < 1e-6) return listOf(start)
         return APPROACH_M.map { m -> Point(start.x + dx / d * m, start.y + dy / d * m) } + start
     }
@@ -255,7 +260,7 @@ object MapSyncPlanner {
 
     /** [loop] (open ring) with intermediate points so that no edge is longer than [stepM]. */
     private fun densify(loop: List<Point>, stepM: Double): List<Point> = (loop + loop.first()).zipWithNext().flatMap { (a, b) ->
-        val n = kotlin.math.max(1, kotlin.math.ceil(a.distance(b) / stepM).toInt())
+        val n = max(1, ceil(a.distance(b) / stepM).toInt())
         (0 until n).map { k -> Point(a.x + (b.x - a.x) * k / n, a.y + (b.y - a.y) * k / n) }
     }
 

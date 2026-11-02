@@ -1,34 +1,42 @@
 package fr.luba.poc.ui.components
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.StopCircle
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -75,7 +83,7 @@ fun LubaSection(
     content: @Composable ColumnScope.() -> Unit = {},
 ) {
     LubaCard(modifier = modifier, padding = padding, containerColor = containerColor) {
-        SectionHeader(title, subtitle)
+        SectionHeader(title, subtitle = subtitle)
         Spacer(Modifier.height(Dimens.Sm))
         content()
     }
@@ -83,7 +91,7 @@ fun LubaSection(
 
 /** Section title, with an optional subtitle. */
 @Composable
-fun SectionHeader(title: String, subtitle: String? = null, modifier: Modifier = Modifier) {
+fun SectionHeader(title: String, modifier: Modifier = Modifier, subtitle: String? = null) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
@@ -219,9 +227,9 @@ fun LubaDialog(
 @Composable
 fun LubaCheckbox(
     checked: Boolean,
+    modifier: Modifier = Modifier,
     onCheckedChange: ((Boolean) -> Unit)? = null,
     enabled: Boolean = true,
-    modifier: Modifier = Modifier,
 ) {
     Checkbox(
         checked = checked,
@@ -349,8 +357,8 @@ fun SliderRow(
 /** Green switch, like the Mammotion settings. */
 @Composable
 fun LubaSwitch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier: Modifier = Modifier, enabled: Boolean = true) {
-    androidx.compose.material3.Switch(checked = checked, onCheckedChange = onCheckedChange, modifier = modifier, enabled = enabled,
-        colors = androidx.compose.material3.SwitchDefaults.colors(
+    Switch(checked = checked, onCheckedChange = onCheckedChange, modifier = modifier, enabled = enabled,
+        colors = SwitchDefaults.colors(
             checkedThumbColor = Color.White, checkedTrackColor = MammotionColors.Green, checkedBorderColor = MammotionColors.Green,
             uncheckedThumbColor = Color.White, uncheckedTrackColor = MammotionColors.Outline, uncheckedBorderColor = MammotionColors.Outline,
         ))
@@ -359,15 +367,15 @@ fun LubaSwitch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier
 /** Indeterminate progress (brand green), continuous rounded track. */
 @Composable
 fun LubaProgress(modifier: Modifier = Modifier) =
-    androidx.compose.material3.LinearProgressIndicator(modifier.height(6.dp), color = MammotionColors.Green,
-        trackColor = MammotionColors.Outline, strokeCap = androidx.compose.ui.graphics.StrokeCap.Round, gapSize = 0.dp)
+    LinearProgressIndicator(modifier.height(6.dp), color = MammotionColors.Green,
+        trackColor = MammotionColors.Outline, strokeCap = StrokeCap.Round, gapSize = 0.dp)
 
 /** Determinate progress (brand green), continuous track, no stop indicator. */
 @Composable
 fun LubaProgress(progress: Float, modifier: Modifier = Modifier) =
-    androidx.compose.material3.LinearProgressIndicator(progress = { progress }, modifier = modifier.height(6.dp),
+    LinearProgressIndicator(progress = { progress }, modifier = modifier.height(6.dp),
         color = MammotionColors.Green, trackColor = MammotionColors.Outline,
-        strokeCap = androidx.compose.ui.graphics.StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
+        strokeCap = StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
 
 /** Emergency stop button: red background, explicit label, immediate action. */
 @Composable
@@ -411,16 +419,16 @@ fun StopAction(onClick: () -> Unit, modifier: Modifier = Modifier) {
  * Screen exit action (STOP of a test), ignored when the activity is only recreated: Fold folding /
  * unfolding or rotation. The state is kept by the ViewModel and the screen comes back.
  */
-@androidx.compose.runtime.Composable
+@Composable
 fun OnLeaveScreen(key: Any?, onLeave: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    androidx.compose.runtime.DisposableEffect(key) {
+    val context = LocalContext.current
+    DisposableEffect(key) {
         // Action captured with the key, like a regular DisposableEffect.
         val leave = onLeave
         onDispose {
-            var current: android.content.Context? = context
-            while (current is android.content.ContextWrapper && current !is android.app.Activity) current = current.baseContext
-            if ((current as? android.app.Activity)?.isChangingConfigurations != true) leave()
+            var current: Context? = context
+            while (current is ContextWrapper && current !is Activity) current = current.baseContext
+            if ((current as? Activity)?.isChangingConfigurations != true) leave()
         }
     }
 }

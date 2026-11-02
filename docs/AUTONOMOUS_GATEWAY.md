@@ -57,6 +57,13 @@ LUBA 2
   does not do this, receives no tracking frame (it would take them for a fault). Frames 0x80–0x97 (`autonomy/LegFrames.kt`): blob upload (route, surface, with CRC),
   `LEG_START`, `LEG_ABORT`, `LEG_OBSTACLES`, `LEG_SYNC`, `LEG_ACK`; return frames `LEG_PROGRESS`, `LEG_SAMPLE`, `LEG_RESULT`,
   `LEG_STATE`, `LEG_EVENT`. Pilot setting: `AutonomySettings` (on by default).
+- Uploads sent ahead (`RemoteLegs.prefetch`): a route started on the base sends the guard surfaces and the first
+  tracking's route as soon as it starts, robot still docked, so that the base exit and the first tracking find them on
+  the gateway (Fold test of 2026-11-02: 2.1 s before the exit, 2.6 s before the first tracking, robot standing still,
+  spent uploading). An upload already in progress is awaited rather than sent twice, a route equal to one already sent
+  (sub-list of the same edges) is not sent again, and a failed upload sent ahead is sent again by the tracking that
+  needs it. The gateway keeps the route of a tracking in progress whatever it receives meanwhile. Tests:
+  `RemoteLegsUploadTest`.
 
 ### Tracking outcomes (`LegOutcome`)
 
@@ -379,7 +386,7 @@ Raw measurements: `GATEWAY_BYPASS_MEASUREMENTS_2026-10-12.jsonl`.
   -PfollowerRouteOutput=$PWD/app/src/test/resources/follower-reference-route.json
 # Bench on the phone (interrupts the app, hence the gateway: robot stopped; relaunch the app afterwards)
 ./gradlew :app:assembleDebugAndroidTest
-adb -s <redmi> install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s <redmi> install -r -t app/build.noindex/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb -s <redmi> shell am instrument -w -r -e mode follower -e stepM 0 \
   fr.luba.poc.test/fr.luba.poc.planning.PlannerDeviceBenchmark
 # Obstacle bypass (same test APK): 12 contacts spread over the mission

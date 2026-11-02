@@ -1,5 +1,6 @@
 package fr.luba.poc.protocol
 
+import com.google.protobuf.Descriptors.FieldDescriptor
 import fr.luba.poc.auth.CloudReadOnly
 import fr.luba.poc.mowing.MowConfig
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
@@ -9,7 +10,6 @@ import fr.luba.poc.proto.MctrlNavProto.MctlNav
 import fr.luba.poc.proto.MctrlNavProto.NavGetCommDataAck
 import fr.luba.poc.proto.MctrlNavProto.NavTaskCtrl
 import fr.luba.poc.proto.MctrlNavProto.svg_message_ack_t
-import com.google.protobuf.Descriptors.FieldDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

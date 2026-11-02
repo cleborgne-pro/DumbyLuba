@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is only needed on the local network (gateway on port 8766, home server on 8765): the Android
+  network security configuration cannot express private IPv4/IPv6 ranges, so the runtime guard stays the authority
+  (LocalNetwork.allows, checked before the gateway and relay sockets). Every external service the app uses is HTTPS:
+  the domains below refuse a cleartext downgrade. Audit of 2026-10-30.
+-->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">mammotion.com</domain>
+        <domain includeSubdomains="true">agora.io</domain>
+        <domain includeSubdomains="true">rainviewer.com</domain>
+        <domain includeSubdomains="true">open-meteo.com</domain>
+        <domain includeSubdomains="true">github.com</domain>
+        <domain includeSubdomains="true">githubusercontent.com</domain>
+    </domain-config>
+</network-security-config>

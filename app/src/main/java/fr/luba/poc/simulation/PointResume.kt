@@ -2,9 +2,9 @@ package fr.luba.poc.simulation
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
-import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import org.json.JSONObject
 
 /**
  * Move to a point in progress or interrupted, kept on disk to resume it after a stop, a link loss or an app restart

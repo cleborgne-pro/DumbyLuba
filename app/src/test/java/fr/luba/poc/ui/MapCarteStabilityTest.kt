@@ -21,11 +21,13 @@ import fr.luba.poc.mowing.MowUi
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.SimulationSession
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -40,12 +42,7 @@ import org.robolectric.shadows.ShadowDialog
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w412dp-h915dp-xxhdpi")
 class MapCarteStabilityTest {
-    // The test activity (ui-test-manifest) only exists in debug: the shipped variant (fold) does not include this manifest.
-    @get:Rule val rules: org.junit.rules.RuleChain = org.junit.rules.RuleChain.outerRule(org.junit.rules.TestRule { base, _ ->
-        object : org.junit.runners.model.Statement() {
-            override fun evaluate() { org.junit.Assume.assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() }
-        }
-    }).around(createAndroidComposeRule<ComponentActivity>().also { compose = it })
+    @get:Rule val rules: RuleChain = withComposeTestActivity(createAndroidComposeRule<ComponentActivity>().also { compose = it })
     private lateinit var compose: androidx.compose.ui.test.junit4.AndroidComposeTestRule<androidx.test.ext.junit.rules.ActivityScenarioRule<ComponentActivity>, ComponentActivity>
 
     private val map: RobotMap by lazy {

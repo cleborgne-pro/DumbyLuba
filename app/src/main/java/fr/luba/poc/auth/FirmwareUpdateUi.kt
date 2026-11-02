@@ -7,17 +7,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import fr.luba.poc.Clock
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
-import fr.luba.poc.i18n.tr
 
 /**
  * Firmware update through the account: offered version, start confirmed by the user and live progress
  * (percentage, stage, final state). "Stop following" does not interrupt the update.
  */
 @Composable
-fun FirmwareUpdateRows(state: CloudUi, onStart: () -> Unit, onFollow: () -> Unit, onStopFollow: () -> Unit, now: Long = System.currentTimeMillis()) {
+fun FirmwareUpdateRows(state: CloudUi, onStart: () -> Unit, onFollow: () -> Unit, onStopFollow: () -> Unit, now: Long = Clock.now()) {
     val colors = MammotionColors
     val f = state.firmwareCheck
     val u = state.firmwareUpdate

@@ -1,9 +1,11 @@
 package fr.luba.poc.simulation
 
 import fr.luba.poc.i18n.tr
-import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotPose
+import fr.luba.poc.planning.CoverageEngine
+import fr.luba.poc.protocol.CollisionLatch
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -50,8 +52,21 @@ object DriftRecovery {
     const val TRAIL_TOLERANCE_M = 0.2
     /** Exit closer than this to the previous one: resume that much further on the route. */
     const val SAME_SPOT_M = 1.0
-    /** Distances (m) by which the resume point may advance along the route when the direct link fails. */
+    /** Distances (m) by which the resume point may advance along the route ([REJOIN_WINDOW_M]). */
     val ENTRY_OFFSETS_M = listOf(0.0, 0.3, 0.6, 1.0, 1.5, 2.5, 4.0)
+    /**
+     * Entries up to this far along the route from the projection of the robot ([ENTRY_OFFSETS_M]) compete on their
+     * manoeuvre cost ([rejoinSeconds]) instead of the nearest one winning; beyond it, only when none of them is safe.
+     */
+    const val REJOIN_WINDOW_M = 1.0
+    /** Nominal forward speed of the cost (m/s): default 30 % setting (docs/TRACKING_EXECUTION.md). */
+    private const val REJOIN_SPEED_MPS = 0.13
+    /**
+     * Cost of a skipped cutting metre (s): the robot drifted with its blades on beside the pass, so the skipped
+     * stretch is partly mowed; about a quarter of its mowing time at [REJOIN_SPEED_MPS]. Higher, the robot came back
+     * sideways next to itself (two pivots of ≈ 90°); lower, it skipped the whole window every time.
+     */
+    private const val SKIPPED_CUTTING_S_PER_M = 2.0
 
     /** Stop reason kept, or null if one more resume is allowed ([count] resumes done, [streak] at the same place). */
     fun refusal(count: Int, streak: Int): String? = when {
@@ -119,7 +134,7 @@ object DriftRecovery {
      */
     fun limitStarts(physical: TrajectoryPlanner, position: Point, headingDegrees: Double, trail: List<Point>): List<Point> {
         val along = starts(physical, position, headingDegrees, trail).filterNotNull()
-            .filter { it.distance(position) >= fr.luba.poc.protocol.CollisionLatch.UNLOCK_BACK_OFF_M - 1e-9 }
+            .filter { it.distance(position) >= CollisionLatch.UNLOCK_BACK_OFF_M - 1e-9 }
         if (along.isNotEmpty()) return along
         return ObstacleBypass.backOffCandidates(physical, position, headingDegrees, ObstacleBypass.straightBehind(position, headingDegrees),
             ObstacleBypass.BLIND_BACK_OFF_M)
@@ -136,10 +151,40 @@ object DriftRecovery {
     }
 
     /**
+     * Driving time (s) of [edges] from [heading], turns included up to [finalHeading]: [REJOIN_SPEED_MPS], pivot rate
+     * and stop measured on the robot ([CoverageEngine.ROBOT_TURN_DEGREES_PER_SECOND], [CoverageEngine.ROBOT_STOP_SECONDS]
+     * per turn sharper than [PathFollower.CORNER_DEGREES], where tracking stops and pivots).
+     */
+    private fun drivingSeconds(edges: List<SimEdge>, heading: Double, finalHeading: Double): Double {
+        val moving = edges.filter { it.meters > 1e-6 }
+        val headings = listOf(heading) + moving.map(::headingOf) + finalHeading
+        val turns = headings.zipWithNext().map { (a, b) -> abs(((b - a) % 360 + 540) % 360 - 180) }
+        return moving.sumOf { it.meters } / REJOIN_SPEED_MPS + turns.sum() / CoverageEngine.ROBOT_TURN_DEGREES_PER_SECOND +
+            turns.count { it > PathFollower.CORNER_DEGREES } * CoverageEngine.ROBOT_STOP_SECONDS
+    }
+
+    /**
+     * Cost (s) of resuming at [entry] (edge [entryIndex]) through [link] from [heading]: driving the link, minus the
+     * stretch of the route from [from] (projection of the start on edge [index]) to [entry] the robot no longer drives,
+     * plus the skipped cutting ([SKIPPED_CUTTING_S_PER_M]). A robot 30 cm beside its pass meets it about 1 m further
+     * on with a slight angle rather than with two square pivots, and one that went past a corner heads for the next
+     * stretch instead of turning back to the corner.
+     */
+    private fun rejoinSeconds(path: List<SimEdge>, index: Int, from: Point, entryIndex: Int, entry: Point,
+                              link: List<SimEdge>, heading: Double, skippedCutting: Double): Double {
+        val skippedRoute = if (entryIndex == index) listOf(SimEdge(from, entry, false))
+            else listOf(SimEdge(from, path[index].b, false)) + path.subList(index + 1, entryIndex) + SimEdge(path[entryIndex].a, entry, false)
+        return drivingSeconds(link, heading, headingOf(path[entryIndex])) -
+            drivingSeconds(skippedRoute, headingOf(path[index]), headingOf(path[entryIndex])) +
+            skippedCutting * SKIPPED_CUTTING_S_PER_M
+    }
+
+    /**
      * Resume after an exit at edge [index] of [path]: optional back-off ([starts]), or as a last resort for a chassis
      * overlapping an edge a straight escape ahead, then a blades-OFF link
      * ([RobotRoute.departure], optional escape included) up to the projection of the start on the interrupted edge,
-     * advanced by [skipM] then by the [ENTRY_OFFSETS_M] as long as the link fails; the rest of the route is unchanged.
+     * advanced by [skipM] then by the [ENTRY_OFFSETS_M]: the cheapest entry within [REJOIN_WINDOW_M] ([rejoinSeconds]),
+     * otherwise the first one further on whose link succeeds; the rest of the route is unchanged.
      * First a link keeping the tracking tolerance up to the entry pivot and over [LOOKAHEAD_M] after it, and meeting a
      * pass near the outline along its axis ([ObstacleBypass.arrivesAligned]), so as not to resume right at the edge or
      * nose first into the border; failing that, the first safe one. [afterContact]: contact at the limit of the task
@@ -177,28 +222,36 @@ object DriftRecovery {
             return null
         }
         var failure: IllegalArgumentException? = null
+        // Resume at [offset] beyond the projection (parameter [t0] of the interrupted edge) of [backOff] (or the current
+        // pose), with its cost; null if the link fails or does not pass the [strict] checks.
+        fun candidate(backOff: Point?, t0: Double, offset: Double, strict: Boolean): Pair<DriftPlan, Double>? {
+            val (entryIndex, t) = entryAt(t0, skipM + offset) ?: return null
+            val start = backOff ?: position
+            val e = path[entryIndex]
+            val entry = Point(e.a.x + (e.b.x - e.a.x) * t, e.a.y + (e.b.y - e.a.y) * t)
+            val link = try { RobotRoute.departure(routes, physical, start, headingDegrees, entry, headingOf(e)) }
+                catch (error: IllegalArgumentException) { failure = error; return null }
+            // Chassis overlapping an edge: never a pivot or a link that does not start with the escape.
+            if (backOff == null && !inside && link.firstOrNull()?.escape != true) return null
+            // Strict: also along the pass axis when it lies near the outline, rather than nose first into the border.
+            if (strict && !(ObstacleBypass.followTolerant(routes, link, start, headingDegrees, headingOf(e)) &&
+                    ObstacleBypass.arrivesAligned(routes, link, headingOf(e)) && ahead(routes, path, entryIndex, entry))) return null
+            val rest = listOf(e.copy(a = entry)) + path.drop(entryIndex + 1)
+            val restOrigins = (entryIndex until path.size).map { origins?.get(it) ?: it }
+            val edges = link + rest
+            try { RobotRoute.requireOutsideBaseZone(routes, edges) } catch (error: IllegalArgumentException) { failure = error; return null }
+            val skipped = ((index until entryIndex).sumOf { if (path[it].cutting) path[it].meters * (if (it == index) 1 - t0 else 1.0) else 0.0 } +
+                if (e.cutting) (if (entryIndex == index) t - t0 else t) * e.meters else 0.0).coerceAtLeast(0.0)
+            val from = Point(current.a.x + dx * t0, current.a.y + dy * t0)
+            return DriftPlan(backOff, edges, link.map { -1 } + restOrigins, link.sumOf { it.meters }, skipped) to
+                rejoinSeconds(path, index, from, entryIndex, entry, link, headingDegrees, skipped)
+        }
         for (strict in listOf(true, false)) for (backOff in starts) {
             val start = backOff ?: position
             val t0 = if (l2 < 1e-12) 1.0 else (((start.x - current.a.x) * dx + (start.y - current.a.y) * dy) / l2).coerceIn(0.0, 1.0)
-            for (offset in ENTRY_OFFSETS_M) {
-                val (entryIndex, t) = entryAt(t0, skipM + offset) ?: break
-                val e = path[entryIndex]
-                val entry = Point(e.a.x + (e.b.x - e.a.x) * t, e.a.y + (e.b.y - e.a.y) * t)
-                val link = try { RobotRoute.departure(routes, physical, start, headingDegrees, entry, headingOf(e)) }
-                    catch (error: IllegalArgumentException) { failure = error; continue }
-                // Chassis overlapping an edge: never a pivot or a link that does not start with the escape.
-                if (backOff == null && !inside && link.firstOrNull()?.escape != true) continue
-                // Strict: also along the pass axis when it lies near the outline, rather than nose first into the border.
-                if (strict && !(ObstacleBypass.followTolerant(routes, link, start, headingDegrees, headingOf(e)) &&
-                        ObstacleBypass.arrivesAligned(routes, link, headingOf(e)) && ahead(routes, path, entryIndex, entry))) continue
-                val rest = listOf(e.copy(a = entry)) + path.drop(entryIndex + 1)
-                val restOrigins = (entryIndex until path.size).map { origins?.get(it) ?: it }
-                val edges = link + rest
-                try { RobotRoute.requireOutsideBaseZone(routes, edges) } catch (error: IllegalArgumentException) { failure = error; continue }
-                val skipped = (index until entryIndex).sumOf { if (path[it].cutting) path[it].meters * (if (it == index) 1 - t0 else 1.0) else 0.0 } +
-                    if (e.cutting) (if (entryIndex == index) t - t0 else t) * e.meters else 0.0
-                return DriftPlan(backOff, edges, link.map { -1 } + restOrigins, link.sumOf { it.meters }, skipped.coerceAtLeast(0.0))
-            }
+            val (near, far) = ENTRY_OFFSETS_M.partition { it <= REJOIN_WINDOW_M + 1e-9 }
+            near.mapNotNull { candidate(backOff, t0, it, strict) }.minByOrNull { it.second }?.let { return it.first }
+            far.firstNotNullOfOrNull { candidate(backOff, t0, it, strict) }?.let { return it.first }
         }
         if (afterContact && starts.isEmpty()) throw IllegalArgumentException(tr("Back-off impossible after the border contact: trail missing or chassis blocked behind",
             "Recul impossible après le contact en bordure : trace absente ou châssis bloqué derrière"))

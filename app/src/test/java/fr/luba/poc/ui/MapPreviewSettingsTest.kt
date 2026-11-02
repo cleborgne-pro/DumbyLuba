@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performClick
 import fr.luba.poc.ble.ConnectionState
 import fr.luba.poc.ble.RobotUi
 import fr.luba.poc.map.CoverageMode
+import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.MapScreen
 import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.Point
@@ -18,32 +19,29 @@ import fr.luba.poc.map.RobotMap
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.SimulationSession
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
-import org.junit.Assume.assumeTrue
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Task settings changed before "Route preview": the computation takes the settings shown, without the
- * "Map changed: recomputation required" refusal (callbacks of the map screen read in their latest composition).
+ * Task settings changed before "Route preview": the computation takes the settings shown (callbacks of the map screen
+ * read in their latest composition; they once refused with "Map changed: recomputation required"). The route is
+ * computed by itself as the inputs change: an obstacle learned during a computation starts it again.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w412dp-h915dp-xxhdpi")
 class MapPreviewSettingsTest {
     val compose = createComposeRule()
-    // The test activity (ui-test-manifest) only exists in debug.
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private val zone = MapShape(1, 0, listOf(Point(0.0, 0.0), Point(12.0, 0.0), Point(12.0, 8.0), Point(0.0, 8.0)), "Pelouse")
     private val state = RobotUi(robotMap = RobotMap(listOf(zone), true, "test"), connection = ConnectionState.Receiving, ready = true,
@@ -62,12 +60,10 @@ class MapPreviewSettingsTest {
         compose.onNodeWithText("Suivant").performClick()
         compose.waitForIdle()
         for ((tile, mode) in listOf("Damier" to CoverageMode.CHECKERBOARD, "Zigzag" to CoverageMode.LINES)) {
-            preview = null
             compose.onNodeWithText(tile).performClick()
             compose.waitForIdle()
             compose.onNodeWithText("Aperçu du trajet").performClick()
-            compose.waitUntil(120_000) { preview != null || compose.onAllNodesWithText("recalcul requis", substring = true).fetchSemanticsNodes().isNotEmpty() }
-            assertEquals("no refusal after choosing $tile", 0, compose.onAllNodesWithText("recalcul requis", substring = true).fetchSemanticsNodes().size)
+            assertTrue("route computed after choosing $tile", compose.awaitCurrentRoute { preview })
             assertEquals(mode, preview?.mode)
             // Back to the settings page for the next change.
             androidx.test.espresso.Espresso.pressBack()
@@ -75,7 +71,25 @@ class MapPreviewSettingsTest {
         }
     }
 
-    @Test fun `obstacle learned during the computation still refuses the route`() {
+    @Test fun `route computed on opening the task settings and again after a change, without tapping Route preview`() {
+        var preview: Preview? = null
+        fr.luba.poc.map.BorderTypeRepository.resetForTest()
+        compose.setContent { LubaTheme(false) { Box(Modifier.fillMaxSize()) {
+            MapScreen(state, SimulationSession(), onFetchMap = {}, onOpenRobot = {}, onOpenAccount = {}, onBack = {}, openMowing = true,
+                onPreview = { preview = it })
+        } } }
+        compose.waitForIdle()
+        compose.onNodeWithText("Tout ajouter").performClick()
+        compose.onNodeWithText("Suivant").performClick()
+        // Reading the screen in the condition lets the computation's main-thread steps run.
+        compose.waitUntil(120_000) { compose.onAllNodesWithText("Trajet prêt").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(CoverageMode.LINES, preview?.mode)
+        // Still on the settings page: a change computes the route again.
+        compose.onNodeWithText("Damier").performClick()
+        compose.waitUntil(120_000) { compose.onAllNodesWithText("Trajet prêt").fetchSemanticsNodes(); preview?.mode == CoverageMode.CHECKERBOARD }
+    }
+
+    @Test fun `obstacle learned during the computation is avoided by the route computed again`() {
         var preview: Preview? = null
         val ui = androidx.compose.runtime.mutableStateOf(state)
         fr.luba.poc.map.BorderTypeRepository.resetForTest()
@@ -88,12 +102,13 @@ class MapPreviewSettingsTest {
         compose.onNodeWithText("Suivant").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Aperçu du trajet").performClick()
-        // Changed before the main thread runs again: the computation in progress started without it.
-        ui.value = state.copy(obstacles = listOf(fr.luba.poc.obstacles.LocalObstacle("tree", fr.luba.poc.obstacles.ObstacleKind.TREE, 3.0, 3.0, 0.3, 0.2)))
-        compose.waitUntil(120_000) { preview != null || compose.onAllNodesWithText("recalcul requis", substring = true).fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(null, preview)
-        // Either check of the computation (after the coverage, or after the height passes) refuses it.
-        compose.onNodeWithText("recalcul requis", substring = true).assertExists()
+        // Changed before the main thread runs again: the computation in progress, started without it, is abandoned and the
+        // route computed again with it.
+        val tree = Point(3.0, 3.0)
+        ui.value = state.copy(obstacles = listOf(fr.luba.poc.obstacles.LocalObstacle("tree", fr.luba.poc.obstacles.ObstacleKind.TREE, tree.x, tree.y, 0.3, 0.2)))
+        assertTrue("route computed again", compose.awaitCurrentRoute { preview })
+        val nearest = requireNotNull(preview).cuttingPaths.flatMap { it.zipWithNext() }.minOf { (a, b) -> Geometry.distance(tree, a, b) }
+        assertTrue("passes ${"%.2f".format(nearest)} m from the tree", nearest > 0.3)
     }
 
     /** Cause of the refusal: two references to one local function are equal whatever they capture. */

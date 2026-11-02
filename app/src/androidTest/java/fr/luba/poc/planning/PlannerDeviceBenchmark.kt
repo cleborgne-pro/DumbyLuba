@@ -10,9 +10,8 @@ import android.os.SystemClock
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.simulation.*
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
+import org.json.JSONObject
 
 /** Test APK only. No BLE ViewModel, activity, service or robot command.
  * Measures the route, then the preparation actually used by MapScreen.
@@ -64,9 +63,9 @@ class PlannerDeviceBenchmark : Instrumentation() {
             check(!output.exists()) { "Campagne existante : $label" }
             val json=JSONObject(context.assets.open("planner-reference-map.json").bufferedReader().use { it.readText() })
             val shapes=json.getJSONArray("shapes").let { a -> (0 until a.length()).map { i ->
-                val s=a.getJSONObject(i);val points=s.getJSONArray("points")
+                val s=a.getJSONObject(i); val points=s.getJSONArray("points")
                 MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until points.length()).map { k ->
-                    val p=points.getJSONArray(k);Point(p.getDouble(0),p.getDouble(1)) },s.getString("name"))
+                    val p=points.getJSONArray(k); Point(p.getDouble(0),p.getDouble(1)) },s.getString("name"))
             } }
             val map=RobotMap(shapes,true,"reference-station")
             val store=BaseStore(targetContext,map)
@@ -95,7 +94,7 @@ class PlannerDeviceBenchmark : Instrumentation() {
                 val began=SystemClock.elapsedRealtimeNanos()
                 fun checkpoint() { check(SystemClock.elapsedRealtimeNanos()-began<limit) { "Measurement budget exceeded" } }
                 fun <T> measured(key:String,block:()->T):T {
-                    val wall=SystemClock.elapsedRealtimeNanos();val cpu=Debug.threadCpuTimeNanos()
+                    val wall=SystemClock.elapsedRealtimeNanos(); val cpu=Debug.threadCpuTimeNanos()
                     try { return block() } finally {
                         row.put(key+"WallMs",(SystemClock.elapsedRealtimeNanos()-wall)/1e6)
                             .put(key+"CpuMs",(Debug.threadCpuTimeNanos()-cpu)/1e6)
@@ -111,14 +110,14 @@ class PlannerDeviceBenchmark : Instrumentation() {
                     val routes=measured("navigation") { RoutePlanning.navigation(map,RobotEnvelope.LUBA2.halfWidthM+0.05,
                         shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points },accesses,base=base,recordedBoundary=true) }
                     val stages=linkedMapOf<String,Double>()
-                    var previous="Assemblage";var stageBegan=SystemClock.elapsedRealtimeNanos()
+                    var previous="Assemblage"; var stageBegan=SystemClock.elapsedRealtimeNanos()
                     fun stage(value:String) {
                         checkpoint()
                         val key=value.substringBefore(" · ")
                         if(key!=previous) {
                             val now=SystemClock.elapsedRealtimeNanos()
                             stages[previous]=(stages[previous] ?: 0.0)+(now-stageBegan)/1e6
-                            previous=key;stageBegan=now
+                            previous=key; stageBegan=now
                             sendStatus(0,Bundle().apply { putString("stream","$label / $name : $key\n") })
                         }
                     }

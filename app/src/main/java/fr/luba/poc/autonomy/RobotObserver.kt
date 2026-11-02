@@ -1,7 +1,7 @@
 package fr.luba.poc.autonomy
 
-import fr.luba.poc.i18n.tr
 import fr.luba.poc.diagnostics.LiftGuard
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.protocol.RobotErrorCatalog

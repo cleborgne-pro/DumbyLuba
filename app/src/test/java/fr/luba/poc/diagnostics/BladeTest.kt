@@ -1,11 +1,11 @@
 package fr.luba.poc.diagnostics
 
-import fr.luba.poc.protocol.Commands
-import fr.luba.poc.protocol.TelemetryReducer
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.LubaMsgProto.MsgCmdType
 import fr.luba.poc.proto.LubaMsgProto.MsgDevice
 import fr.luba.poc.proto.MctrlDriverProto.*
+import fr.luba.poc.protocol.Commands
+import fr.luba.poc.protocol.TelemetryReducer
 import org.junit.Assert.*
 import org.junit.Test
 

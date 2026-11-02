@@ -11,31 +11,29 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.Alignment
 import androidx.compose.runtime.*
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.history.CoverageMap
 import fr.luba.poc.history.drawRealCoverage
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.ui.theme.MammotionColors
 import java.util.IdentityHashMap
-import kotlin.math.max
-import kotlin.math.min
 
 /** Brush input: one finger paints (map coordinates, in meters), two fingers move the view. */
 class MapPaintInput(val begin: (Point) -> Unit, val extend: (Point) -> Unit, val finish: (committed: Boolean) -> Unit)
@@ -80,7 +78,6 @@ fun MapLive(
     cameraState: MutableState<MapCamera>? = null,
     signalCells: List<SignalCell> = emptyList(), signal: SurveySignal = SurveySignal.WIFI,
     signalColor: (SignalCell) -> Color = { heatColor(signal,it) },
-    paint: List<PaintStroke> = emptyList(),
     paintPieces: List<List<Point>> = emptyList(),
     onPaint: MapPaintInput? = null,
     overlays: List<MapOverlay> = emptyList(),
@@ -89,7 +86,7 @@ fun MapLive(
     /** [x], [y]: point published by the robot (8 cm behind its rotation center); false for an already centered pose (simulation). */
     publishedPosition: Boolean = true,
     /** Real coverage layer and its image ([fr.luba.poc.history.CoverageLayerStyle.image]), over the planned stripes. */
-    coverage: Pair<fr.luba.poc.history.CoverageMap, androidx.compose.ui.graphics.ImageBitmap>? = null,
+    coverage: Pair<CoverageMap, ImageBitmap>? = null,
 ) {
     val colors = MammotionColors
     val robot = if (x != null && y != null) Point(x, y) else null
@@ -107,47 +104,7 @@ fun MapLive(
     // Compass outside the gesture area: a tap on it neither draws nor moves the map.
     Box(modifier) {
     Box(Modifier.matchParentSize().clipToBounds().mapAppear(map.shapes).then(if (onPaint != null) Modifier.pointerInput(map, cameraHolder, "paint") {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
-            down.consume()
-            val center = Point(size.width / 2.0, size.height / 2.0)
-            fun toMap(o: Offset): Point? {
-                val frame = currentFrame
-                if (frame.size < 2) return null
-                val layer = camera.inverse(Point(o.x.toDouble(), o.y.toDouble()), center)
-                return liveFit(frame, size.width.toFloat(), size.height.toFloat()).map(Offset(layer.x.toFloat(), layer.y.toFloat()))
-            }
-            // The stroke only starts once the gesture is recognized as a single finger (dragged beyond the touch slop, or tap
-            // released): the first finger of a pinch neither paints nor moves the obstacle simulation object (which used to
-            // stop it and erase the robot on every zoom).
-            var pending = true
-            var painting = false
-            fun beginAtDown(): Boolean = toMap(down.position)?.let { painter?.begin?.invoke(it); true } ?: false
-            do {
-                val event = awaitPointerEvent()
-                if (event.changes.count { it.pressed } > 1) {
-                    // Second finger: the current stroke is dropped, the view moves.
-                    pending = false
-                    if (painting) { painter?.finish?.invoke(false); painting = false }
-                    val centroid = event.calculateCentroid(useCurrent = false)
-                    if (centroid != Offset.Unspecified) {
-                        val pan = event.calculatePan()
-                        camera = camera.transform(Point(centroid.x.toDouble(), centroid.y.toDouble()), center,
-                            Point(pan.x.toDouble(), pan.y.toDouble()), event.calculateZoom().toDouble(), event.calculateRotation().toDouble())
-                    }
-                } else {
-                    val change = event.changes.firstOrNull { it.id == down.id }
-                    if (pending && change != null && (!change.pressed ||
-                            (change.position - down.position).getDistance() > viewConfiguration.touchSlop)) {
-                        pending = false
-                        painting = beginAtDown()
-                    }
-                    if (painting && change != null && change.pressed) toMap(change.position)?.let { painter?.extend?.invoke(it) }
-                }
-                event.changes.forEach { it.consume() }
-            } while (event.changes.any { it.pressed })
-            if (painting) painter?.finish?.invoke(true)
-        }
+        paintGestures(cameraHolder, { currentFrame }, { painter })
     } else if (interactive) Modifier.pointerInput(map, cameraHolder) {
         detectTransformGestures { centroid, pan, zoom, rotation ->
             camera = camera.transform(Point(centroid.x.toDouble(),centroid.y.toDouble()),
@@ -180,23 +137,6 @@ fun MapLive(
         fun screen(p: Point) = fit.screen(p)
         val path = geometry::path
         drawLawn(map, { cuttingZoneIds.isEmpty() || it.id in cuttingZoneIds }, path, 1.dp.toPx() / lineScale, colors)
-        if (paint.isNotEmpty()) {
-            // Paint visible only inside the zones (no-go excluded): this is the kept area.
-            clipPath(geometry.surface(map, null)) {
-                drawIntoCanvas { canvas ->
-                    // Separate layer: the eraser removes paint, and overlapping strokes keep the same tint.
-                    canvas.saveLayer(androidx.compose.ui.geometry.Rect(Offset.Zero, size), Paint().apply { alpha = 0.5f })
-                    paint.forEach { stroke ->
-                        val width = (2 * stroke.radiusM * scale).toFloat()
-                        val color = colors.Warning
-                        val blend = if (stroke.erase) BlendMode.Clear else BlendMode.SrcOver
-                        if (stroke.points.size == 1) drawCircle(color, width / 2, screen(stroke.points[0]), blendMode = blend)
-                        else drawPath(path(stroke.points, false), color, style = Stroke(width, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = blend)
-                    }
-                    canvas.restore()
-                }
-            }
-        }
         paintPieces.forEach { piece ->
             if (piece.size >= 3) drawPath(path(piece, true), colors.Warning, style = Stroke(2.dp.toPx() / lineScale, join = StrokeJoin.Round))
         }
@@ -233,7 +173,7 @@ fun MapLive(
         start?.let { drawCircle(colors.RobotMarker.copy(alpha = 0.6f), 4.dp.toPx() / lineScale, screen(it)) }
         signalCells.forEach { cell ->
             drawRect(signalColor(cell),screen(Point(cell.point.x-0.5,cell.point.y+0.5)),
-                androidx.compose.ui.geometry.Size(scale.toFloat(),scale.toFloat()))
+                Size(scale.toFloat(),scale.toFloat()))
         }
         drawZoneOrder(map,zoneOrder,::screen,1.dp.toPx() / lineScale,camera.rotation.toFloat())
         geometry.end()
@@ -246,6 +186,54 @@ fun MapLive(
     }
     // Only interactive maps rotate: compass at the top left ("Recenter" takes the right corner).
     if (interactive || onPaint != null) LiveCompass(cameraHolder, Modifier.align(Alignment.TopStart).padding(8.dp))
+    }
+}
+
+/**
+ * Painting on the map ([MapPaintInput]): one finger paints, a second finger drops the stroke and moves the view. The
+ * stroke only starts once the gesture is recognized as a single finger (dragged beyond the touch slop, or tap released).
+ */
+private suspend fun PointerInputScope.paintGestures(cameraHolder: MutableState<MapCamera>, fitPoints: () -> List<Point>, painter: () -> MapPaintInput?) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        down.consume()
+        val center = Point(size.width / 2.0, size.height / 2.0)
+        fun toMap(o: Offset): Point? {
+            val frame = fitPoints()
+            if (frame.size < 2) return null
+            val layer = cameraHolder.value.inverse(Point(o.x.toDouble(), o.y.toDouble()), center)
+            return liveFit(frame, size.width.toFloat(), size.height.toFloat()).map(Offset(layer.x.toFloat(), layer.y.toFloat()))
+        }
+        // The stroke only starts once the gesture is recognized as a single finger (dragged beyond the touch slop, or tap
+        // released): the first finger of a pinch neither paints nor moves the obstacle simulation object (which used to
+        // stop it and erase the robot on every zoom).
+        var pending = true
+        var painting = false
+        fun beginAtDown(): Boolean = toMap(down.position)?.let { painter()?.begin?.invoke(it); true } ?: false
+        do {
+            val event = awaitPointerEvent()
+            if (event.changes.count { it.pressed } > 1) {
+                // Second finger: the current stroke is dropped, the view moves.
+                pending = false
+                if (painting) { painter()?.finish?.invoke(false); painting = false }
+                val centroid = event.calculateCentroid(useCurrent = false)
+                if (centroid != Offset.Unspecified) {
+                    val pan = event.calculatePan()
+                    cameraHolder.value = cameraHolder.value.transform(Point(centroid.x.toDouble(), centroid.y.toDouble()), center,
+                        Point(pan.x.toDouble(), pan.y.toDouble()), event.calculateZoom().toDouble(), event.calculateRotation().toDouble())
+                }
+            } else {
+                val change = event.changes.firstOrNull { it.id == down.id }
+                if (pending && change != null && (!change.pressed ||
+                        (change.position - down.position).getDistance() > viewConfiguration.touchSlop)) {
+                    pending = false
+                    painting = beginAtDown()
+                }
+                if (painting && change != null && change.pressed) toMap(change.position)?.let { painter()?.extend?.invoke(it) }
+            }
+            event.changes.forEach { it.consume() }
+        } while (event.changes.any { it.pressed })
+        if (painting) painter()?.finish?.invoke(true)
     }
 }
 

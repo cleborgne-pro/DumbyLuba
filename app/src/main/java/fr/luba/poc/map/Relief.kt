@@ -2,6 +2,8 @@ package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
 import kotlin.math.abs
+import kotlin.math.acos
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -86,7 +88,7 @@ data class MountEstimate(val angle: Double, val source: MountSource, val events:
  */
 data class TiltCalibration(val reference: PhoneGravity, val angle: Double?, val at: Long) {
     /** Phone tilt at the time of the reference, in degrees. */
-    val tiltDegrees get() = Math.toDegrees(kotlin.math.acos((reference.z / reference.norm).coerceIn(-1.0, 1.0)))
+    val tiltDegrees get() = Math.toDegrees(acos((reference.z / reference.norm).coerceIn(-1.0, 1.0)))
 
     /** Corrected reading: rotation that brings the reference back to the phone vertical (Rodrigues' formula). */
     fun level(g: PhoneGravity): PhoneGravity {
@@ -410,7 +412,7 @@ object MountEstimator {
         // Consistency: the offsets must point in the same direction (mean length of the unit vectors).
         val agreement = hypot(strong.sumOf { it.first / hypot(it.first, it.second) }, strong.sumOf { it.second / hypot(it.first, it.second) }) / strong.size
         if (agreement < 0.5) return null
-        return Motion(PhoneTilt.normalize(Math.toDegrees(kotlin.math.atan2(sx, sy))), strong.size, agreement)
+        return Motion(PhoneTilt.normalize(Math.toDegrees(atan2(sx, sy))), strong.size, agreement)
     }
 
     /**

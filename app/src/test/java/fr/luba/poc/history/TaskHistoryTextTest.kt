@@ -46,7 +46,8 @@ class TaskHistoryTextTest {
         assertEquals("${MowingText.duration(forecast.totalSeconds)} (+0 %) · 0 recharge", MowingText.summary(record()))
         val slow = MowingText.summary(record(active = forecast.totalSeconds * 1.2, recharges = 2))
         assertTrue(slow, slow.contains("(+20 %)") && slow.endsWith("· 2 recharges"))
-        val partial = MowingText.summary(record(outcome = MowingOutcome.INTERRUPTED, done = 40.0, active = forecast.totalSeconds * 0.3))
+        // 40 % of the 3600 s run, before the recharge planned at 80 %: 1440 s expected.
+        val partial = MowingText.summary(record(outcome = MowingOutcome.INTERRUPTED, done = 40.0, active = 1080.0))
         assertTrue(partial, partial.contains("(−25 %)") && partial.endsWith("· 40 % tondus"))
         assertTrue(MowingText.summary(record(TaskKind.SURVEY, MowingOutcome.INTERRUPTED, done = 50.0)).endsWith("50 % parcourus"))
         // Too short to compare: no deviation shown.

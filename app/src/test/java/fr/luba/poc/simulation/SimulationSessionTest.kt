@@ -6,6 +6,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.test.core.app.ApplicationProvider
 import fr.luba.poc.map.*
+import java.io.File
+import java.time.Duration
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
@@ -13,9 +16,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import java.io.File
-import java.time.Duration
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Simulation session (map screen): playback in 100 ms steps of the main-thread clock, pause, resume, speed,

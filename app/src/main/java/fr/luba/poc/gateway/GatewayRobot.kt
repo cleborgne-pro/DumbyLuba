@@ -1,19 +1,29 @@
 package fr.luba.poc.gateway
 
+import fr.luba.poc.Clock
 import fr.luba.poc.autonomy.GatewayAutonomy
+import fr.luba.poc.autonomy.GatewayDetachment
 import fr.luba.poc.autonomy.LegContact
 import fr.luba.poc.autonomy.LegEnv
 import fr.luba.poc.autonomy.LegHooks
 import fr.luba.poc.autonomy.LegHost
+import fr.luba.poc.autonomy.OrphanDock
 import fr.luba.poc.autonomy.PilotSink
 import fr.luba.poc.autonomy.RobotObserver
 import fr.luba.poc.autonomy.RobotView
 import fr.luba.poc.ble.MotionSetpoints
 import fr.luba.poc.ble.RobotLink
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.PhoneGravity
+import fr.luba.poc.map.Point
 import fr.luba.poc.protocol.Blufi
-import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.protocol.Commands
+import fr.luba.poc.protocol.CutHeightRange
+import fr.luba.poc.protocol.ModelSupport
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ScheduledExecutorService
@@ -100,7 +110,7 @@ class GatewayRobot(
     /** Reason to forbid the blades (battery of the phone mounted on the robot too low); blades-OFF moves allowed. */
     private val cuttingCheck: () -> String? = { null },
     /** Acceleration of the phone mounted on the robot (fresh reading), attached to signal surveys for slope and terrain. */
-    private val tilt: () -> fr.luba.poc.map.PhoneGravity? = { null },
+    private val tilt: () -> PhoneGravity? = { null },
     private val orphanLimitMs: Long = GatewayAutonomy.ORPHAN_LIMIT_MS,
     /** Automatic retries to the kept robot stop once the gateway has been unused (no pilot, no tracking) this long. */
     private val idleRetryMs: Long = IDLE_RETRY_MS,
@@ -125,7 +135,7 @@ class GatewayRobot(
     private var mtu = 23
     private var connectingSince = 0L
     /** Last moment the gateway was in use (start, pilot plugged in or unplugged, tracking running), [System.currentTimeMillis]. */
-    private var usedAt = System.currentTimeMillis()
+    private var usedAt = Clock.now()
     private var retryPaused = false
     private var blufi = Blufi()
     private var safety = GatewaySafety()
@@ -146,7 +156,7 @@ class GatewayRobot(
     private fun newObserver() = RobotObserver(::monotonicMs, clock, ::urgentStop)
     @Volatile private var observer: RobotObserver = newObserver()
     /** Gateway fallen off the robot, from its own Bluetooth signal to the robot (read during route trackings). Under lock. */
-    private val detachment = fr.luba.poc.autonomy.GatewayDetachment()
+    private val detachment = GatewayDetachment()
     /** Last own RSSI read requested ([monotonicMs]). */
     private var ownRssiAt = 0L
 
@@ -168,7 +178,7 @@ class GatewayRobot(
             val changed = this.address != address || (name != null && name != this.name)
             this.address = address; if (name != null) this.name = name
             if (changed) runCatching { onRemember(address, this.name) }
-            usedAt = System.currentTimeMillis(); retryPaused = false
+            usedAt = Clock.now(); retryPaused = false
             if (link == null) open()
             publish()
         }
@@ -220,7 +230,7 @@ class GatewayRobot(
         if (pilot != null) return "Passerelle occupée par un autre pilote"
         if (address != null && address != requested && link != null) return "La passerelle tient déjà un autre robot ($name)"
         pilot = newPilot; pilotSynced = false
-        usedAt = System.currentTimeMillis(); retryPaused = false
+        usedAt = Clock.now(); retryPaused = false
         if (address != requested || link == null || (requestedName != null && requestedName != name)) connect(requested, requestedName)
         // Safety stop written while the pilot was away: tell it (it reported it as "not guaranteed").
         lastStop?.let { stop ->
@@ -255,7 +265,7 @@ class GatewayRobot(
         val gen = synchronized(lock) {
             if (pilot !== old) return null
             pilot = null
-            usedAt = System.currentTimeMillis() // automatic retries for [idleRetryMs] from the pilot's departure
+            usedAt = Clock.now() // automatic retries for [idleRetryMs] from the pilot's departure
             queue.removeAll { it.owner === old }
             publish()
             if (!emergency) return null
@@ -268,8 +278,8 @@ class GatewayRobot(
     /** Safety stop written by the gateway: blades OFF if they may spin, then zero speed, each frame confirmed. Wire text. */
     private fun emergencyWrite(gen: Int): String {
         // Let the current write finish: it sets the sequence and the blade state.
-        val deadline = System.currentTimeMillis() + ackTimeoutMs
-        while (synchronized(lock) { inFlight != null && generation == gen } && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        val deadline = Clock.now() + ackTimeoutMs
+        while (synchronized(lock) { inFlight != null && generation == gen } && Clock.now() < deadline) Thread.sleep(10)
         val pending = synchronized(lock) {
             if (generation != gen || !ready) return "liaison robot perdue : arrêt non transmis"
             if (inFlight != null) { closeLink("écriture bloquée"); return "écriture GATT bloquée : liaison fermée, arrêt non garanti" }
@@ -280,10 +290,13 @@ class GatewayRobot(
             }
             // Tracking writes still pending (setpoint, keepalive blades ON…): removed, they would go after the stop.
             purgeOwnLocked()
-            val ops = payloads.flatMap { blufi.fragment(it, mtu) }.map { frame -> Op.Write(frame, null, LinkedBlockingQueue()) }
+            val confirmations = mutableListOf<LinkedBlockingQueue<Int>>()
+            val ops = payloads.flatMap { blufi.fragment(it, mtu) }.map { frame ->
+                Op.Write(frame, null, LinkedBlockingQueue<Int>().also(confirmations::add))
+            }
             queue.addAll(0, ops)
             pump()
-            ops.map { it.done!! }
+            confirmations
         }
         for (done in pending) {
             val code = done.poll(ackTimeoutMs * 2, TimeUnit.MILLISECONDS)
@@ -303,9 +316,12 @@ class GatewayRobot(
         val pending = synchronized(lock) {
             if (!ready || link == null) return "robot non connecté"
             if (safety.midMessage) return "message BluFi en cours d'écriture"
-            val ops = payloads.flatMap { blufi.fragment(it, mtu) }.map { frame -> Op.Write(frame, null, LinkedBlockingQueue()) }
+            val confirmations = mutableListOf<LinkedBlockingQueue<Int>>()
+            val ops = payloads.flatMap { blufi.fragment(it, mtu) }.map { frame ->
+                Op.Write(frame, null, LinkedBlockingQueue<Int>().also(confirmations::add))
+            }
             queue.addAll(ops); pump()
-            ops.map { it.done!! }
+            confirmations
         }
         for (done in pending) {
             val code = done.poll(ackTimeoutMs * 2, TimeUnit.MILLISECONDS)
@@ -319,20 +335,20 @@ class GatewayRobot(
      * from manual mode (the official return is ignored in state 20), zero speed, then the official Mammotion return; the
      * firmware then docks by itself. No motion setpoint is written by the gateway. The result is a wire text (French).
      */
-    private fun dockAlone(approach: fr.luba.poc.map.Point): String {
-        fr.luba.poc.autonomy.OrphanDock.refusal(observer.view, monotonicMs(), approach)?.let { return "accostage non demandé : $it" }
+    private fun dockAlone(approach: Point): String {
+        OrphanDock.refusal(observer.view, monotonicMs(), approach)?.let { return "accostage non demandé : $it" }
         // Navigation receiver of the kept robot's model (the official return is a navigation message).
         val commands = Commands.forRobot(synchronized(lock) { name })
-        val height = (observer.view.telemetry.bladeHeightMm ?: 60).let(fr.luba.poc.protocol.CutHeightRange.ANY::clamp)
+        val height = (observer.view.telemetry.bladeHeightMm ?: 60).let(CutHeightRange.ANY::clamp)
         // Reports renewed: the position must stay fresh while leaving manual mode.
         writeConfirmed(listOf(commands.reports(true, periodMs = 200), commands.manualMow(0, 0, height)))?.let { return "accostage non demandé : lames OFF $it" }
         val deadline = monotonicMs() + 4000
         while (observer.view.telemetry.robotState == 20 && monotonicMs() < deadline) Thread.sleep(200)
         if (observer.view.telemetry.robotState == 20) return "accostage non demandé : mode manuel non quitté"
-        fr.luba.poc.autonomy.OrphanDock.refusal(observer.view, monotonicMs(), approach)?.let { return "accostage non demandé : $it" }
+        OrphanDock.refusal(observer.view, monotonicMs(), approach)?.let { return "accostage non demandé : $it" }
         writeConfirmed(listOf(commands.stop(), commands.returnToDock()))?.let { return "accostage non confirmé : $it" }
-        return "${fr.luba.poc.autonomy.OrphanDock.RESULT_PREFIX} (pilote absent), à %.0f cm du point d'approche".format(
-            observer.view.telemetry.let { t -> fr.luba.poc.map.Point(t.x ?: approach.x, t.y ?: approach.y).distance(approach) * 100 })
+        return "${OrphanDock.RESULT_PREFIX} (pilote absent), à %.0f cm du point d'approche".format(
+            observer.view.telemetry.let { t -> Point(t.x ?: approach.x, t.y ?: approach.y).distance(approach) * 100 })
     }
 
     fun write(from: GatewayPilot, frame: ByteArray) {
@@ -395,13 +411,13 @@ class GatewayRobot(
             return GatewayLegEnv(hooks)
         }
         override fun emergencyStop(): String = ownEmergencyStop()
-        override fun nativeDock(approach: fr.luba.poc.map.Point): String = dockAlone(approach)
+        override fun nativeDock(approach: Point): String = dockAlone(approach)
         override fun refusal(): String? = synchronized(lock) {
             when {
                 link == null || !ready -> "Robot non connecté en Bluetooth sur la passerelle"
                 // Read-only mode (docs/features/supported-models.md): a known robot name that is not validated never
                 // gets an autonomous leg. An unknown name is left to the pilot, which checks the robot it selected.
-                name != null && !fr.luba.poc.protocol.ModelSupport.motionValidated(name) -> "Modèle de robot en lecture seule : suivi autonome refusé"
+                name != null && !ModelSupport.motionValidated(name) -> "Modèle de robot en lecture seule : suivi autonome refusé"
                 safety.midMessage -> "Message BluFi en cours d'écriture : réessayer"
                 // Same preconditions as starting a route on the pilot: fresh robot state and position (≤ 2 s).
                 observer.view.let { v -> v.devicePrevious == 0L || monotonicMs() - v.devicePrevious !in 0..2000 } ->
@@ -423,7 +439,7 @@ class GatewayRobot(
         override fun linkHealthy(): Boolean = linkProblem() == null
         override fun linkProblem(): String? {
             val problem = synchronized(lock) {
-                linkProblem(ready && link != null, ownWriteFailedCode, queue.size, inFlight?.let { System.currentTimeMillis() - inFlightSince }, ackTimeoutMs * 2)
+                linkProblem(ready && link != null, ownWriteFailedCode, queue.size, inFlight?.let { Clock.now() - inFlightSince }, ackTimeoutMs * 2)
             } ?: return null
             // Link lost because the gateway fell off: the reason says so (with where to find it).
             return detached() ?: problem
@@ -436,7 +452,7 @@ class GatewayRobot(
             val verdict = synchronized(lock) { detachment.verdict } ?: return null
             if (!announced) {
                 announced = true
-                runCatching { event(fr.luba.poc.autonomy.GatewayDetachment.EVENT, verdict.text, verdict.fields()) }
+                runCatching { event(GatewayDetachment.EVENT, verdict.text, verdict.fields()) }
             }
             return verdict.text
         }
@@ -447,7 +463,7 @@ class GatewayRobot(
         override fun onWritten(listener: ((label: String, at: Long) -> Unit)?) { ownWritten = listener }
         override suspend fun delay(ms: Long) = kotlinx.coroutines.delay(ms)
         override fun confirmedHeading(heading: Double?) { observer.confirmedHeading = heading }
-        override fun tilt(): fr.luba.poc.map.PhoneGravity? = this@GatewayRobot.tilt()
+        override fun tilt(): PhoneGravity? = this@GatewayRobot.tilt()
     }
 
     // --- Internal (under lock) ---
@@ -458,7 +474,7 @@ class GatewayRobot(
         ready = false; mtu = 23; blufi = Blufi(); queue.clear(); inFlight = null
         observer = newObserver().also { fresh -> safety = GatewaySafety().also { it.onMessage = fresh::accept } }
         ownWriteFailedCode = null
-        connectingSince = System.currentTimeMillis()
+        connectingSince = Clock.now()
         report(tr("Bluetooth connection to the robot ${name ?: target}…", "Connexion Bluetooth au robot ${name ?: target}…"))
         val opened = runCatching { links.open(target, Listener(gen)) }.getOrNull()
         if (gen != generation) { opened?.let { runCatching { it.close() } }; return }
@@ -491,7 +507,7 @@ class GatewayRobot(
         if (inFlight != null || !ready) return
         val l = link ?: return
         val op = queue.removeFirstOrNull() ?: return
-        inFlight = op; inFlightSince = System.currentTimeMillis()
+        inFlight = op; inFlightSince = Clock.now()
         val accepted = runCatching {
             when (op) {
                 is Op.Write -> { val frame = blufi.forWrite(op.frame); sent = frame; l.write(frame) }
@@ -505,7 +521,7 @@ class GatewayRobot(
         op.done?.offer(code)
         when (op) {
             is Op.Write -> {
-                op.owner?.written(code, (System.currentTimeMillis() - inFlightSince).toInt().coerceAtLeast(0))
+                op.owner?.written(code, (Clock.now() - inFlightSince).toInt().coerceAtLeast(0))
                 if (op.label != null) {
                     if (code != RobotLink.GATT_SUCCESS) { if (ownWriteFailedCode == null) ownWriteFailedCode = code }
                     else if (op.last) ownWritten?.invoke(op.label, monotonicMs())
@@ -516,12 +532,12 @@ class GatewayRobot(
     }
 
     /** Robot position less than 2 s old, or null. */
-    private fun freshPosition(): fr.luba.poc.map.Point? {
+    private fun freshPosition(): Point? {
         val v = observer.view
         if (v.positionPrevious == 0L || monotonicMs() - v.positionPrevious !in 0..2000) return null
         val x = v.telemetry.x?.takeIf { it.isFinite() } ?: return null
         val y = v.telemetry.y?.takeIf { it.isFinite() } ?: return null
-        return fr.luba.poc.map.Point(x, y)
+        return Point(x, y)
     }
 
     /** Own RSSI reading during a route tracking (under lock): a gateway fallen off the robot stops it at once. */
@@ -540,7 +556,7 @@ class GatewayRobot(
 
     private fun tickLocked(tracking: Boolean) {
         if (closed) return
-        val now = System.currentTimeMillis()
+        val now = Clock.now()
         if (inFlight != null && now - inFlightSince > ackTimeoutMs * 2) { drop("opération GATT sans réponse", now); return }
         if (link != null && !ready && now - connectingSince > connectTimeoutMs) { drop("connexion sans réponse", now); return }
         if (pilot != null || tracking) { usedAt = now; retryPaused = false }
@@ -554,7 +570,7 @@ class GatewayRobot(
         if (link == null && address != null && retryAllowed && now - connectingSince > retryMs) open()
         // Route tracking: own Bluetooth signal read every second, to notice a gateway fallen off the robot.
         val mono = monotonicMs()
-        if (ready && link != null && observer.active && mono - ownRssiAt >= fr.luba.poc.autonomy.GatewayDetachment.READ_PERIOD_MS &&
+        if (ready && link != null && observer.active && mono - ownRssiAt >= GatewayDetachment.READ_PERIOD_MS &&
             (listOfNotNull(inFlight) + queue).none { it is Op.Rssi && it.owner == null }) {
             ownRssiAt = mono
             queue.addLast(Op.Rssi(null)); pump()
@@ -582,7 +598,7 @@ class GatewayRobot(
         private inline fun live(block: () -> Unit) = synchronized(lock) { if (gen == generation) block() }
         override fun onDiscovering(link: RobotLink) = live { pilot?.discovering() }
         override fun onReady(link: RobotLink, mtu: Int) = live {
-            ready = true; this@GatewayRobot.mtu = mtu; lastKeepalive = System.currentTimeMillis()
+            ready = true; this@GatewayRobot.mtu = mtu; lastKeepalive = Clock.now()
             report(tr("Robot ${name ?: address} connected over Bluetooth (MTU $mtu)", "Robot ${name ?: address} connecté en Bluetooth (MTU $mtu)"))
             pilot?.ready(mtu)
             publish(); pump()
@@ -593,14 +609,14 @@ class GatewayRobot(
             report(tr("Robot Bluetooth link lost ($code): new attempt in ${retryMs / 1000} s", "Liaison Bluetooth robot perdue ($code) : nouvel essai dans ${retryMs / 1000} s"))
             val p = pilot
             closeLink(reason)
-            connectingSince = System.currentTimeMillis()
+            connectingSince = Clock.now()
             p?.lost(code, reason)
         }
         override fun onFailure(link: RobotLink, reason: String) = live {
             report(tr("Bluetooth failure: $reason", "Échec Bluetooth : $reason"))
             val p = pilot
             closeLink(reason)
-            connectingSince = System.currentTimeMillis()
+            connectingSince = Clock.now()
             p?.failure(reason)
         }
         override fun onWritten(link: RobotLink, code: Int) = live {
@@ -636,7 +652,7 @@ class GatewayRobot(
             failedCode != null -> tr("BLE interrupted: write refused by the robot (code $failedCode)", "BLE interrompu : écriture refusée par le robot (code $failedCode)")
             inFlightMs != null && inFlightMs >= stallMs ->
                 tr("BLE interrupted: write unconfirmed by the robot for %.1f s", "BLE interrompu : écriture sans confirmation du robot depuis %.1f s")
-                    .format(if (fr.luba.poc.i18n.I18n.french) java.util.Locale.FRANCE else java.util.Locale.US, inFlightMs / 1000.0)
+                    .format(if (I18n.french) Locale.FRANCE else Locale.US, inFlightMs / 1000.0)
             queued > 4 -> tr("BLE interrupted: write queue saturated ($queued frames pending)", "BLE interrompu : file d'écriture saturée ($queued trames en attente)")
             else -> null
         }
@@ -646,6 +662,6 @@ class GatewayRobot(
         private const val GATT_TIMEOUT = 8
         /** Safety stop handed to a pilot returning within this delay; beyond it, the information is stale. */
         private const val STOP_REPORT_MS = 30 * 60 * 1000L
-        private fun time(at: Long): String = java.text.SimpleDateFormat("HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(java.util.Date(at))
+        private fun time(at: Long): String = SimpleDateFormat("HH:mm:ss", I18n.locale).format(Date(at))
     }
 }

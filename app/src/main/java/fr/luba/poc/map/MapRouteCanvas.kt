@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -13,6 +15,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.history.CoverageMap
 import fr.luba.poc.history.drawRealCoverage
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.simulation.*
@@ -20,7 +23,7 @@ import fr.luba.poc.ui.theme.MammotionColors
 import kotlin.math.min
 
 /**
- * Static layer of the map ([MapScreen]): lawn, base safety zone, route stripes and center lines, obstacles, heatmap,
+ * Static layer of the map ([MapScreen]): lawn, base safety zone, zone being painted, route stripes and center lines, obstacles, heatmap,
  * real coverage, accesses, station, simulation, real trace, resume, move to a point, zone order and names. The camera is read in the
  * drawing and layer phases only ([camera] provider): a zoom or a pan redraws without recomposing. The animated
  * effects are drawn by [MapFxLayer].
@@ -34,7 +37,9 @@ internal fun MapRouteCanvas(
     resumeSkip: ResumeSkipView?, pointMove: PointMoveState, pointTarget: PointTarget, demo: Boolean,
     recoveryPoints: List<KnownPoint>, zoneNameLabels: List<ZoneLabel>, routeGeometry: LiveGeometry,
     /** Real coverage of the current or last mowing ([fr.luba.poc.history.realCoverageLayer]), null when hidden. */
-    coverageLayer: Pair<fr.luba.poc.history.CoverageMap, androidx.compose.ui.graphics.ImageBitmap>?,
+    coverageLayer: Pair<CoverageMap, ImageBitmap>?,
+    /** Zone being painted during the zone choice ([ZonePaintState]), null otherwise. */
+    paint: ZonePaintState? = null,
 ) {
     val colors = MammotionColors
 Canvas(
@@ -71,7 +76,7 @@ Canvas(
         // Trace break ([MissionTrail.BREAK]): the next piece starts again without a connecting line.
         var start = true
         points.forEach { p ->
-            if (fr.luba.poc.simulation.MissionTrail.isBreak(p)) { start = true; return@forEach }
+            if (MissionTrail.isBreak(p)) { start = true; return@forEach }
             val o = screen(p)
             if (start) out.moveTo(o.x, o.y) else out.lineTo(o.x, o.y)
             start = false
@@ -110,6 +115,7 @@ Canvas(
     val bandStroke = Stroke(width = cutPx, cap = StrokeCap.Round, join = StrokeJoin.Round)
     routeGeometry.begin(MapProjection(minX, minY, scale, ox, oy, size.height))
     val routePath = routeGeometry::path
+    paint?.let { drawZonePaint(it, map, routeGeometry.surface(map, null), routePath, ::screen, scale, screenUnit, colors) }
     (sim.engine?.preview ?: preview)?.passes?.forEach { drawPath(routePath(it, false), colors.BandPass, style = bandStroke) }
     // Border loops lighter than the passes: the margin held along the boundaries and around the no-go zones
     // reads as an edging, as in the Mammotion app.
@@ -123,7 +129,7 @@ Canvas(
     coverageLayer?.let { (coverage, image) -> drawRealCoverage(coverage, image, ::screen) }
 
     // Local point obstacles: physical circle, safety margin, turning envelope.
-    // Saved obstacles; presumed obstacles are drawn by the Obstacles layer (dashed).
+    // Saved obstacles; presumed obstacles are drawn dashed by drawDifficultyLayers.
     drawLocalObstacles(state.obstacles, ::screen, scale, colors, unit = screenUnit)
     // Encountered obstacles (photo) and difficulties heatmap, according to the displayed layers.
     drawDifficultyLayers(state.difficulties, extraLayers, state.obstaclePhoto.photos, ::screen, scale, colors, unit = screenUnit)
@@ -131,7 +137,7 @@ Canvas(
     if (heatShown) signalView.cells.forEach { cell ->
         val color = signalView.color(cell)
         val corner = screen(Point(cell.point.x-0.5,cell.point.y+0.5))
-        drawRect(color,corner,androidx.compose.ui.geometry.Size(scale.toFloat(),scale.toFloat()))
+        drawRect(color,corner,Size(scale.toFloat(),scale.toFloat()))
     }
     // Manual accesses: travel with blades stopped (blue dashes).
     accesses.forEach { drawTransitPath(path(it, false), screenUnit, colors, 1.75f) }

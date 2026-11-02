@@ -4,6 +4,7 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.*
 import androidx.lifecycle.ViewModelProvider
 import fr.luba.poc.MainActivity
@@ -24,7 +25,7 @@ class RobotLinkService : Service() {
      * Wi-Fi kept active during the link (screen off, app in the background): the pilot talks to the gateway over Wi-Fi.
      * Tests of 2026-10-14: Fold in the background, screen off, access point lost at 10:33 then Wi-Fi turned off by Android.
      */
-    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
     private val main = Handler(Looper.getMainLooper())
     private val renewWake = object : Runnable {
         override fun run() {
@@ -40,7 +41,11 @@ class RobotLinkService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             // Emergency stop from the notification: STOP, blades OFF then the link is closed.
-            try { robot().stop() } catch (_: Exception) { }
+            val failure = runCatching { robot().stop() }.exceptionOrNull()
+            if (failure != null) runCatching {
+                robot().journal("service_stop_failed", tr("STOP from the link service failed: ${failure.javaClass.simpleName}",
+                    "STOP depuis le service de liaison impossible : ${failure.javaClass.simpleName}"), mapOf("error" to failure.message))
+            }
             stopSelf()
             return START_NOT_STICKY
         }
@@ -62,8 +67,8 @@ class RobotLinkService : Service() {
             main.postDelayed(renewWake, WAKE_MS / 2)
             if (wifiLock == null) wifiLock = runCatching {
                 @Suppress("DEPRECATION")
-                getSystemService(android.net.wifi.WifiManager::class.java)
-                    .createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "DumbyLuba:link")
+                getSystemService(WifiManager::class.java)
+                    .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "DumbyLuba:link")
                     .apply { setReferenceCounted(false); acquire() }
             }.getOrNull()
             mutable.value = true
@@ -77,7 +82,11 @@ class RobotLinkService : Service() {
 
     /** App removed from recent tasks: no supervision without a screen, so STOP and close. */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        try { robot().disconnect() } catch (_: Exception) { }
+        val failure = runCatching { robot().disconnect() }.exceptionOrNull()
+        if (failure != null) runCatching {
+            robot().journal("service_disconnect_failed", tr("Disconnection by the link service failed: ${failure.javaClass.simpleName}",
+                "Déconnexion depuis le service de liaison impossible : ${failure.javaClass.simpleName}"), mapOf("error" to failure.message))
+        }
         stopSelf()
         super.onTaskRemoved(rootIntent)
     }
@@ -99,11 +108,13 @@ class RobotLinkService : Service() {
         /** True while the foreground service holds the link. */
         val active = mutable.asStateFlow()
 
-        fun start(context: Context) {
-            try { context.startForegroundService(Intent(context, RobotLinkService::class.java)) } catch (_: Exception) { }
-        }
-        fun stop(context: Context) {
-            try { context.stopService(Intent(context, RobotLinkService::class.java)) } catch (_: Exception) { }
-        }
+        /** Starts the service; the failure (background start refused by Android…) is returned for the event log. */
+        fun start(context: Context): Exception? = try {
+            context.startForegroundService(Intent(context, RobotLinkService::class.java)); null
+        } catch (e: Exception) { e }
+        /** Stops the service; the failure is returned for the event log. */
+        fun stop(context: Context): Exception? = try {
+            context.stopService(Intent(context, RobotLinkService::class.java)); null
+        } catch (e: Exception) { e }
     }
 }

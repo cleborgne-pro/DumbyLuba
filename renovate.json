@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard"],
+  "labels": ["dependencies"],
+  "rangeStrategy": "pin",
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "schedule": ["every weekend"],
+  "rebaseWhen": "behind-base-branch",
+  "packageRules": [
+    {
+      "description": "Version catalog: every dependency lives in gradle/libs.versions.toml",
+      "matchManagers": ["gradle"],
+      "groupName": "Gradle dependencies"
+    },
+    {
+      "description": "Compose is driven by the BOM: upgrading the BOM and the artifacts together keeps them aligned",
+      "matchPackageNames": ["androidx.compose:compose-bom", "/^androidx\\.compose/"],
+      "groupName": "Compose"
+    },
+    {
+      "description": "Kotlin, KSP and Compose compiler share the Kotlin version and must move together",
+      "matchPackageNames": ["/^org\\.jetbrains\\.kotlin/"],
+      "groupName": "Kotlin"
+    },
+    {
+      "description": "Android Gradle Plugin and the Gradle wrapper are upgraded by hand, with a full build on a device",
+      "matchPackageNames": ["com.android.application", "/^com\\.android\\.tools\\.build/", "/^gradle$/"],
+      "enabled": false
+    },
+    {
+      "description": "Test-only libraries: lower risk, but still validated by the pipeline before merging",
+      "matchManagers": ["gradle"],
+      "matchPackageNames": ["junit:junit", "/robolectric/", "/roborazzi/", "org.json:json"],
+      "groupName": "Test libraries"
+    }
+  ],
+  "ignorePaths": ["home-server/data/**", "artifacts/**", "**/build/**"]
+}

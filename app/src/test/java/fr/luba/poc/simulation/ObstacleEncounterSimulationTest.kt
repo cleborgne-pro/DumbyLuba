@@ -1,8 +1,8 @@
 package fr.luba.poc.simulation
 
 import fr.luba.poc.map.*
-import fr.luba.poc.planning.RoutePlanning
 import fr.luba.poc.obstacles.RobotEnvelope
+import fr.luba.poc.planning.RoutePlanning
 import org.junit.Assert.*
 import org.junit.Test
 import org.locationtech.jts.geom.Coordinate

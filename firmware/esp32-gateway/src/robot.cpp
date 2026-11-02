@@ -21,6 +21,7 @@
 #include "gw_reconnect.h"
 #include "gw_safety.h"
 #include "gw_worker.h"
+#include "journal.h"
 
 // ESP-IDF configuration with the Bluetooth controller only (CONFIG_BT_CONTROLLER_ONLY, platformio.ini): NimBLE-Arduino
 // brings its own host. The Arduino core then leaves out the "BLE library in use" flag that NimBLE-Arduino still sets at
@@ -151,7 +152,7 @@ struct Lock {
   ~Lock() { xSemaphoreGiveRecursive(mtx); }
 };
 
-void report(const std::string &text) { Serial.printf("[robot] %s\n", text.c_str()); }
+void report(const std::string &text) { journal::console.printf("[robot] %s\n", text.c_str()); }
 
 int64_t monotonicMs() { return esp_timer_get_time() / 1000; }
 
@@ -1043,7 +1044,7 @@ namespace {
 
 // Task of a worker: runs its bodies for good (gw_worker.h).
 void workerTask(void *arg) {
-  static_cast<gw::leg::Worker *>(arg)->run([](const char *what) { Serial.printf("[leg] task body ended by an exception: %s\n", what); });
+  static_cast<gw::leg::Worker *>(arg)->run([](const char *what) { journal::console.printf("[leg] task body ended by an exception: %s\n", what); });
   vTaskDelete(nullptr);
 }
 
@@ -1067,7 +1068,7 @@ void startAutonomy() {
   // A worker that could not be created falls back to a task per body (the former behaviour).
   const gw::leg::Spawner spawner = gw::leg::workerSpawner(legOk ? legWorker : nullptr, prepareOk ? prepareWorker : nullptr, spawnTask);
   autonomy.reset(new gw::leg::GatewayAutonomy(
-      legHost, spawner, [](const std::string &text) { Serial.printf("[leg] %s\n", text.c_str()); },
+      legHost, spawner, [](const std::string &text) { journal::console.printf("[leg] %s\n", text.c_str()); },
       // Durations only (pilot absent for 20 min): monotonic, never shifted by the NTP synchronisation.
       [] { return monotonicMs(); }, limits));
 }
@@ -1082,9 +1083,9 @@ bool spawnTask(const char *taskName, std::function<void()> body) {
         try {
           (*f)();
         } catch (const std::exception &e) {
-          Serial.printf("[leg] task ended by an exception: %s\n", e.what());
+          journal::console.printf("[leg] task ended by an exception: %s\n", e.what());
         } catch (...) {
-          Serial.println("[leg] task ended by an exception");
+          journal::console.println("[leg] task ended by an exception");
         }
         f.reset();
         vTaskDelete(nullptr);

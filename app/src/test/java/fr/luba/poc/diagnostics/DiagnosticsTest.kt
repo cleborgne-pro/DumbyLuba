@@ -1,7 +1,7 @@
 package fr.luba.poc.diagnostics
 
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 

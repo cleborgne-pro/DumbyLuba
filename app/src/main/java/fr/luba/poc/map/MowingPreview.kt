@@ -18,7 +18,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.obstacles.LocalObstacle
+import fr.luba.poc.simulation.AdaptiveSpeed
+import fr.luba.poc.simulation.SpeedReason
 import fr.luba.poc.ui.Format
+import fr.luba.poc.ui.components.LubaProgress
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
 import kotlin.math.ceil
@@ -28,6 +31,8 @@ fun MowingPreview(map: RobotMap, plan: Preview?, obstacles: List<LocalObstacle>,
     computing: Boolean = false, validating: Boolean = false, stage: String = tr("Computing the route", "Calcul du trajet"), zoneIds: Set<Long> = plan?.zoneIds.orEmpty().toSet(),
     /** Requested start point (chosen or saved), marked on the map; null = nearest to the robot. */
     requestedStart: Point? = null,
+    /** Metres of the prepared route driven slower ([AdaptiveSpeed]), by reason. */
+    slowed: Map<SpeedReason, Double> = emptyMap(),
     /** Start choice in progress: a tap on the map designates it. */
     onPickStart: ((Point) -> Unit)? = null) {
     val colors = MammotionColors
@@ -71,12 +76,13 @@ fun MowingPreview(map: RobotMap, plan: Preview?, obstacles: List<LocalObstacle>,
     }
     if (borderStrategy.isNotEmpty()) Text(tr("Borders by type", "Bordures par type") + "\n" + borderStrategy.joinToString("\n") { "• $it" },
         style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
+    if (slowed.isNotEmpty()) Text(AdaptiveSpeed.summary(slowed), style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
     if ((plan?.skippedBorderLoops ?: 0) > 0) Text(
         tr("${plan?.skippedBorderLoops} border fragment(s) too narrow to maneuver: not driven.", "${plan?.skippedBorderLoops} fragment(s) de bordure trop étroit(s) pour manœuvrer : non parcouru(s)."),
         style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
     if (computing) Text(stage, style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
     if (validating) {
-        fr.luba.poc.ui.components.LubaProgress(Modifier.fillMaxWidth())
+        LubaProgress(Modifier.fillMaxWidth())
         Text(tr("$stage. The buttons will be available once preparation is finished.", "$stage. Les boutons seront disponibles à la fin de la préparation."),
             style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
     }
@@ -112,7 +118,6 @@ fun MowingPreview(map: RobotMap, plan: Preview?, obstacles: List<LocalObstacle>,
             Text(if (onPickStart != null) tr("Tap the start point · pinch to zoom", "Touchez le point de départ · pincer pour zoomer") else tr("Drag · pinch to zoom · rotate with two fingers", "Glisser · pincer pour zoomer · tourner à deux doigts"),
                 Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall)
         }
-
 
     }
 

@@ -67,9 +67,37 @@ class MowingHistoryTest {
         val f = forecast()
         val r = record("a", MowingTotals(activeSeconds = 1800.0, batteryUsed = 30.0), outcome = MowingOutcome.INTERRUPTED, done = 50.0, f = f)
         val c = MowingComparison.of(r)
-        assertEquals(f.totalSeconds * 0.5, c.expectedSeconds, 1e-6)
+        // The recharge is planned at 80 % of the run (2880 s of 3600 s): not due at 50 %, nor any of its charge.
+        assertEquals(1800.0, c.expectedSeconds, 1e-6)
         assertEquals(0, c.expectedRecharges)
         assertEquals(1.0, c.observedTimeFactor!!, 1e-9)
+    }
+
+    @Test fun aRechargeDueBeforeTheInterruptionCountsWithItsWholeCharge() {
+        val f = forecast()
+        val charge = f.totalSeconds - 3600.0
+        val r = record("a", MowingTotals(activeSeconds = 3240.0, chargingSeconds = charge, batteryUsed = 90.0, batteryCharged = 70.0),
+            outcome = MowingOutcome.INTERRUPTED, done = 90.0, recharges = 1, f = f)
+        val c = MowingComparison.of(r)
+        assertEquals(1, c.expectedRecharges)
+        assertEquals(3240.0 + charge, c.expectedSeconds, 1e-6)
+        assertEquals("Conforme à l'estimation", c.durationVerdict)
+        assertEquals("Conforme à l'estimation", c.rechargeVerdict)
+    }
+
+    /** Fold test of 2026-11-02: a slow robot recharged at 57 % for a recharge planned at 80 %; it was not an extra one. */
+    @Test fun aSlowMowingRechargesSoonerRatherThanMore() {
+        val f = forecast()
+        val r = record("a", MowingTotals(activeSeconds = 3078.0, chargingSeconds = 1500.0, batteryUsed = 90.0, batteryCharged = 50.0),
+            outcome = MowingOutcome.INTERRUPTED, done = 57.0, recharges = 1, f = f)
+        val c = MowingComparison.of(r)
+        assertEquals(0, c.expectedRecharges)
+        assertTrue(c.rechargedEarlier)
+        assertEquals("Recharge plus tôt que prévu", c.rechargeVerdict)
+        // 3078 s instead of 0.57 × 3600 = 2052 s of run time: +50 %, said apart from the moved charge.
+        assertTrue(c.durationVerdict, c.durationVerdict.endsWith("(roulage +50 %)"))
+        // A second recharge would be one more than the whole estimate.
+        assertFalse(MowingComparison.of(r.copy(recharges = 2)).rechargedEarlier)
     }
 
     @Test fun calibrationLearnsFromRecentFinishedRecordsOnly() {

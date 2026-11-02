@@ -7,6 +7,8 @@ import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
+import java.time.Duration
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,8 +19,6 @@ import org.robolectric.shadows.SensorEventBuilder
 import org.robolectric.shadows.ShadowNetwork
 import org.robolectric.shadows.ShadowSensor
 import org.robolectric.shadows.ShadowSystemClock
-import java.time.Duration
-import java.util.concurrent.CopyOnWriteArrayList
 
 /** Phone sensors: gateway accelerometer (terrain) and pilot Wi-Fi (cause of an outage). */
 @RunWith(RobolectricTestRunner::class)

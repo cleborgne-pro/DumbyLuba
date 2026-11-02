@@ -1,10 +1,10 @@
 package fr.luba.poc.map
 
+import java.io.File
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.File
 
 class SignalSurveyStoreTest {
     @get:Rule val temp=TemporaryFolder()
@@ -14,7 +14,7 @@ class SignalSurveyStoreTest {
 
     @Test fun retainsDifferentToursOnTheSameDayAndRestoresAllSignalLayersAndMap() {
         val store=SignalSurveyStore(temp.root)
-        store.save(survey("one",1000));store.save(survey("two",2000))
+        store.save(survey("one",1000)); store.save(survey("two",2000))
         val restarted=SignalSurveyStore(temp.root)
         assertEquals(listOf("two","one"),restarted.history().map { it.sessionId })
         assertEquals("two",restarted.read("AA:BB")!!.sessionId)
@@ -26,7 +26,7 @@ class SignalSurveyStoreTest {
     @Test fun updatesOneSessionWithoutDuplicatingHistoryOrLosingPreviousTours() {
         val store=SignalSurveyStore(temp.root)
         val one=survey("one",1000)
-        store.save(one);store.save(one.copy(samples=one.samples+sample.copy(at=2000)))
+        store.save(one); store.save(one.copy(samples=one.samples+sample.copy(at=2000)))
         assertEquals(1,store.history().size)
         assertEquals(2,store.history().single().samples.size)
         store.save(survey("two",3000).copy(samples=emptyList()))
@@ -35,7 +35,7 @@ class SignalSurveyStoreTest {
     }
     @Test fun realAndSimulatedSurveysStayDistinctAfterRestart() {
         val store=SignalSurveyStore(temp.root)
-        store.save(survey("real",2000));store.save(survey("fake",3000,true))
+        store.save(survey("real",2000)); store.save(survey("fake",3000,true))
         val history=SignalSurveyStore(temp.root).history()
         assertEquals(2,history.size)
         assertTrue(history.first().simulated)

@@ -1,10 +1,11 @@
 package fr.luba.poc.alerts
 
+import fr.luba.poc.Clock
 import fr.luba.poc.i18n.tr
-import org.json.JSONArray
-import org.json.JSONObject
 import java.util.Calendar
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Notification shown in the panel: what Android displayed, at its time. Independent of Android for tests.
@@ -37,7 +38,7 @@ data class AlertEntry(val kind: AlertKind, val severity: Severity, val at: Long,
             val head = lines[0].split(" · ", limit = 3)
             val severity = Severity.valueOf(head[0])
             val kind = AlertKind.entries.first { it.titleFr == head[1] }
-            val stamp = Regex("""^(\d{2})/(\d{2}) (\d{2}):(\d{2}):(\d{2}) · (\d+) événement""").find(lines[1])!!.groupValues
+            val stamp = Regex("""^(\d{2})/(\d{2}) (\d{2}):(\d{2}):(\d{2}) · (\d+) événement""").find(lines[1])?.groupValues ?: return null
             val calendar = Calendar.getInstance(Locale.FRANCE).apply {
                 timeInMillis = now
                 set(get(Calendar.YEAR), stamp[2].toInt() - 1, stamp[1].toInt(), stamp[3].toInt(), stamp[4].toInt(), stamp[5].toInt())
@@ -80,7 +81,7 @@ data class AlertJournal(val entries: List<AlertEntry> = emptyList(), val records
         fun key(alert: RobotAlert) = "${alert.context.robotId}|${alert.kind.name}"
         /** Panel order: newest first, bounded; at equal times, arrival order is kept. */
         fun latest(entries: List<AlertEntry>) = entries.sortedByDescending { it.at }.take(MAX_ENTRIES)
-        fun decode(text: String, now: Long = System.currentTimeMillis()): AlertJournal {
+        fun decode(text: String, now: Long = Clock.now()): AlertJournal {
             val root = JSONObject(text)
             val entries = mutableListOf<AlertEntry>()
             val records = mutableMapOf<String, AlertRecord>()

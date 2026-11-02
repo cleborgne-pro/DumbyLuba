@@ -43,6 +43,11 @@ data class CutHeightRange(val minMm: Int, val maxMm: Int) {
     fun refusal(mm: Int): String? = if (mm in this) null else
         tr("Height outside the $label range", "Hauteur hors plage $label")
 
+    /** Throws [IllegalArgumentException] with the [refusal] text when [mm] is outside the range. */
+    fun requireHeight(mm: Int) {
+        refusal(mm)?.let { throw IllegalArgumentException(it) }
+    }
+
     companion object {
         /** LUBA 2 AWD, LUBA 3 AWD, LUBA 4 AWD standard version. */
         val STANDARD = CutHeightRange(25, 70)

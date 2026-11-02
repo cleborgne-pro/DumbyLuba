@@ -1,11 +1,11 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** One archive per route; updates only replace that same route. */
 class SignalSurveyStore(private val directory: File) {
@@ -34,9 +34,9 @@ class SignalSurveyStore(private val directory: File) {
             SignalSample(Point(s.getDouble("x"),s.getDouble("y")),s.getLong("at"),s.number("wifi"),s.number("ble"),s.number("mobile"),s.number("rtk"),s.number("gps"),
                 if (s.has("heading") && !s.isNull("heading")) s.getDouble("heading") else null,gravity) }
         val snapshot=data.optJSONArray("shapes")?.let { shapes -> RobotMap((0 until shapes.length()).map { i ->
-            val shape=shapes.getJSONObject(i);val points=shape.getJSONArray("points")
+            val shape=shapes.getJSONObject(i); val points=shape.getJSONArray("points")
             MapShape(shape.getLong("id"),shape.getInt("type"),(0 until points.length()).map { j ->
-                val p=points.getJSONArray(j);Point(p.getDouble(0),p.getDouble(1)) },shape.optString("name")) },true,tr("Map of the archived survey", "Carte du relevé archivé")) }
+                val p=points.getJSONArray(j); Point(p.getDouble(0),p.getDouble(1)) },shape.optString("name")) },true,tr("Map of the archived survey", "Carte du relevé archivé")) }
         val survey=SignalSurvey(data.optString("robot",fallbackId),data.getString("map"),(0 until zones.length()).map { zones.getLong(it) },samples,
             data.optString("id"),data.optLong("startedAt",samples.firstOrNull()?.at ?: 0),data.optBoolean("simulated"),
             runCatching { CoverageMode.valueOf(data.optString("mode","TOUR")) }.getOrDefault(CoverageMode.TOUR),snapshot,

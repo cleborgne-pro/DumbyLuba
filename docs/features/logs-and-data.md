@@ -18,6 +18,9 @@ possible to analyze a test and attach material to a ticket.
   decisions, alerts…). Each line carries `schemaVersion` (2), `appRunId` (one per launch), `sequence`, `timestamp`,
   `elapsedRealtimeMs`, `event`, `detail` and `fields`. Files: `diagnostics/<appRunId>/0000.jsonl`, `0001.jsonl`… in the
   app's private storage. Failures, stop requests and test results are flushed to disk immediately.
+- Service hub, group **This launch**: aggregate of the current launch's log (event count, STOP requests, failures,
+  link losses, last link loss time, average successful route preparation), re-read every 30 s without opening the raw
+  JSONL. A failure or a link loss leaves a warning note; the detail stays in **Logs**.
 - Service → Logs, group **Latest events**: the last 150 events, newest first ("No events." when empty). The notes
   under it recall that the full log stays on the phone, that the ZIP archive adds the test reports, and that exports
   are anonymized.
@@ -38,11 +41,21 @@ possible to analyze a test and attach material to a ticket.
 - **Raw archive (not anonymized, with photos)**, action under the notes: `luba-diagnostics-raw-<time>.zip` with every
   `.json`, `.jsonl` and `.jpg` file as stored, for the user's own analysis, with the same `tasks/` folder ("Raw archive
   exported (reports + kept logs + tasks + photos), not anonymized"). Not meant for a public ticket.
-- Rotation in 8 MB files, 256 MB at most per launch; writing is suspended when less than 32 MB of free space remains
-  ("Log limit reached / not enough disk space"). While the log is not healthy, tests that need it are refused
-  ("BLE / log not ready"). Earlier launches are not deleted automatically from the private folder.
-- A copy (96 MB at most per launch, the last 5 launches plus the current one) is reachable over ADB in the app's
-  external folder (`Android/data/fr.luba.poc/files/diagnostics/`), for analysis without a manual export.
+- Rotation in 8 MB files, 256 MB at most per launch: beyond, the oldest parts of the launch are deleted (the first one,
+  with the connection, is kept; the gap shows in the part numbers and the event sequence). A full log no longer stops
+  the robot. The logs of the earlier launches are kept up to 256 MB together, oldest launch first deleted (their
+  reports and the photos stay). When less than 32 MB of free space remains, the earlier logs then the old parts of
+  this launch are deleted first; writing is suspended only if that is not enough ("Not enough disk space for the
+  log"). While the log is not healthy, tests that need it are refused ("BLE / log not ready").
+- What is written: every decoded message, except the four the robot sends about once per second (status report,
+  `systemUpdateBuf`, `bidire_comm_cmd`, Wi-Fi status), written in full every 10 s (an unchanged one every minute; each
+  report still gives a `telemetry` line); raw received frames (`ble_rx`) only when their message fails to decode.
+  During a sensor capture every message is written. Replayed on the log of the Fold test of 2026-11-02
+  (5.9 h, 37 to 70 MB/h while connected): 14 MB instead of 101 MB, 7 times less.
+- A copy (96 MB at most per launch, its latest parts kept, the last 5 launches plus the current one) is reachable over
+  ADB in the app's external folder (`Android/data/fr.luba.poc/files/diagnostics/`), for analysis without a manual
+  export. The Mammotion account screen logs in its own folders (`cloud-<id>`), kept apart: they no longer push robot
+  launches out of the copy.
 - Test reports (`campaign-<id>.json`) are written atomically; a report still "RUNNING" when the app process ended is
   marked `INTERRUPTED_PROCESS_END_UNCONFIRMED` at the next launch.
 
@@ -61,7 +74,7 @@ IP address gets the same pseudonym in every file of the archive.
 | IP addresses (private ranges, after `/`, before `:port`) | `‹ip-1›`…; firmware versions are left alone |
 | E-mails, tokens (JWT) | `‹email›`, `‹token›` |
 | Other Bluetooth devices paired with or seen by the phone | name replaced by `‹other device›` |
-| Received BLE frames (`ble_rx`) | removed (`‹BLE frame removed, n bytes›`): telemetry carries the RTK position, the decoded form stays |
+| Received BLE frames (`ble_rx`, only frames that failed to decode) | removed (`‹BLE frame removed, n bytes›`): telemetry carries the RTK position, the decoded form stays |
 | Raw ZMQ messages, Wi-Fi network of the sensor probe | removed |
 | Obstacle photos | left out |
 

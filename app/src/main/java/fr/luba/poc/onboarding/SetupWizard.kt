@@ -2,19 +2,22 @@ package fr.luba.poc.onboarding
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -32,6 +35,7 @@ import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -91,7 +95,7 @@ fun SetupWizard(onExit: (WizardExit) -> Unit) {
             WizardPage.PILOT_DONE -> {
                 ScreenTitle(tr("Paired", "Appairé"), subtitle = tr("The robot connects through the gateway on its own.", "Le robot se connecte par la passerelle tout seul."))
                 StatusNote(tr("Next: check the setup (Wi-Fi, placement of the gateway, safety), then follow the list \"Before the first mowing\" on the home screen.",
-                    "Ensuite : vérifiez l'installation (Wi-Fi, placement de la passerelle, sécurité), puis suivez la liste « Avant la première tonte » de l'accueil."), NoteTone.SUCCESS)
+                    "Ensuite : vérifiez l'installation (Wi-Fi, placement de la passerelle, sécurité), puis suivez la liste « Avant la première tonte » de l'accueil."), tone = NoteTone.SUCCESS)
                 PrimaryPillButton(tr("Check the setup", "Vérifier l'installation"), { finish(WizardExit.SETUP_CHECK) }, Modifier.fillMaxWidth(), icon = Icons.Rounded.Checklist)
                 SecondaryPillButton(tr("Go to the home screen", "Aller à l'accueil"), { finish(WizardExit.HOME) }, Modifier.fillMaxWidth())
             }
@@ -116,7 +120,7 @@ fun SetupWizard(onExit: (WizardExit) -> Unit) {
 private fun Choice(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     val colors = MammotionColors
     Surface(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = colors.Surface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, colors.Hairline)) {
+        border = BorderStroke(1.dp, colors.Hairline)) {
         Row(Modifier.padding(Dimens.Lg), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.Md)) {
             Box(Modifier.size(44.dp).background(colors.GreenSoft, MaterialTheme.shapes.medium), contentAlignment = Alignment.Center) {
                 Icon(icon, contentDescription = null, tint = colors.Ink)
@@ -142,7 +146,7 @@ private fun PermissionsPage(title: String, why: String, onBack: () -> Unit, onNe
     ScreenTitle(title)
     InfoNote(why)
     if (refused) StatusNote(tr("Bluetooth refused: the robot cannot be found. Allow it in the Android settings (Android 8 to 11: location on), or continue and allow it later.",
-        "Bluetooth refusé : le robot ne peut pas être trouvé. Autorisez-le dans les paramètres Android (Android 8 à 11 : localisation activée), ou continuez et autorisez-le plus tard."), NoteTone.WARNING)
+        "Bluetooth refusé : le robot ne peut pas être trouvé. Autorisez-le dans les paramètres Android (Android 8 à 11 : localisation activée), ou continuez et autorisez-le plus tard."), tone = NoteTone.WARNING)
     PrimaryPillButton(tr("Allow", "Autoriser"), {
         if (granted(context, setupPermissions())) onNext() else launcher.launch(setupPermissions())
     }, Modifier.fillMaxWidth(), icon = Icons.Rounded.Check)
@@ -175,7 +179,7 @@ private fun PilotGatewayPage(onBack: () -> Unit, onPaired: () -> Unit, onDirect:
     if (testing) LubaProgress(Modifier.fillMaxWidth())
     failure?.let {
         StatusNote(tr("Paired, but the gateway does not answer yet: $it. Both phones must be on the same Wi-Fi; the app keeps trying on its own.",
-            "Appairé, mais la passerelle ne répond pas encore : $it. Les deux téléphones doivent être sur le même Wi-Fi ; l'application réessaie seule."), NoteTone.WARNING)
+            "Appairé, mais la passerelle ne répond pas encore : $it. Les deux téléphones doivent être sur le même Wi-Fi ; l'application réessaie seule."), tone = NoteTone.WARNING)
         SecondaryPillButton(tr("Continue", "Continuer"), onPaired, Modifier.fillMaxWidth())
     }
     TextAction(tr("No gateway yet: direct Bluetooth for now", "Pas encore de passerelle : Bluetooth direct pour l'instant"), {
@@ -195,7 +199,7 @@ private fun GatewayPhonePage(onBack: () -> Unit, onDone: () -> Unit) {
         while (true) {
             exempt = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
             dnd = SilenceKeeper.policyGranted(context)
-            kotlinx.coroutines.delay(2_000)
+            delay(2_000)
         }
     }
     BackRow(onBack)
@@ -210,7 +214,7 @@ private fun GatewayPhonePage(onBack: () -> Unit, onDone: () -> Unit) {
         if (!dnd) {
             InfoNote(tr("Keeps the phone on the robot silent (calls, notifications). Optional.", "Garde le téléphone posé sur le robot silencieux (appels, notifications). Facultatif."))
             SecondaryPillButton(tr("Allow \"Do not disturb\"", "Autoriser « Ne pas déranger »"),
-                { runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) } }, Modifier.fillMaxWidth())
+                { runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) } }, Modifier.fillMaxWidth())
         }
     }
     InfoNote(tr("Next: the home screen shows the QR code to scan from your phone. Then lay this phone flat on top of the robot, screen up, held firmly.",

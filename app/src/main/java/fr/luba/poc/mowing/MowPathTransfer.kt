@@ -1,10 +1,10 @@
 package fr.luba.poc.mowing
 
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlNavProto.*
 import fr.luba.poc.protocol.Commands
-import fr.luba.poc.i18n.tr
 
 /** Reading of the firmware route: subCmd=3 hashes, transactions of at most 20 lines. */
 class MowPathTransfer(private val transactionSeed: Long) {

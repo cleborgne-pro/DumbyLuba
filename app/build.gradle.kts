@@ -5,10 +5,18 @@ import java.nio.channels.OverlappingFileLockException
 import java.util.Properties
 
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.protobuf")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.protobuf)
+    alias(libs.plugins.ktlint)
+}
+
+// Style: ktlint with a reduced, high-signal rule set (see .editorconfig): existing code passes it as is, so no
+// multi-megabyte baseline is needed and new code is checked from the first line.
+ktlint {
+    version.set(libs.versions.ktlint.cli.get())
+    filter { exclude { it.file.path.contains("generated") } }
 }
 // Optional release signing: keystore.properties (not versioned) at the repository root, see
 // keystore.properties.example. Without this file, the release variant is built unsigned.
@@ -22,8 +30,8 @@ android {
         applicationId = "fr.luba.poc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 187
-        versionName = "1.17.0"
+        versionCode = 188
+        versionName = "1.18.0"
         testInstrumentationRunner = "fr.luba.poc.planning.PlannerDeviceBenchmark"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -38,6 +46,12 @@ android {
     buildTypes {
         getByName("release") {
             if (releaseSigning != null) signingConfig = signingConfigs.getByName("release")
+            // Shrinking and resource removal on the published APK (unminified release: 19 MB, 60 MB of dex on
+            // 2026-10-30). Keep rules in proguard-rules.pro; the Dalvik register check and the deploy verification
+            // stay the guard rails against a D8/ART regression.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         // Same application and signature, without the ART debugging constraints.
         // No check removal and no minification in this variant.
@@ -52,6 +66,11 @@ android {
     sourceSets.getByName("androidTest").assets.srcDir("src/test/resources")
     // Compose screenshots on the JVM (Robolectric): visual check without a device.
     testOptions { unitTests.isIncludeAndroidResources = true }
+    // Lint on the app sources only: the analysis of the unit test sources (lintAnalyzeFoldUnitTest, 1 min 14 s of
+    // CPU at each deployment, competing with the tests) reported nothing that the tests do not already check.
+    // No lint warning on the app (2026-10-31): a new one fails the check. A deliberate case is justified where it is
+    // (tools:ignore, @SuppressLint) or in app/lint.xml.
+    lint { ignoreTestSources = true; warningsAsErrors = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
 }
@@ -61,42 +80,58 @@ android {
 androidComponents {
     onVariants(selector().withBuildType("release")) { it.applicationId.set("io.github.cleborgne_pro.dumbyluba") }
 }
+// Compose stability: the lists and maps held by the UI state are immutable by contract (replaced, never mutated
+// after being published). Declaring them stable lets screens skip recomposition instead of re-running the whole
+// tree at each telemetry frame (1 Hz idle, 5 Hz while a route is tracked).
+composeCompiler {
+    stabilityConfigurationFiles.add(layout.projectDirectory.file("compose_compiler_config.conf"))
+}
 protobuf {
+    // Same version as `protobuf` in gradle/libs.versions.toml (protobuf-java); the catalog accessor is not usable in
+    // this provider-typed plugin block (script compilation failed on a clean configuration).
     protoc { artifact = "com.google.protobuf:protoc:3.25.5" }
     generateProtoTasks { all().configureEach { builtins { create("java") } } }
 }
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2025.08.01"))
-    implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.2")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
-    implementation("com.google.protobuf:protobuf-java:3.25.5")
-    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
-    implementation("org.locationtech.jts:jts-core:1.20.0")
+    implementation(platform(libs.compose.bom))
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.protobuf.java)
+    implementation(libs.jts.core)
     // Gateway pairing: QR code drawn on the gateway, read by the pilot's camera.
-    implementation("com.google.zxing:core:3.5.3")
-    implementation("androidx.camera:camera-camera2:1.4.2")
-    implementation("androidx.camera:camera-lifecycle:1.4.2")
-    implementation("androidx.camera:camera-view:1.4.2")
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20240303")
-    testImplementation("org.robolectric:robolectric:4.16")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.46.1")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.46.1")
-    testImplementation(platform("androidx.compose:compose-bom:2025.08.01"))
-    testImplementation("androidx.compose.ui:ui-test-junit4")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    implementation(libs.zxing.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    testImplementation(libs.junit)
+    testImplementation(libs.json)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
-// Fast tests are for iterations; deployment keeps the full suite.
-// Planner sweeps on the reference map (every zone, angle or spacing): about 80 % of the test time, excluded by
-// -PlubaQuickTests, run on their own by tools/check.sh planner and kept in the full suite.
+// Planner sweeps on the reference map (every zone, angle or spacing): about 70 % of the test time. They never run in
+// test<Variant>UnitTest but in their own test<Variant>PlannerSweeps task (registered below): tools/check.sh planner runs
+// them alone, the full suite (tools/check.sh full, deployments that touch the planner, publication) runs both tasks.
+// The second group: reference-map tests that only use the map, planning and simulation packages and took 3.5 s or
+// more each, 170 s of the 600 s of quick test classes (2026-10-31). A branch that does not touch those packages
+// cannot change their result; tools/deploy.sh runs them, with the sweeps, as soon as it does.
 val plannerSweeps = listOf("**/ReferenceMapPlannerTest*", "**/ReferenceMapPlannerZamboniSpiralTest*", "**/ReferenceTransitTest*",
     "**/ReferenceSimulationTest*", "**/ZamboniQaTest*", "**/ZamboniQaSpacingTest*", "**/ZamboniManualAngleReproTest*", "**/ZamboniReferenceTest*", "**/ZamboniOrderPropertyTest*",
     "**/OrientationAcceptanceTest*", "**/OrientationReferenceTest*", "**/SpiralReferenceTest*", "**/SpiralDirectionTest*",
-    "**/StartTransitTest*", "**/TurnStyleReferenceTest*")
+    "**/StartTransitTest*", "**/TurnStyleReferenceTest*", "**/OuterOffsetCoverageTest*",
+    "**/FastPipelineTest*", "**/OptimizedModeTest*", "**/DockObstaclePreviewTest*", "**/ZamboniDeadEndTest*", "**/SpiralCentreResumeTest*",
+    "**/ObstacleBypassTest*", "**/BorderMarginChassisTest*", "**/ReturnReserveTest*", "**/SmartResumeReferenceTest*", "**/BorderClearanceTest*",
+    "**/ZoneExit20261014Test*", "**/ZamboniExecutionTest*", "**/EdgeContactSimulationTest*", "**/NoGoPivotMarginTest*", "**/OuterOffsetTest*",
+    "**/RollingTurnExecutionTest*")
 // Test slots shared by every worktree of the machine: sessions that ran their full suite at the same time loaded
 // 10 cores up to 43 and made each run two to four times slower (30 to 60 minutes instead of about 19). A test task waits for a
 // free slot (lock files in /tmp/dumbyluba-test-slots, released at the end of the build, or by the system if Gradle
@@ -122,20 +157,32 @@ abstract class TestSlots : BuildService<TestSlots.Params>, AutoCloseable {
     override fun close() { held?.let { (channel, lock) -> lock.release(); channel.close() }; held = null }
 }
 val testSlots = gradle.sharedServices.registerIfAbsent("dumbylubaTestSlots", TestSlots::class) {
-    parameters.slots.set(providers.gradleProperty("testSlots").orNull?.toInt() ?: 1)
+    // Two slots on a machine with at least 8 cores: a quick run no longer waits for a full sweep run to finish
+    // (11 minutes of waiting on 2026-10-30). Below that, one slot, as before.
+    val cpus = Runtime.getRuntime().availableProcessors()
+    parameters.slots.set(providers.gradleProperty("testSlots").orNull?.toInt() ?: if (cpus >= 8) 2 else 1)
 }
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
-    // Two processes: the route preparations of each one already use up to 8 threads (PreparationPool), so the
+    // Local val: the doFirst action captures the provider itself, instead of re-reading a script property at
+    // execution time (which the configuration cache cannot serialize).
+    val slots = testSlots
+    val sweeps = name.endsWith("PlannerSweeps")
+    // Sweeps, two processes by default: the route preparations of each one already use up to 8 threads (PreparationPool), so the
     // 10 cores are full. Measured on 2026-10-29: 5 processes, with or without capping the pool, made the long
     // sweep classes (reference map, Zamboni) up to three times slower and the full run longer (28 to 31 minutes).
-    // Without the sweeps (-PlubaQuickTests), four: the longest classes there wait in real time (gateway sockets,
+    // The other unit tests, four: the longest classes there wait in real time (gateway sockets,
     // robot bench), so 2 / 3 / 4 / 5 processes took 4:23 / 3:53 / 2:58 / 3:30 (measured on 2026-10-29).
-    val quick = providers.gradleProperty("lubaQuickTests").isPresent
-    maxParallelForks = providers.gradleProperty("testForks").orNull?.toInt() ?: if (quick) 4 else 2
+    // Fork counts derived from the cores (10 cores here: 2 for a full run, 4 for a quick one, both measured on
+    // 2026-10-29), so that another machine does not have to be recalibrated by hand.
+    val cpus = Runtime.getRuntime().availableProcessors()
+    maxParallelForks = providers.gradleProperty("testForks").orNull?.toInt()
+        ?: if (sweeps) (cpus / 5).coerceIn(1, 4) else (cpus / 2.5).toInt().coerceIn(2, 6)
+    // Stop at the first failing class (-PtestFailFast), instead of running the remaining ones.
+    if (providers.gradleProperty("testFailFast").isPresent) failFast = true
     // 1 GB per fork instead of 512 MB (fewer G1 cycles on the large sweeps).
     maxHeapSize = "1g"
     usesService(testSlots)
-    doFirst { testSlots.get().acquire(logger) }
+    doFirst { slots.get().acquire(logger) }
     providers.gradleProperty("plannerBenchmarkOutput").orNull?.let { systemProperty("plannerBenchmarkOutput", it) }
     providers.gradleProperty("plannerBenchmarkStrategies").orNull?.let { systemProperty("plannerBenchmarkStrategies", it) }
     providers.gradleProperty("plannerBenchmarkIndexed").orNull?.let { systemProperty("plannerBenchmarkIndexed", it) }
@@ -156,8 +203,26 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
         ?: if (providers.gradleProperty("uiShots").isPresent) "en" else "fr")
     // Opt-in screenshots: -PuiShots=output/directory
     providers.gradleProperty("uiShots").orNull?.let { systemProperty("uiShots", it); systemProperty("robolectric.graphicsMode", "NATIVE"); systemProperty("roborazzi.test.record", "true") }
-    if (quick) exclude(plannerSweeps)
-    if (providers.gradleProperty("lubaPlannerSweeps").isPresent) include(plannerSweeps)
+    if (sweeps) include(plannerSweeps) else exclude(plannerSweeps)
+}
+// One Test task is a single unit for the up-to-date check and the build cache: when the sweeps were a filter of
+// test<Variant>UnitTest, a quick check followed by the full suite ran the 2 200 other tests a second time. In a task of
+// their own, the full suite after a quick check only adds the sweeps. Same classes, classpath and JVM arguments as the
+// variant's unit tests, run after them so that the two process pools never load the cores at the same time.
+afterEvaluate {
+    for (variant in listOf("Debug", "Fold", "Release")) {
+        val unitTests = tasks.named<org.gradle.api.tasks.testing.Test>("test${variant}UnitTest")
+        tasks.register<org.gradle.api.tasks.testing.Test>("test${variant}PlannerSweeps") {
+            group = "verification"
+            description = "Planner sweeps on the reference map (${variant.lowercase()} variant)."
+            val base = unitTests.get()
+            testClassesDirs = base.testClassesDirs
+            classpath = base.classpath
+            jvmArgumentProviders.addAll(base.jvmArgumentProviders)
+            javaLauncher.set(base.javaLauncher)
+            mustRunAfter(unitTests)
+        }
+    }
 }
 
 // ART safeguard: a method with more than ~256 Dalvik registers (large Compose function) was
@@ -175,6 +240,11 @@ val checkFoldDexRegisters by tasks.registering(Exec::class) {
     commandLine("python3", script.absolutePath, apk.get().asFile.absolutePath, "224")
     doLast { checked.get().asFile.writeText("APK checked\n") }
 }
+// No lint vital on the fold variant: AGP runs it on every assembly of a non-debuggable variant (30 s of analysis
+// for a one-line change, 55 s builds instead of 11 s, measured on 2026-10-29), while tools/deploy.sh and
+// tools/check.sh full run the complete lintFold, which already reports every fatal issue. Release keeps it.
+tasks.matching { it.name in setOf("generateFoldLintVitalReportModel", "lintVitalAnalyzeFold", "lintVitalReportFold", "lintVitalFold") }
+    .configureEach { enabled = false }
 afterEvaluate {
     checkFoldDexRegisters.configure { dependsOn("packageFold") }
     tasks.named("assembleFold") { finalizedBy(checkFoldDexRegisters) }
@@ -183,7 +253,7 @@ afterEvaluate {
 
 // JVM test coverage, opt-in: ./gradlew :app:testDebugUnitTest :app:lubaCoverageReport -PlubaCoverage
 // JaCoCo agent at runtime (rather than AGP instrumentation) so Robolectric tests, whose sandbox reloads
-// classes, are counted too. Report: app/build/reports/jacoco/lubaCoverageReport/ (HTML and XML).
+// classes, are counted too. Report: app/build.noindex/reports/jacoco/lubaCoverageReport/ (HTML and XML).
 if (providers.gradleProperty("lubaCoverage").isPresent) {
     apply(plugin = "jacoco")
     tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {

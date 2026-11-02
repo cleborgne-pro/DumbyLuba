@@ -4,6 +4,7 @@ import fr.luba.poc.map.Point
 import fr.luba.poc.map.SignalSample
 import fr.luba.poc.simulation.PathFollower
 import fr.luba.poc.simulation.SimEdge
+import java.util.Collections
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -14,7 +15,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
-import java.util.Collections
 
 /**
  * Pilot ([RemoteLegs]) ↔ gateway ([GatewayAutonomy]) through an in-memory pipe, simulated robot: route and envelope

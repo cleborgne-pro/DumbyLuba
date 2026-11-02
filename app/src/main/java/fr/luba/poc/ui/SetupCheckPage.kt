@@ -1,6 +1,8 @@
 package fr.luba.poc.ui
 
 import android.Manifest
+import android.bluetooth.BluetoothManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -9,17 +11,19 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Error
-import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.BuildConfig
 import fr.luba.poc.ble.ConnectionState
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
@@ -29,6 +33,8 @@ import fr.luba.poc.diagnostics.CheckLevel
 import fr.luba.poc.diagnostics.SetupCheck
 import fr.luba.poc.gateway.*
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.onboarding.SetupProgress
+import fr.luba.poc.onboarding.SetupStep
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.MammotionColors
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +57,7 @@ fun SetupCheckPage(robot: RobotBle, state: RobotUi, back: () -> Unit, open: (Str
     val latest by rememberUpdatedState(state)
     var items by remember { mutableStateOf<List<CheckItem>?>(null) }
     var running by remember { mutableStateOf(false) }
-    var token by remember { mutableStateOf(0) }
+    var token by remember { mutableIntStateOf(0) }
     val gatewayStatus by GatewayService.status.collectAsState()
     LaunchedEffect(token, role) {
         running = true
@@ -73,13 +79,13 @@ fun SetupCheckPage(robot: RobotBle, state: RobotUi, back: () -> Unit, open: (Str
                 }
                 val live = GatewayHealthStore.latest.value?.takeIf { it.fresh() }?.health
                 SetupCheck.pilot(PhoneWifi.connected, announced, probe, error, latest.setupRobot(), live,
-                    GatewayHealthStore.gatewayVersion.value, fr.luba.poc.BuildConfig.VERSION_NAME)
+                    GatewayHealthStore.gatewayVersion.value, BuildConfig.VERSION_NAME)
             }
             GatewayRole.OFF -> {
                 val permissions = if (Build.VERSION.SDK_INT >= 31) listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
                     else listOf(Manifest.permission.ACCESS_FINE_LOCATION)
                 val granted = permissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
-                val on = runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled == true }.getOrDefault(false)
+                val on = runCatching { context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true }.getOrDefault(false)
                 // Robot not linked: a fresh search (no automatic connection), then the verdict on what it found.
                 if (granted && on && latest.connection == ConnectionState.Disconnected && !latest.scanning) {
                     robot.scan(autoConnect = false)
@@ -95,7 +101,7 @@ fun SetupCheckPage(robot: RobotBle, state: RobotUi, back: () -> Unit, open: (Str
         running = false
         // First-mowing list: the check counts as done once it finds nothing to fix (pilot or direct role).
         if (role != GatewayRole.GATEWAY && items?.none { it.level == CheckLevel.FAILED } == true)
-            fr.luba.poc.onboarding.SetupProgress.mark(context, fr.luba.poc.onboarding.SetupStep.SETUP_CHECKED)
+            SetupProgress.mark(context, SetupStep.SETUP_CHECKED)
     }
     PushedPage(ServicePage.SETUP.title, back, bottomBar = {
         PrimaryPillButton(if (running) tr("Checking…", "Vérification…") else tr("Check again", "Vérifier de nouveau"), { token++ }, Modifier.fillMaxWidth(),
@@ -115,8 +121,8 @@ fun SetupCheckPage(robot: RobotBle, state: RobotUi, back: () -> Unit, open: (Str
                 failed > 0 -> tr("$failed point(s) to fix, $warned to watch", "$failed point(s) à corriger, $warned à surveiller")
                 warned > 0 -> tr("Working, $warned point(s) to watch", "Fonctionnel, $warned point(s) à surveiller")
                 else -> tr("Everything is in place", "Tout est en place")
-            }, when { failed > 0 -> NoteTone.DANGER; warned > 0 -> NoteTone.WARNING; else -> NoteTone.SUCCESS })
-            SettingsGroup(tr("Checks", "Vérifications")) {
+            }, tone = when { failed > 0 -> NoteTone.DANGER; warned > 0 -> NoteTone.WARNING; else -> NoteTone.SUCCESS })
+            SettingsGroup(title = tr("Checks", "Vérifications")) {
                 list.forEach { item -> CheckRow(item) { fix -> applyFix(context, fix, latest, open) } }
             }
         }
@@ -153,7 +159,7 @@ private fun fixLabel(fix: CheckFix) = when (fix) {
     CheckFix.USE_GATEWAY -> tr("Use this gateway", "Utiliser cette passerelle")
 }
 
-private fun applyFix(context: android.content.Context, fix: CheckFix, state: RobotUi, open: (String) -> Unit) {
+private fun applyFix(context: Context, fix: CheckFix, state: RobotUi, open: (String) -> Unit) {
     fun settings(action: String) = runCatching { context.startActivity(Intent(action)) }
     when (fix) {
         CheckFix.PAIR_GATEWAY -> open(ServicePage.RELAY.key)

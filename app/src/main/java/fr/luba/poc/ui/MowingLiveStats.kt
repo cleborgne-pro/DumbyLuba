@@ -1,9 +1,14 @@
 package fr.luba.poc.ui
 
+import fr.luba.poc.history.LiveEta
+import fr.luba.poc.history.MowingText
+import fr.luba.poc.i18n.I18n
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.RobotRouteUi
-import fr.luba.poc.i18n.tr
-import java.util.Locale
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * Indicators of the bar during a real mowing: **cutting** progress (metres of stripes mowed, excluding moves with the
@@ -58,7 +63,7 @@ object MowingLiveStats {
         }
         val battery = t.battery?.let { tr("Battery $it %", "Batterie $it %") }
         val duration = elapsedSeconds?.let { spent ->
-            fr.luba.poc.history.MowingText.duration(spent) + (expectedSeconds?.takeIf { it > 0 }?.let { " / ≈ ${fr.luba.poc.history.MowingText.duration(it)}" } ?: "")
+            MowingText.duration(spent) + (expectedSeconds?.takeIf { it > 0 }?.let { " / ≈ ${MowingText.duration(it)}" } ?: "")
         }
         return Stats(fraction, progress, blades, on, height, battery, duration, rechargeText(recharges ?: route.rechargeCycles, expectedRecharges))
     }
@@ -77,9 +82,9 @@ object MowingLiveStats {
      * Live end of the mowing ([fr.luba.poc.history.LiveEta]): "End ≈ 16:40 · 1 h 05 left · 1 recharge left";
      * "(forecast)" while the speed is not measured on this mowing yet.
      */
-    fun etaText(eta: fr.luba.poc.history.LiveEta.Eta, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
-        val end = java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(zone).format(java.time.Instant.ofEpochMilli(eta.endAtMs))
-        val left = fr.luba.poc.history.MowingText.duration(eta.remainingSeconds)
+    fun etaText(eta: LiveEta.Eta, zone: ZoneId = ZoneId.systemDefault()): String {
+        val end = DateTimeFormatter.ofPattern("HH:mm").withZone(zone).format(Instant.ofEpochMilli(eta.endAtMs))
+        val left = MowingText.duration(eta.remainingSeconds)
         val recharges = when (eta.rechargesLeft) {
             0 -> null
             1 -> tr("1 recharge left", "1 recharge restante")
@@ -89,5 +94,5 @@ object MowingLiveStats {
             if (eta.measuredSpeed) "" else tr(" (forecast)", " (prévision)")
     }
 
-    private fun thousands(value: Int): String = String.format(fr.luba.poc.i18n.I18n.locale, "%,d", value).replace(' ', ' ').replace(' ', ' ')
+    private fun thousands(value: Int): String = String.format(I18n.locale, "%,d", value).replace(' ', ' ').replace(' ', ' ')
 }

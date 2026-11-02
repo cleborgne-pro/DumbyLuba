@@ -1,6 +1,7 @@
 package fr.luba.poc.manual
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -12,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.camera.LiveCamera
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.OnLeaveScreen
 import kotlinx.coroutines.delay
@@ -101,9 +103,9 @@ fun rememberManualDrive(robot: RobotBle, state: RobotUi): ManualDrive {
         } else robot.stopManual(tr("Joysticks inactive", "Joysticks inactifs"))
     }
     // Camera stream requested while a control screen is open (the view can be hidden).
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        fr.luba.poc.camera.LiveCamera.manualPage = true
-        onDispose { fr.luba.poc.camera.LiveCamera.manualPage = false }
+    DisposableEffect(Unit) {
+        LiveCamera.manualPage = true
+        onDispose { LiveCamera.manualPage = false }
     }
     return drive
 }

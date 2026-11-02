@@ -2,10 +2,11 @@ package fr.luba.poc.planning
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
+import java.io.File
+import kotlin.math.ceil
+import kotlin.math.roundToLong
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import kotlin.math.roundToLong
 
 /**
  * What was actually mowed on a zone, for "Change every session" ([OrientationMode.EACH_SESSION]): pass directions
@@ -105,7 +106,7 @@ object ZoneProgress {
         for ((a, b) in path.zipWithNext()) {
             val d = a.distance(b)
             if (d <= 0) continue
-            val steps = kotlin.math.ceil(d / SAMPLE_M).toInt()
+            val steps = ceil(d / SAMPLE_M).toInt()
             for (k in 0 until steps) {
                 val t = (k + 0.5) / steps
                 val p = Point(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)

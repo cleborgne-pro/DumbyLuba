@@ -1,14 +1,16 @@
 package fr.luba.poc.simulation
 
+import fr.luba.poc.diagnostics.MotionProgressGuard
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.planning.*
+import java.util.Random
+import kotlin.math.*
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.prep.PreparedGeometryFactory
-import kotlin.math.*
 
 /** Shape of the object placed on the map for the obstacle simulation. */
 enum class ProbeShape(private val labelEn: String, private val labelFr: String) {
@@ -100,6 +102,10 @@ class ObstacleEncounterSimulation(
     private val envelopeGuard: Boolean = false,
     /** Longest resume link after a limit contact ([EdgeContact.longLink]); lowered by the tests of that guard. */
     private val limitLinkMaxM: Double = EdgeContact.MAX_LINK_M,
+    /** Outline the chassis touches (disturbance bench: a thin branch); the probe object's by default. */
+    outline: List<Point> = obstacle.outline(),
+    /** Standard deviation of the published position at a point (RTK degraded under a tree); 1 cm everywhere by default. */
+    private val positionNoiseM: (Point) -> Double = { NOISE_M },
 ) {
     companion object {
         /** Back-off after contact: forward command of the actual pilot (≈ 10 cm/s). */
@@ -119,7 +125,7 @@ class ObstacleEncounterSimulation(
                 boundary = if (recorded) BoundaryMeaning.RECORDED_TRACE else BoundaryMeaning.PHYSICAL, outerOffsetM = OuterOffsetSetting.meters)
             progress(tr("Computing passes", "Calcul des passes"))
             val planned = RoutePlanning.coverage(PlanningRequest(map, listOf(zone.id), base.point, config = config,
-                obstacles = fr.luba.poc.planning.DockClearance.planning(obstacles, base),
+                obstacles = DockClearance.planning(obstacles, base),
                 navigation = PlanningNavigation(accesses, base)), checkpoint = checkpoint)
             require(!planned.preview.localOnly) { tr("Plan not validated: ${planned.report?.selected?.diagnostics?.joinToString(" ; ") ?: "insufficient coverage"}",
                 "Plan non validé : ${planned.report?.selected?.diagnostics?.joinToString(" ; ") ?: "couverture insuffisante"}") }
@@ -146,7 +152,7 @@ class ObstacleEncounterSimulation(
 
     private val factory = GeometryFactory()
     private val body = PreparedGeometryFactory.prepare(factory.createPolygon(
-        (obstacle.outline() + obstacle.outline().first()).map { Coordinate(it.x, it.y) }.toTypedArray()))
+        (outline + outline.first()).map { Coordinate(it.x, it.y) }.toTypedArray()))
 
     /** Original route (display) and followed route, possibly repaired. */
     val original: List<SimEdge> = original.drop(startIndex.coerceIn(0, original.lastIndex))
@@ -178,7 +184,7 @@ class ObstacleEncounterSimulation(
     val detourRefusals = mutableListOf<String>()
 
     // Actual mowing pilot: predicted pose, current blade range, confirmed arrival, progress guard.
-    private val random = java.util.Random(1)
+    private val random = Random(1)
     private var ms = 0L
     private var carryS = 0.0
     private var reckoning = DeadReckoning(commandDelayMs = DeadReckoning.ROUTE_COMMAND_DELAY_MS, publishedBehindM = DeadReckoning.PUBLISHED_POINT_BEHIND_M)
@@ -190,9 +196,11 @@ class ObstacleEncounterSimulation(
     private var follower: PathFollower? = null
     private var rangeEnd = 0
     private var arrival: RangeArrival? = null
-    private val progress = fr.luba.poc.diagnostics.MotionProgressGuard()
+    private val progress = MotionProgressGuard()
     /** Navigation for the rest of the mission (discovered exclusions included) and physical surface of the escapes. */
     private var missionRoutes = routes
+    /** Slowed stretches of the followed edges, recomputed when the route is repaired. */
+    private val speedCaps = PathSpeedCaps { missionRoutes.speedZones }
     private var missionPhysical = physical ?: routes
     /** Heading published by the simulated robot (noisy), realigned by dead reckoning as in actual mowing. */
     private var reportedHeading = pose.headingDegrees
@@ -269,7 +277,8 @@ class ObstacleEncounterSimulation(
     private fun publish() {
         if (ms % 1000 != 0L) return
         val point = behind(pose)
-        published = Point(point.x + random.nextGaussian() * NOISE_M, point.y + random.nextGaussian() * NOISE_M)
+        val noise = positionNoiseM(point)
+        published = Point(point.x + random.nextGaussian() * noise, point.y + random.nextGaussian() * noise)
         fixAt = ms
         reportedHeading = pose.headingDegrees + random.nextGaussian() * HEADING_NOISE_DEG
         reckoning.fix(published, reportedHeading, ms)
@@ -303,7 +312,8 @@ class ObstacleEncounterSimulation(
         ReturnDrift.failure(deviation, f.index, f.index >= returnFrom, measured, baseZone, slide.update(f.pivoting, measured, deviation)) { missionRoutes.bodySafe(it) }
             ?.let { return halt(it) }
         val predicted = reckoning.predict(ms) ?: RobotPose(measured, pose.headingDegrees)
-        val nominal = PathFollower.linearFor(speedPercent)
+        // Adaptive speed of the actual tracking on the slowed stretches (RTK not simulated: always FIX here).
+        val nominal = AdaptiveSpeed.linear(PathFollower.linearFor(speedPercent), AdaptiveSpeed.percentAt(speedCaps.of(edges), AdaptiveSpeed.position(edges, f.index, predicted.position)))
         val limit = if (!reckoning.headingConfirmed) minOf(nominal, DeadReckoning.UNCONFIRMED_LINEAR) else reckoning.postPivotLinear(nominal)
         val c = f.command(predicted.position, predicted.headingDegrees, limit, PathFollower.angularLimit(speedPercent),
             reckoning.degreesPerUnit, reckoning.metersPerUnit, RangeArrival.APPROACH_MIN_LINEAR, deviation, reckoning.rotationCalibrated)
@@ -316,7 +326,7 @@ class ObstacleEncounterSimulation(
             }
             return
         }
-        if (progress.blocked(measured, fixAt, ms, c.linear)) return halt(tr("Presumed blockage: no translation for 3 s", "Blocage présumé : aucune translation depuis 3 s"))
+        if (progress.blocked(measured, fixAt, ms, c.linear)) { mower.halt(); follower = null; return contact(blockage = true) }
         // Projected footprint ahead of the robot on its realigned heading: same check as the actual tracking (Fold and gateway).
         if (envelopeGuard && reckoning.headingConfirmed) {
             val heading = reckoning.heading(reportedHeading)
@@ -351,16 +361,25 @@ class ObstacleEncounterSimulation(
         publish()
     }
 
-    /** Contact: stop, classification, then back-off and resume, or estimated obstacle, acceptance rules and repair shared with actual mowing. */
-    private fun contact() {
+    /**
+     * Contact: stop, classification, then back-off and resume, or estimated obstacle, acceptance rules and repair shared
+     * with actual mowing. [blockage]: wheels turning without moving for 3 s, no bumper code (branch under the chassis,
+     * root, soft ground): like actual mowing (`RouteOrchestrator.stallEncounter`), no border classification, the place
+     * is an estimated obstacle in front of the robot, bypassed like after a contact.
+     */
+    private fun contact(blockage: Boolean = false) {
         mower.halt(); follower = null
         val at = index.coerceAtMost(edges.lastIndex)
         // Bumper code (-1014) always present in the simulation: classification b) of [EdgeContact].
-        val edge = EdgeContact.classify(true, null, null, pose.position, pose.headingDegrees, border, edges, at, trail.takeLast(400), limits, discovered.toList())
-        note(tr("Contact detected (%.1f; %.1f): stop, blades OFF", "Contact détecté (%.1f ; %.1f) : arrêt, lames OFF").format(pose.position.x, pose.position.y))
-        if (edge.kind == EdgeContactKind.LIMIT && limitContact(edge)) return
+        val edge = if (blockage) null
+            else EdgeContact.classify(true, null, null, pose.position, pose.headingDegrees, border, edges, at, trail.takeLast(400), limits, discovered.toList())
+        note(if (blockage) tr("Presumed blockage (%.1f; %.1f): no translation for 3 s, stop, blades OFF", "Blocage présumé (%.1f ; %.1f) : aucune translation depuis 3 s, arrêt, lames OFF")
+                .format(pose.position.x, pose.position.y)
+            else tr("Contact detected (%.1f; %.1f): stop, blades OFF", "Contact détecté (%.1f ; %.1f) : arrêt, lames OFF").format(pose.position.x, pose.position.y))
+        if (edge?.kind == EdgeContactKind.LIMIT && limitContact(edge)) return
         val estimated = ObstacleBypass.contactObstacle("simulation-${contacts.size + 1}", pose.position, pose.headingDegrees, ms,
-            marginM = EdgeContact.marginM(edge.kind))
+            marginM = edge?.let { EdgeContact.marginM(it.kind) } ?: ObstacleBypass.CONTACT_MARGIN_M)
+            .let { if (blockage) it.copy(label = tr("Blockage during the mission", "Blocage pendant la mission")) else it }
         val refusal = ObstacleBypass.contactFailure(discovered, estimated, bypasses)
         if (refusal != null) return stop(estimated, refusal)
         discovered += estimated
@@ -435,8 +454,8 @@ class ObstacleEncounterSimulation(
 
     /**
      * Tracking safety stop: like actual mowing, leaving the route (deviation, footprint outside the corridor) is recovered
-     * by a back-off along the trail then a link to the route ([DriftRecovery]); any other stop (blockage) ends the
-     * mission.
+     * by a back-off along the trail then a link to the route ([DriftRecovery]); any other stop ends the mission (a
+     * blockage goes down the obstacle path instead, [contact]).
      */
     private fun halt(reason: String) {
         mower.halt(); follower = null

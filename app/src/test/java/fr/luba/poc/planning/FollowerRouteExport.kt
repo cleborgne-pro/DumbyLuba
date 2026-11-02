@@ -3,11 +3,11 @@ package fr.luba.poc.planning
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.simulation.*
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assume.assumeTrue
 import org.junit.Test
-import java.io.File
 
 /**
  * Generates opt-in (-PfollowerRouteOutput=path) the reference route replayed by the on-phone tracking bench

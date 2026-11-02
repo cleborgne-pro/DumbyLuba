@@ -123,6 +123,35 @@ obstacles are computed on this center. Heading and speed are still measured on t
 - The rotation gain is calibrated online and stored per robot; beyond a 12 cm deviation, speed is reduced
   progressively.
 
+### Adaptive speed
+
+The travel speed is a ceiling: the robot drives slower where precision matters more than pace, never faster. Switch:
+Map → **Mow** → **Task settings** → **Smart features** → **Adaptive speed** (on by default, shared by all tasks, kept
+between launches). Off, the robot drives at the travel speed everywhere, RTK included; the switch travels with each
+route to the Redmi and ESP32 gateways. The centring through narrow passages below is part of the route computation
+and stays on.
+
+| Where | Share of the travel speed |
+|---|---|
+| Narrow passage: the robot centre cannot keep 50 cm from both sides (passages, narrow strips, sharp corners) | 60 % |
+| Within the transit band of a **Danger** border portion ([border types](map.md#border-types)) | 60 % |
+| Difficult area of the difficulty heatmap (repeated contacts, slides, blockages): precision mode | 70 % |
+| RTK float | 60 % |
+| RTK single or none, or no RTK report for 10 s | 50 % |
+
+- The slowed stretches are computed with the route, on its geometry: a long transit edge is only slowed where it
+  crosses the area, from 50 cm before it so that the robot brakes before entering. The strictest rule applies when
+  several meet. The RTK rule is read live.
+- Never below about 0.1 m/s (100 units), unless the travel speed itself is lower: slower, the LUBA 2 creeps and a slope
+  reads as a blockage. At the default 30 %, only the RTK rules and the strongest slowdowns change anything; the
+  difference shows from about 40 %.
+- Same rule for the tracking from the phone, by the Redmi gateway and by the ESP32 gateway (once its firmware is updated): the
+  slowed stretches travel with the route; an older gateway ignores them and drives at the travel speed everywhere.
+- The route preview lists the slowed metres ("Slower: 12 m (narrow passages 4 m, near Danger borders 8 m)"); the
+  simulation drives them at the same speed.
+- Through a narrow passage, the transit keeps to the middle of the passage instead of grazing one side at the safety
+  margin ([how the route is computed](mowing-preparation.md#how-the-route-is-computed)).
+
 In the log, `route_manoeuvres` lists the U-turns, loops and curves of the route with their planned duration, and
 `route_curve_stats` gives for each of them, once driven, its duration, median speed and largest deviation.
 
@@ -155,9 +184,13 @@ leave, the safe corridor:
    If no point of the trail behind the robot brings the chassis back inside (typically after a pivot: the trail is
    then ahead of the robot), the robot first moves **straight ahead**, blades stopped, provided this only moves its
    chassis away from the border (1.1.5).
-3. **Link with blades stopped** back to the route, level with the interrupted spot; if that would bring the robot
-   right up against the border (15 cm tracking tolerance, next metre included), it rejoins the route up to 4 m
-   further on. A pass near the border is joined **along its axis** (last segment within 25° of the pass, from an
+3. **Link with blades stopped** back to the route, at the cheapest entry between the interrupted spot and 1 m
+   further on: driving and pivot time of the link, minus the stretch of the route it skips, plus a cost per skipped
+   cutting metre (Unreleased). A robot 30 cm beside its pass meets it about 1 m further on with a slight angle,
+   instead of two pivots of about 90° to come back sideways right next to itself; a robot that went past the end of
+   its pass heads for the next stretch instead of turning back to the corner. If no entry in that window can be
+   reached without bringing the robot right up against the border (15 cm tracking tolerance, next metre included), it
+   rejoins the route up to 4 m further on. A pass near the border is joined **along its axis** (last segment within 25° of the pass, from an
    approach point inside the zone), never nose first: arriving square to a border pass put the front 35 cm ahead of
    the robot centre over the border. The nearest entry where this fits is preferred to a closer one met nose first.
    The same applies to the link after a contact bypass, to the start or resume of a mission and to the other links
@@ -234,6 +267,9 @@ default, kept between launches and shared by all tasks). Outside the window:
   (`work_window_return`). On failure, a "Return to base failed" alert is raised ("Outside the working hours: automatic return to base
   failed (…)", `work_window_return_failed`).
 
+[Confirmed rain](rain-and-weather.md#return-to-base-on-confirmed-rain) uses the same stop and return when its switch is
+on, then resumes the mowing by itself once the rain is over.
+
 The check runs as long as the app is active, including in the background with the link service; a gateway Wi-Fi
 outage delays stopping a handed-over tracking job until the link comes back. Working hours set in the Mammotion app
 add to these: outside that window, the robot simply refuses to work
@@ -271,6 +307,29 @@ Once a cell has enough measurements (at least 3 s of pivoting), tracking uses it
 The 60 cm tolerance above does not change. The gateway receives the cells around the route, at most 300 (optional
 final field of the tracking description, ignored by an older gateway). It sends its measurements back to the Fold
 (`gateway_leg_pivot_slide` log event; `route_pivot_slide` for local tracking).
+
+## Return lanes to the base
+
+Every return to the base ends at the same approach point in front of it, where the official docking takes over. With a
+single shortest path, every return of every mowing drove the same last metres before that point, and the wheels wear a
+rut there. The returns now alternate between **five lanes**: the direct return, and four lanes through a point 3 m in
+front of the approach point, on the docking axis shifted 0.8 or 1.6 m to either side (`simulation/ReturnLanes.kt`).
+Switch: **Task settings** → **Smart features** → **Return lanes** (on by default); off, every return is the direct one
+and nothing is recorded.
+
+- Choice: the cheapest of the lanes, each counted as its extra length, plus 4 m for each use among the last 6 returns to
+  this base, plus 2 m per metre inside a difficult area of the difficulty heatmap (contacts, slides, blockages). A lane
+  more than 3 m (or 15 % on a long return) longer than the direct return is not used. With no history, the direct
+  return wins.
+- Memory: the lanes of the last 12 returns are kept per base (station and approach point to the decimetre: a moved base
+  starts afresh), between launches. A use is counted when the return is planned.
+- Same checks as any return: safe surface, chassis, base safety zone. A lane with no safe link is skipped.
+- Applies to the final return of a mowing, the returns for a recharge and at the end of the working hours, **Recharge**
+  and the return after a mowing is finished during a recharge. The log gives `route_return_lane` (lane, extra length,
+  incident metres). The simulation keeps the direct return for its estimate (at most 3 m more on the robot).
+
+On a 20 × 14 m lawn, five returns from the same corner used the five lanes in turn, at most 1.2 m longer than the direct
+one (`ReturnLanesTest`).
 
 ## Recharging during mowing
 

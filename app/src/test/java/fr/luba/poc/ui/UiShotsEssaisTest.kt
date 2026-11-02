@@ -1,7 +1,5 @@
 package fr.luba.poc.ui
 
-import fr.luba.poc.i18n.tr
-
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -15,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import com.github.takahirom.roborazzi.captureRoboImage
 import fr.luba.poc.ble.ConnectionState
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleIncident
@@ -107,9 +106,9 @@ class UiShotsEssaisTest {
     @Test fun obstaclesDark() { page("Obstacles", dark = true); capture("obstacles-list-dark") }
 
     @Test fun obstacleSim() { page("SimObstacle"); capture("obstacle-sim") }
-    @Test fun mowDebug() { page("TonteDebug"); capture("mowdebug-paint") }
+    @Test fun mowDebug() { page("TonteDebug"); capture("mowdebug-finishing") }
     @Test fun border() { page("Bordure"); capture("mowdebug-border") }
-    @Test fun mowDebugDark() { page("TonteDebug", dark = true); capture("mowdebug-paint-dark") }
+    @Test fun mowDebugDark() { page("TonteDebug", dark = true); capture("mowdebug-finishing-dark") }
 
     @Config(qualifiers = "w412dp-h915dp-xxhdpi")
     @Test fun manual() { page("Pilotage"); capture("manual") }

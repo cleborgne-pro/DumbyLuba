@@ -1,7 +1,10 @@
 package fr.luba.poc.history
 
+import android.graphics.Bitmap
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
@@ -13,9 +16,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
+import fr.luba.poc.map.RobotMap
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.math.roundToInt
 
 /** Real coverage shown on the map: [taskId] task, [running] while the mowing goes on. */
 data class CoverageView(val taskId: String, val coverage: CoverageMap, val running: Boolean)
@@ -46,7 +50,7 @@ object CoverageLayerStyle {
     /** Layer image; gaps only once the task has ended (everything ahead of the robot is still to mow). */
     fun image(coverage: CoverageMap, gaps: Boolean): ImageBitmap {
         val pixels = coverage.pixels(covered.toArgb(), repeated.toArgb(), if (gaps) gap.toArgb() else null)
-        return android.graphics.Bitmap.createBitmap(pixels, coverage.cols, coverage.rows, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
+        return Bitmap.createBitmap(pixels, coverage.cols, coverage.rows, Bitmap.Config.ARGB_8888).asImageBitmap()
     }
 }
 
@@ -54,13 +58,13 @@ object CoverageLayerStyle {
  * Coverage to draw on the map showing [map]: the published one when [enabled] and its zones belong to this map, with its
  * image (gaps once the task has ended); null otherwise, and always on the demo map.
  */
-@androidx.compose.runtime.Composable
-fun realCoverageLayer(map: fr.luba.poc.map.RobotMap, enabled: Boolean): Pair<CoverageMap, ImageBitmap>? {
+@Composable
+fun realCoverageLayer(map: RobotMap, enabled: Boolean): Pair<CoverageMap, ImageBitmap>? {
     val view by RealCoverage.flow.collectAsState()
     // Never on the demo map (its small zone ids could match test zones).
     val shown = view?.takeIf { v -> enabled && !map.source.contains("DÉMONSTRATION", true) &&
         v.coverage.zones.any { z -> map.shapes.any { it.id == z.id } } } ?: return null
-    val image = androidx.compose.runtime.remember(shown) { CoverageLayerStyle.image(shown.coverage, gaps = !shown.running) }
+    val image = remember(shown) { CoverageLayerStyle.image(shown.coverage, gaps = !shown.running) }
     return shown.coverage to image
 }
 

@@ -1,8 +1,10 @@
 package fr.luba.poc.gateway
 
+import fr.luba.poc.Clock
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.protocol.Blufi
 import fr.luba.poc.protocol.Commands
+import fr.luba.poc.protocol.CutHeightRange
 import fr.luba.poc.protocol.TelemetryReducer
 
 /**
@@ -32,10 +34,10 @@ class GatewaySafety(private val luba2: Boolean = true) {
         if (message.hasDriver() && message.driver.hasMowCtrlByHand()) {
             val hand = message.driver.mowCtrlByHand
             commandedBlades = hand.cutKnifeCtrl == 1
-            if (hand.cutKnifeHeight in fr.luba.poc.protocol.CutHeightRange.ANY) commandedHeightMm = hand.cutKnifeHeight
+            if (hand.cutKnifeHeight in CutHeightRange.ANY) commandedHeightMm = hand.cutKnifeHeight
         }
         if (message.hasDriver() && message.driver.hasTodevKnifeHeightSet()) {
-            message.driver.todevKnifeHeightSet.knifeHeight.takeIf { it in fr.luba.poc.protocol.CutHeightRange.ANY }?.let { commandedHeightMm = it }
+            message.driver.todevKnifeHeightSet.knifeHeight.takeIf { it in CutHeightRange.ANY }?.let { commandedHeightMm = it }
         }
         if (message.hasSys() && message.sys.hasTodevKnifeCtrl()) commandedBlades = message.sys.todevKnifeCtrl.knifeStatus == 1
     }
@@ -44,7 +46,7 @@ class GatewaySafety(private val luba2: Boolean = true) {
     @Volatile var onMessage: ((LubaMsg) -> Unit)? = null
 
     /** FF02 notification relayed to the pilot. */
-    fun notified(frame: ByteArray, now: Long = System.currentTimeMillis()) {
+    fun notified(frame: ByteArray, now: Long = Clock.now()) {
         val payload = runCatching { incoming.receive(frame) }.getOrNull() ?: return
         if (payload.firstOrNull() == '{'.code.toByte()) return
         val message = runCatching { LubaMsg.parseFrom(payload) }.getOrNull() ?: return
@@ -63,17 +65,17 @@ class GatewaySafety(private val luba2: Boolean = true) {
     val incomingAssembling: Boolean get() = incoming.assembling
 
     /** Stop messages (blades OFF if needed, zero speed), or null if a fragmented message is unfinished. */
-    fun emergencyPayloads(now: Long = System.currentTimeMillis()): List<ByteArray>? {
+    fun emergencyPayloads(now: Long = Clock.now()): List<ByteArray>? {
         if (midMessage || corrupted) return null
         val commands = Commands()
         return buildList {
-            if (bladesMayTurn) add(commands.manualBlades(false, commandedHeightMm ?: reducer.value.bladeHeightMm?.takeIf { it in fr.luba.poc.protocol.CutHeightRange.ANY } ?: 60, now))
+            if (bladesMayTurn) add(commands.manualBlades(false, commandedHeightMm ?: reducer.value.bladeHeightMm?.takeIf { it in CutHeightRange.ANY } ?: 60, now))
             add(commands.stop(now))
         }
     }
 
     /** Stop frames continuing the BluFi sequence, or null if injection is impossible. */
-    fun emergencyFrames(mtu: Int, now: Long = System.currentTimeMillis()): List<ByteArray>? {
+    fun emergencyFrames(mtu: Int, now: Long = Clock.now()): List<ByteArray>? {
         val payloads = emergencyPayloads(now) ?: return null
         val blufi = Blufi().apply { lastSeq?.let { continueAfter(it) } }
         return payloads.flatMap { blufi.encode(it, mtu) }

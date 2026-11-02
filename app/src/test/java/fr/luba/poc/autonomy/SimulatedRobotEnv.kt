@@ -1,8 +1,8 @@
 package fr.luba.poc.autonomy
 
+import fr.luba.poc.ble.MotionSetpoints
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.SignalSample
-import fr.luba.poc.ble.MotionSetpoints
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.protocol.Telemetry
 import java.util.Random
@@ -64,6 +64,8 @@ class SimulatedRobotEnv(
     /** Error added to the published heading (wrong heading when stopped, realigned while rolling on the real robot). */
     var headingBias = 0.0
     var obstacleList: List<LegObstacle> = emptyList()
+    /** RTK solution published (`rtk.status`): 4 FIX, 5 float. */
+    var rtkStatus = 4
     /** Called at each 200 ms step (virtual time): test scenarios. */
     var onTick: (SimulatedRobotEnv) -> Unit = {}
 
@@ -91,7 +93,7 @@ class SimulatedRobotEnv(
             bladeHeightMm = heightMm, driverHeightMm = heightMm, lastDriverHeightAt = heightReportedAt.takeIf { it > 0 }, heightMoving = false,
             lastPositionAt = positionWall, lastDeviceAt = wallBase + devicePrevious, lastReportAt = wallBase + devicePrevious,
             lastConnectAt = positionWall, wifiRssi = -60, bleRssi = -50, mobileRssi = -90, lastRtkAt = positionWall,
-            rtkStatus = 4, positioningLevel = 1, gpsStars = 24,
+            rtkStatus = rtkStatus, positioningLevel = 1, gpsStars = 24,
         )
 
     override fun linkHealthy() = healthy

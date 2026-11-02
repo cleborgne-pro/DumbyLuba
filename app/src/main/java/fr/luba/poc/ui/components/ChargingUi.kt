@@ -20,9 +20,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,15 +35,20 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.Clock
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.MowingTaskStore
 import fr.luba.poc.protocol.Telemetry
+import fr.luba.poc.simulation.RobotRouteUi
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.EyebrowStyle
 import fr.luba.poc.ui.theme.MammotionColors
 import fr.luba.poc.ui.theme.NumericStyle
+import kotlinx.coroutines.delay
 
 /** Origin of the displayed charge reading. */
 enum class ChargeSource(private val labelEn: String, private val labelFr: String) {
@@ -77,11 +82,12 @@ fun chargeStatus(cloud: Telemetry?, ble: Telemetry?, now: Long): ChargeStatus? {
     val c = fresh(cloud, CLOUD_CHARGE_MAX_AGE_MS)
     val b = fresh(ble, BLE_CHARGE_MAX_AGE_MS)
     val (t, source) = when {
-        b != null && (c == null || b.lastDeviceAt!! >= c.lastDeviceAt!!) -> b to ChargeSource.BLE
+        b != null && (c == null || (b.lastDeviceAt ?: 0L) >= (c.lastDeviceAt ?: 0L)) -> b to ChargeSource.BLE
         c != null -> c to ChargeSource.CLOUD
         else -> return null
     }
-    return if (t.chargeState in setOf(1, 2)) ChargeStatus(t.battery?.coerceIn(0, 100), source, t.lastDeviceAt!!) else null
+    val at = t.lastDeviceAt ?: return null
+    return if (t.chargeState in setOf(1, 2)) ChargeStatus(t.battery?.coerceIn(0, 100), source, at) else null
 }
 
 /**
@@ -98,7 +104,7 @@ data class BatteryThreshold(val percent: Int, val charging: Boolean) {
 }
 
 /** Mowing in progress: its thresholds; otherwise those of the next task (Map → Mow → Task settings). */
-fun batteryThreshold(charging: Boolean, route: fr.luba.poc.simulation.RobotRouteUi, taskLow: Int, taskHigh: Int): BatteryThreshold {
+fun batteryThreshold(charging: Boolean, route: RobotRouteUi, taskLow: Int, taskHigh: Int): BatteryThreshold {
     // End of mowing below the lower threshold: return floor; short remainder while charging: early start level.
     val low = if (route.running) route.lowWatch ?: route.returnPercent else taskLow
     val high = if (route.running) route.chargeTarget ?: route.resumePercent else taskHigh
@@ -108,15 +114,15 @@ fun batteryThreshold(charging: Boolean, route: fr.luba.poc.simulation.RobotRoute
 /** Recharge thresholds of the next task (low, high), re-read each time the screen is shown. */
 @Composable
 fun rememberTaskChargeThresholds(): Pair<Int, Int> {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    return remember { fr.luba.poc.map.MowingTaskStore(context).read().sanitized().let { it.chargeLow.toInt() to it.chargeHigh.toInt() } }
+    val context = LocalContext.current
+    return remember { MowingTaskStore(context).read().sanitized().let { it.chargeLow.toInt() to it.chargeHigh.toInt() } }
 }
 
 /** Wall clock refreshed periodically, to expire a reading that has become too old. */
 @Composable
 fun rememberWallClock(periodMs: Long = 5_000L): Long {
-    val now by produceState(System.currentTimeMillis()) {
-        while (true) { kotlinx.coroutines.delay(periodMs); value = System.currentTimeMillis() }
+    val now by produceState(Clock.now()) {
+        while (true) { delay(periodMs); value = Clock.now() }
     }
     return now
 }
@@ -126,7 +132,7 @@ fun rememberWallClock(periodMs: Long = 5_000L): Long {
 fun rememberChargeStatus(cloud: Telemetry?, ble: Telemetry?): ChargeStatus? {
     // Reading the sampled clock re-runs the evaluation every 5 s (expiry); the comparison uses the real time.
     rememberWallClock()
-    return chargeStatus(cloud, ble, System.currentTimeMillis())
+    return chargeStatus(cloud, ble, Clock.now())
 }
 
 /** Gauge colour: red below 20 %, orange below 50 %, green above. */

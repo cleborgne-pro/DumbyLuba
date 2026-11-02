@@ -1,10 +1,10 @@
 package fr.luba.poc.map
 
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.random.Random
+import org.junit.Assert.*
+import org.junit.Test
 
 /**
  * QA property test of [ZamboniOrder] with random U-turn costs, random undrivable U-turns (breaks), staggered ends and

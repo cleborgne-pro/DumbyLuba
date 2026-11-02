@@ -1,12 +1,12 @@
 package fr.luba.poc.difficulty
 
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.File
 
 /** Difficulty log in `difficulties.json`: reload after a restart, missing, corrupted or old file. */
 class DifficultyStoreTest {

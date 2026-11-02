@@ -4,7 +4,6 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ObstacleJsonTest {
-
     private val tree = LocalObstacle(
         id = "o1", kind = ObstacleKind.TREE, x = 3.25, y = -1.5, radiusM = 0.30, marginM = 0.20,
         incidents = listOf(

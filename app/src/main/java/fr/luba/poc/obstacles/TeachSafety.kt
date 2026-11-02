@@ -2,6 +2,10 @@ package fr.luba.poc.obstacles
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
+import fr.luba.poc.protocol.BumperRest
+import fr.luba.poc.protocol.ModelSupport
+import fr.luba.poc.protocol.SelfCheck
+import kotlin.math.hypot
 
 /** Obstacle teaching configuration: slow supervised advance, blades necessarily OFF. */
 data class TeachConfig(
@@ -38,14 +42,13 @@ data class TeachProposal(val contact: TeachContact, val estimated: Point, val ra
 
 /** Teach mode guards. The bumper is not a failure: it is the expected contact. */
 object TeachSafety {
-
     /** Preconditions shown live (label, satisfied, refusal reason), in the order of [startFailure]. */
     fun checks(
         name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
         sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, bladeTestRunning: Boolean,
         navRunning: Boolean, mapLoading: Boolean, batteryFloor: Int = 30,
         /** Model check: validated model, or a model trial for the command cutoff test ([fr.luba.poc.protocol.ModelTrial]). */
-        modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(name),
+        modelAllowed: Boolean = ModelSupport.motionValidated(name),
     ): List<Triple<String, Boolean, String>> = listOf(
         Triple("Robot LUBA 2", modelAllowed, tr("Reserved for a LUBA 2 identified as Luba-VS or Luba-VP (or a model trial armed)", "Réservé au LUBA 2 identifié Luba-VS ou Luba-VP (ou à un essai du modèle armé)")),
         Triple(tr("BLE diagnostics stopped", "Diagnostic BLE arrêté"), !campaignRunning, tr("Stop the BLE campaign before teaching", "Arrêter la campagne BLE avant l'apprentissage")),
@@ -55,9 +58,9 @@ object TeachSafety {
         Triple(tr("Fresh robot state (≤ 2 s)", "État robot frais (≤ 2 s)"), stateAgeMs != null && stateAgeMs in 0..2000, tr("Robot state missing or older than 2 s", "État robot absent ou âgé de plus de 2 s")),
         Triple(tr("Battery > $batteryFloor %", "Batterie > $batteryFloor %"), battery != null && battery > batteryFloor, tr("Battery unknown or ≤$batteryFloor %", "Batterie inconnue ou ≤$batteryFloor %")),
         Triple(tr("Robot ready (state 11)", "Robot prêt (état 11)"), robotState == 11, tr("Robot not ready (MODE_READY=11 expected)", "Robot non prêt (MODE_READY=11 attendu)")),
-        Triple(tr("No active protection", "Aucune protection active"), fr.luba.poc.protocol.SelfCheck.nominal(selfCheck), fr.luba.poc.protocol.SelfCheck.refusal(selfCheck)),
+        Triple(tr("No active protection", "Aucune protection active"), SelfCheck.nominal(selfCheck), SelfCheck.refusal(selfCheck)),
         Triple(tr("Bumper without alert", "Pare-chocs sans alerte"), sensors != null && sensors and 7 == 0,
-            fr.luba.poc.protocol.BumperRest.refusal(sensors, fr.luba.poc.protocol.ModelSupport.motionValidated(name))),
+            BumperRest.refusal(sensors, ModelSupport.motionValidated(name))),
         Triple(tr("Blades stopped", "Lames arrêtées"), sensors != null && sensors and (7 shl 9) == 0, tr("Blades not confirmed OFF by telemetry", "Lames non confirmées OFF par la télémétrie")),
     )
 
@@ -66,7 +69,7 @@ object TeachSafety {
         name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
         sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, bladeTestRunning: Boolean,
         navRunning: Boolean, mapLoading: Boolean, batteryFloor: Int = 30,
-        modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(name),
+        modelAllowed: Boolean = ModelSupport.motionValidated(name),
     ): String? = checks(name, stateAgeMs, battery, robotState, sensors, selfCheck, campaignRunning, bladeTestRunning,
         navRunning, mapLoading, batteryFloor, modelAllowed).firstOrNull { !it.second }?.third
 
@@ -82,7 +85,7 @@ object TeachSafety {
     fun approachFailure(positionAgeMs: Long?, x: Double?, y: Double?, startX: Double?, startY: Double?): String? {
         if (positionAgeMs == null || positionAgeMs !in 0..2000 || x == null || y == null || startX == null || startY == null ||
             !x.isFinite() || !y.isFinite() || !startX.isFinite() || !startY.isFinite()) return tr("Position missing or stale", "Position absente ou périmée")
-        if (kotlin.math.hypot(x - startX, y - startY) >= 1.0) return tr("1 m approach limit reached", "Limite d'approche de 1 m atteinte")
+        if (hypot(x - startX, y - startY) >= 1.0) return tr("1 m approach limit reached", "Limite d'approche de 1 m atteinte")
         return null
     }
 

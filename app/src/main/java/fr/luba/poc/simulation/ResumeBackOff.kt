@@ -2,6 +2,8 @@ package fr.luba.poc.simulation
 
 import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.Point
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * "Unblock" before resuming a mowing (Mowing interrupted panel): straight back-off, heading unchanged, blades OFF,
@@ -55,7 +57,7 @@ object ResumeBackOff {
         if (planned.size >= 2 && distance(here, planned) <= NEAR_M) return Guide.PLANNED to planned + here
         val rad = Math.toRadians(headingDegrees)
         val behind = MAX_M + 0.2
-        return Guide.STRAIGHT to listOf(Point(here.x - behind * kotlin.math.cos(rad), here.y - behind * kotlin.math.sin(rad)), here)
+        return Guide.STRAIGHT to listOf(Point(here.x - behind * cos(rad), here.y - behind * sin(rad)), here)
     }
 
     /** Chosen back-off point, or null if no step behind the robot is admissible. */

@@ -3,10 +3,13 @@ package fr.luba.poc.map
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.luba.poc.ble.RobotUi
 import fr.luba.poc.simulation.SimulationUi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Signal survey shown on the map ([MapScreen]): simulated or measured readings, terrain and colored cells. */
 internal class MapSignals(
@@ -44,8 +47,8 @@ internal fun rememberMapSignals(map: RobotMap, state: RobotUi, sim: SimulationUi
     // Automatic orientation: search over the whole survey, computed off the UI thread.
     // Simulation: fictional terrain without reference; real survey: corrected by the flat-ground reference.
     val terrainCalibration = if (simulatedSurvey) null else layers.tiltCalibration
-    val relief by androidx.compose.runtime.produceState<ReliefResult?>(null, displayedSignalSamples, terrainMount, terrainCalibration) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ReliefModel.result(displayedSignalSamples,terrainMount,terrainCalibration) }
+    val relief by produceState<ReliefResult?>(null, displayedSignalSamples, terrainMount, terrainCalibration) {
+        value = withContext(Dispatchers.Default) { ReliefModel.result(displayedSignalSamples,terrainMount,terrainCalibration) }
     }
     val signalView = remember(displayedSignalSamples, layers.surveySignal, relief, layers.reliefShading) {
         signalReliefView(displayedSignalSamples,layers.surveySignal,relief,layers.reliefShading)

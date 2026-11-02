@@ -66,7 +66,7 @@ class MissionStartTest {
             val nearest = if (bordersFirst) fromRobot.preview.borders.take(fromRobot.preview.outerLoops).flatten()
                 .filter { routes.supportsPivot(it) }.minOf { it.distance(robot) }
                 else fromRobot.preview.cuttingPaths.flatMap { listOf(it.first(), it.last()) }.minOf { it.distance(robot) }
-            assertTrue("Entry at ${entry.distance(robot)} m, nearest possible ${nearest} m", entry.distance(robot) <= nearest + 0.5)
+            assertTrue("Entry at ${entry.distance(robot)} m, nearest possible $nearest m", entry.distance(robot) <= nearest + 0.5)
             assertTrue(entry.distance(robot) < baseEntry.distance(robot) - 5.0)
             // Start from the robot, mission end evaluated at the base.
             assertEquals(robot, fromRobot.report.selected.mission.first().path.first())

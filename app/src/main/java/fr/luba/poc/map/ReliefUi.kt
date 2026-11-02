@@ -4,16 +4,16 @@ import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Landscape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import fr.luba.poc.i18n.tr
-import kotlinx.coroutines.launch
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -23,6 +23,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.core.content.edit
+import fr.luba.poc.Clock
+import fr.luba.poc.i18n.I18n
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.ChipChoice
 import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.KeyValueRow
@@ -37,8 +41,14 @@ import fr.luba.poc.ui.components.TextAction
 import fr.luba.poc.ui.components.ToggleRow
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
+import java.text.SimpleDateFormat
+import java.util.Date
 import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.round
 import kotlin.math.sin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** "Topographic map" terrain palette: low in blue, then green, yellow, high in brown. */
 private val reliefStops = listOf(Color(0xFF2C7BB6), Color(0xFF3FAE9B), Color(0xFF8CC84B), Color(0xFFF2D04A), Color(0xFFC77A34), Color(0xFF7B4A26))
@@ -75,7 +85,7 @@ else (shade - 1f).let { k -> Color(color.red + (1 - color.red) * k, color.green 
  * as shading on the map and as a shape in the 3D view.
  */
 data class SignalReliefView(val signal: SurveySignal, val cells: List<SignalCell>, val relief: ReliefResult?, val shading: Boolean) {
-    private val byCell = cells.associateBy { kotlin.math.floor(it.point.x).toInt() to kotlin.math.floor(it.point.y).toInt() }
+    private val byCell = cells.associateBy { floor(it.point.x).toInt() to floor(it.point.y).toInt() }
     val shadingActive get() = shading && relief != null && signal != SurveySignal.RELIEF
     fun color(cell: SignalCell): Color {
         val base = heatColor(signal, cell)
@@ -83,7 +93,7 @@ data class SignalReliefView(val signal: SurveySignal, val cells: List<SignalCell
     }
     /** Color of a 3D terrain cell: that of the chosen layer, neutral grey if the cell has no such reading. */
     fun color3d(height: SignalCell): Color = if (signal == SurveySignal.RELIEF) reliefColor(height.level ?: 0.5f)
-        else byCell[kotlin.math.floor(height.point.x).toInt() to kotlin.math.floor(height.point.y).toInt()]?.let { heatColor(signal, it).copy(alpha = 1f) }
+        else byCell[floor(height.point.x).toInt() to floor(height.point.y).toInt()]?.let { heatColor(signal, it).copy(alpha = 1f) }
             ?: Color(0xFFB8BEC4)
 }
 
@@ -115,7 +125,7 @@ fun signalReliefLegend(view: SignalReliefView, samples: List<SignalSample>): Str
 
 /** "top of the phone 35° to the left of the front (deduced from the robot's starts and stops, 24 readings)" */
 fun mountDescription(mount: MountEstimate): String {
-    val a = PhoneTilt.normalize(mount.angle).let { kotlin.math.round(it).toInt() % 360 }
+    val a = PhoneTilt.normalize(mount.angle).let { round(it).toInt() % 360 }
     val where = when {
         a == 0 -> tr("towards the front", "vers l'avant")
         a == 180 -> tr("towards the back", "vers l'arrière")
@@ -136,7 +146,7 @@ object ReliefSettings {
     private fun prefs(context: Context) = context.getSharedPreferences("relief", Context.MODE_PRIVATE)
     fun mount(context: Context): PhoneMount =
         runCatching { PhoneMount.valueOf(prefs(context).getString("mount", null) ?: "") }.getOrDefault(PhoneMount.AUTO)
-    fun saveMount(context: Context, mount: PhoneMount) { prefs(context).edit().putString("mount", mount.name).apply() }
+    fun saveMount(context: Context, mount: PhoneMount) { prefs(context).edit { putString("mount", mount.name) } }
 
     /** Reference taken on flat ground (tilt zero and default orientation), or null. */
     fun calibration(context: Context): TiltCalibration? = prefs(context).let { p ->
@@ -145,12 +155,16 @@ object ReliefSettings {
             if (p.contains("cal_angle")) p.getFloat("cal_angle", 0f).toDouble() else null, p.getLong("cal_at", 0))
     }
     fun saveCalibration(context: Context, c: TiltCalibration) {
-        prefs(context).edit().putFloat("cal_gx", c.reference.x.toFloat()).putFloat("cal_gy", c.reference.y.toFloat())
-            .putFloat("cal_gz", c.reference.z.toFloat()).putLong("cal_at", c.at)
-            .apply { if (c.angle != null) putFloat("cal_angle", c.angle.toFloat()) else remove("cal_angle") }.apply()
+        prefs(context).edit {
+            putFloat("cal_gx", c.reference.x.toFloat())
+            putFloat("cal_gy", c.reference.y.toFloat())
+            putFloat("cal_gz", c.reference.z.toFloat())
+            putLong("cal_at", c.at)
+            if (c.angle != null) putFloat("cal_angle", c.angle.toFloat()) else remove("cal_angle")
+        }
     }
     fun clearCalibration(context: Context) {
-        prefs(context).edit().remove("cal_gx").remove("cal_gy").remove("cal_gz").remove("cal_angle").remove("cal_at").apply()
+        prefs(context).edit { remove("cal_gx"); remove("cal_gy"); remove("cal_gz"); remove("cal_angle"); remove("cal_at") }
     }
 }
 
@@ -166,28 +180,28 @@ fun TiltCalibrationDialog(orientation: MountEstimate?, calibration: TiltCalibrat
     var capturing by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<Pair<String, NoteTone>?>(null) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { while (true) { live = RobotTilt.current(System.currentTimeMillis()); kotlinx.coroutines.delay(250) } }
-    val date = remember { java.text.SimpleDateFormat(tr("yyyy-MM-dd HH:mm", "dd/MM/yyyy à HH:mm"), fr.luba.poc.i18n.I18n.locale) }
+    LaunchedEffect(Unit) { while (true) { live = RobotTilt.current(Clock.now()); delay(250) } }
+    val date = remember { SimpleDateFormat(tr("yyyy-MM-dd HH:mm", "dd/MM/yyyy à HH:mm"), I18n.locale) }
     // Closing blocked during the capture (4 s of readings).
     LubaDialog(onDismissRequest = onDismiss, title = tr("Flat-ground reference", "Référence sur sol plat"), dismissEnabled = !capturing, content = {
         InfoNote(tr("Robot stopped on flat, level ground (terrace, path, garage), gateway phone fixed in its " +
             "survey position. Do not touch the robot during the capture.",
             "Robot arrêté sur un sol plat et horizontal (terrasse, allée, garage), téléphone passerelle fixé dans sa " +
             "position de relevé. Ne pas toucher le robot pendant l'enregistrement."))
-        SettingsGroup(tr("Current reading", "Mesure actuelle")) {
+        SettingsGroup(title = tr("Current reading", "Mesure actuelle")) {
             val g = live
             if (g != null) KeyValueRow(tr("Tilt", "Inclinaison"), "%.1f°".format(TiltCalibration(g, null, 0).tiltDegrees))
-            else StatusNote(tr("No tilt received: control the robot through the gateway (Android phone mounted on the robot).", "Aucune inclinaison reçue : piloter le robot via la passerelle (téléphone Android posé sur le robot)."), NoteTone.WARNING)
+            else StatusNote(tr("No tilt received: control the robot through the gateway (Android phone mounted on the robot).", "Aucune inclinaison reçue : piloter le robot via la passerelle (téléphone Android posé sur le robot)."), tone = NoteTone.WARNING)
             if (orientation != null) KeyValueRow(tr("Current orientation", "Orientation en cours"), mountDescription(orientation).removePrefix(mountPrefix()))
             Text(tr("Saves the current tilt as zero", "Enregistre l'inclinaison actuelle comme zéro") +
                 if (orientation != null) tr(" and the current orientation.", " et l'orientation en cours.")
                 else tr("; orientation unknown (no survey): automatic detection stays active.", " ; orientation non connue (aucun relevé) : la détection automatique reste active."),
                 style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
         }
-        message?.let { (text, tone) -> StatusNote(text, tone) }
+        message?.let { (text, tone) -> StatusNote(text, tone = tone) }
         calibration?.let { c ->
-            SettingsGroup(tr("Saved reference", "Référence enregistrée")) {
-                KeyValueRow("Date", date.format(java.util.Date(c.at)))
+            SettingsGroup(title = tr("Saved reference", "Référence enregistrée")) {
+                KeyValueRow("Date", date.format(Date(c.at)))
                 KeyValueRow(tr("Tilt", "Inclinaison"), "%.1f°".format(c.tiltDegrees))
                 c.angle?.let { KeyValueRow("Orientation", mountDescription(MountEstimate(it, MountSource.CALIBRATED)).removePrefix(mountPrefix())) }
                 TextAction(tr("Clear the reference", "Effacer la référence"), onCleared, enabled = !capturing, danger = true)
@@ -199,10 +213,10 @@ fun TiltCalibrationDialog(orientation: MountEstimate?, calibration: TiltCalibrat
             scope.launch {
                 val readings = mutableListOf<PhoneGravity>()
                 repeat(16) {
-                    RobotTilt.current(System.currentTimeMillis())?.let { g -> if (readings.lastOrNull() !== g) readings += g }
-                    kotlinx.coroutines.delay(250)
+                    RobotTilt.current(Clock.now())?.let { g -> if (readings.lastOrNull() !== g) readings += g }
+                    delay(250)
                 }
-                val (saved, error) = TiltCalibration.capture(readings, orientation?.angle, System.currentTimeMillis())
+                val (saved, error) = TiltCalibration.capture(readings, orientation?.angle, Clock.now())
                 capturing = false
                 message = if (saved != null) { onSaved(saved); tr("Reference saved (phone tilted by %.1f°).", "Référence enregistrée (téléphone incliné de %.1f°).").format(saved.tiltDegrees) to NoteTone.SUCCESS }
                     else error.orEmpty().takeIf { it.isNotBlank() }?.let { it to NoteTone.WARNING }
@@ -234,8 +248,8 @@ fun terrainLegend(signal: SurveySignal, relief: ReliefResult?, samples: List<Sig
 @Composable
 fun Relief3DView(cells: List<SignalCell>, map: RobotMap, modifier: Modifier = Modifier, exaggeration: Float = 5f,
                   colorOf: (SignalCell) -> Color = { reliefColor(it.level ?: 0.5f) }) {
-    var azimuth by remember { mutableStateOf(-35f) }
-    var elevation by remember { mutableStateOf(35f) }
+    var azimuth by remember { mutableFloatStateOf(-35f) }
+    var elevation by remember { mutableFloatStateOf(35f) }
     val edge = MammotionColors.TextSecondary
     Canvas(modifier.pointerInput(Unit) {
         detectDragGestures { change, drag ->
@@ -287,7 +301,7 @@ fun Relief3DView(cells: List<SignalCell>, map: RobotMap, modifier: Modifier = Mo
 
 @Composable
 fun Relief3DDialog(view: SignalReliefView, map: RobotMap, legend: String, onDismiss: () -> Unit) {
-    var exaggeration by remember { mutableStateOf(5f) }
+    var exaggeration by remember { mutableFloatStateOf(5f) }
     LubaDialog(onDismissRequest = onDismiss, title = tr("${view.signal.label} on the terrain", "${view.signal.label} sur le relief"), content = {
         Relief3DContent(view, map, legend, exaggeration) { exaggeration = it }
     })
@@ -344,7 +358,7 @@ fun SignalReliefControls(view: SignalReliefView, samples: List<SignalSample>, on
         subtitle = if (calibration != null) tr("Saved: tilt zero", "Enregistrée : zéro d'inclinaison") + (if (calibration.angle != null) tr(" and orientation", " et orientation") else "")
             else tr("Save the current tilt and orientation", "Enregistrer l'inclinaison et l'orientation actuelles"), onClick = onCalibrate)
     if (on3d != null && view.relief != null) NavRow(tr("3D view: ${view.signal.label} on the terrain", "Vue 3D : ${view.signal.label} sur le relief"),
-        icon = androidx.compose.material.icons.Icons.Rounded.Landscape, onClick = on3d)
+        icon = Icons.Rounded.Landscape, onClick = on3d)
 }
 
 /** Choice of the gateway phone orientation (Slope / Terrain). */

@@ -209,6 +209,20 @@ LegSpec LegSpec::decode(const Bytes &bytes) {
       s.offMapSections.push_back(section);
     }
   }
+  if (in.available() > 0 && in.readBoolean()) {
+    const int count = in.readUnsignedShort();
+    for (int i = 0; i < count; i++) {
+      SpeedCap cap;
+      cap.from = in.readDouble();
+      cap.to = in.readDouble();
+      cap.percent = in.readUnsignedByte();
+      require(std::isfinite(cap.from) && std::isfinite(cap.to) && cap.from >= 0 && cap.from < cap.to && cap.percent >= 1 &&
+                  cap.percent <= 100,
+              "Failed requirement.");
+      s.speedCaps.push_back(cap);
+    }
+  }
+  if (in.available() > 0) s.adaptiveSpeed = in.readBoolean();
   s.cutting = flags & 1;
   s.shown = flags & 2;
   s.watchBattery = flags & 4;
@@ -226,6 +240,7 @@ LegSpec LegSpec::decode(const Bytes &bytes) {
   bool sectionsOk = s.offMapSections.size() <= MAX_OFF_MAP_SECTIONS;
   for (const auto &section : s.offMapSections) sectionsOk = sectionsOk && section.size() <= MAX_OFF_MAP_POINTS;
   require(sectionsOk, "Trop de tronçons hors carte");
+  require(s.speedCaps.size() <= MAX_SPEED_CAPS, "Limites de vitesse invalides");
   return s;
 }
 
@@ -267,6 +282,14 @@ Bytes LegSpec::encode() const {
       out.writeDouble(p.y);
     }
   }
+  out.writeBoolean(!speedCaps.empty());
+  if (!speedCaps.empty()) out.writeShort((int)speedCaps.size());
+  for (const auto &cap : speedCaps) {
+    out.writeDouble(cap.from);
+    out.writeDouble(cap.to);
+    out.writeByte(cap.percent);
+  }
+  out.writeBoolean(adaptiveSpeed);
   return out.bytes;
 }
 

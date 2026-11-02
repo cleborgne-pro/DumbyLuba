@@ -1,6 +1,7 @@
 package fr.luba.poc.map
 
 import android.content.Context
+import androidx.core.content.edit
 import java.util.zip.CRC32
 import kotlin.math.roundToLong
 
@@ -77,7 +78,7 @@ class BorderValidationStore(context: Context) {
     fun save(entry: BorderValidationEntry): Map<Long, BorderValidationEntry> = write(read() + (entry.shapeId to entry))
     fun clear(shapeId: Long): Map<Long, BorderValidationEntry> = write(read() - shapeId)
     private fun write(saved: Map<Long, BorderValidationEntry>): Map<Long, BorderValidationEntry> {
-        prefs.edit().putString(KEY, BorderValidation.encode(saved)).apply()
+        prefs.edit { putString(KEY, BorderValidation.encode(saved)) }
         return saved
     }
     private companion object { const val KEY = "validations" }

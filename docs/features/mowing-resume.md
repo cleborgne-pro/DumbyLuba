@@ -2,7 +2,7 @@
 
 A mowing lasting several hours does not start again from zero after a STOP, a lost connection, the app being closed or
 the phone restarting. Since 0.61.0, the same applies to **every task in which the robot follows a route**: run with
-blades stopped, signal survey, border following and trial mowing (painted zone) resume at the point reached, and so
+blades stopped, signal survey, border following, painted zone and finishing of the gaps resume at the point reached, and so
 does a [move to a point](station-and-moves.md#move-to-a-point) towards the same destination.
 
 | | |
@@ -28,7 +28,7 @@ mowing (Service → Supervised tests) — the app writes one file per robot to i
   then carries on with the following ones;
 - the reason for the interruption;
 - the starting base (station, docking axis, approach; 0.64.2);
-- for a trial mowing, the **painted zones** where the blades keep running between two passes (0.61.0);
+- for a painted zone or a finishing, the **painted zones** (or the gaps) where the blades keep running between two passes (0.61.0);
 - the **robot's actual trace** (0.45.2), in a neighbouring file, tied to the mowing by its start date.
 
 The file is written at most every 5 s or every 2 m of cutting, and immediately at the start, on each recharge and on
@@ -37,7 +37,7 @@ each interruption. At worst, 5 s or 2 m are redone. Finishing the last stripe de
 ## Resume
 
 The map panel bears the name of the task: **Mowing interrupted**, **Route with blades stopped interrupted**,
-**Signal survey interrupted**, **Border following interrupted** or **Trial mowing interrupted**, followed by the
+**Signal survey interrupted**, **Border following interrupted** or **Partial mowing interrupted** (painted zone, finishing), followed by the
 percentage ("Mowing interrupted · 42 %"). A task started from the supervised tests can also be resumed from the map,
 with the same plan (same obstacles, blade zones). The panel shows the percentage mowed (all passes included), the
 time and the cause, then a line with the height ("Pass 2/3 · 55 mm" with several passes), the zones in order, the

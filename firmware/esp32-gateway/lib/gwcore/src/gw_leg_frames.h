@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "gw_datastream.h"
+#include "gw_speed.h"
 #include "gw_types.h"
 
 namespace gw {
@@ -92,8 +93,13 @@ struct LegSpec {
   // Slide field bytes (SlideField.write) kept as is; empty: none.
   Bytes slideField;
   std::vector<std::vector<Point>> offMapSections;
+  // Slowed stretches of the route (AdaptiveSpeed); empty: set speed everywhere.
+  std::vector<SpeedCap> speedCaps;
+  // Adaptive speed switched on by the pilot; off: set speed everywhere, RTK included. Absent (older pilot): on.
+  bool adaptiveSpeed = true;
 
   static constexpr size_t MAX_OFF_MAP_SECTIONS = 8;
+  static constexpr size_t MAX_SPEED_CAPS = 600;
   static constexpr size_t MAX_OFF_MAP_POINTS = 64;
   // Throws LegInvalid with the French message of the Kotlin init block.
   static LegSpec decode(const Bytes &bytes);

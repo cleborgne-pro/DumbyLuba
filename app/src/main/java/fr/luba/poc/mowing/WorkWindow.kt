@@ -1,10 +1,12 @@
 package fr.luba.poc.mowing
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.core.content.edit
+import fr.luba.poc.i18n.tr
+import java.time.LocalTime
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.time.LocalTime
-import fr.luba.poc.i18n.tr
 
 /**
  * DumbyLuba working hours, deliberately simple: a single window per day, from [startMinutes] to [endMinutes]
@@ -44,7 +46,7 @@ data class WorkWindow(val enabled: Boolean = false, val startMinutes: Int = DEFA
 
 /** Setting shared by the task screen and the robot driver, kept between launches. */
 object WorkWindowSetting {
-    private var prefs: android.content.SharedPreferences? = null
+    private var prefs: SharedPreferences? = null
     private val state = MutableStateFlow(WorkWindow())
     val flow: StateFlow<WorkWindow> get() = state
     val value: WorkWindow get() = state.value
@@ -60,6 +62,6 @@ object WorkWindowSetting {
     fun set(window: WorkWindow) {
         val clean = window.sanitized()
         state.value = clean
-        prefs?.edit()?.putBoolean("enabled", clean.enabled)?.putInt("start", clean.startMinutes)?.putInt("end", clean.endMinutes)?.apply()
+        prefs?.edit { putBoolean("enabled", clean.enabled); putInt("start", clean.startMinutes); putInt("end", clean.endMinutes) }
     }
 }

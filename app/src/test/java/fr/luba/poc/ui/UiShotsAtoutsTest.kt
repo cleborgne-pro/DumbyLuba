@@ -23,7 +23,7 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Opt-in screenshots (-PuiShots=folder) of the highlights shown in the README: signal heatmaps on the map,
- * progressive route drawing and painted zone. Deterministic fake signals ([SignalCoverage.simulated]),
+ * progressive route drawing. Deterministic fake signals ([SignalCoverage.simulated]),
  * never radio measurements. No pixel assertions.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -104,19 +104,6 @@ class UiShotsAtoutsTest {
             MapLive(map = focus(playground), plannedBands = reveal.runs, plannedBorders = reveal.borders,
                 cuttingZoneIds = setOf(playground.id), x = tip?.x, y = tip?.y, interactive = true,
                 modifier = Modifier.fillMaxSize())
-        }
-    }
-
-    /** Zone painted by finger on the Aire de jeux: strokes and retained area. */
-    @Test fun paintedZone() {
-        val zone = playground.points
-        val cx = zone.map { it.x }.average(); val cy = zone.map { it.y }.average()
-        val strokes = listOf(
-            PaintStroke((0..16).map { Point(cx - 4.0 + it * 0.5, cy - 1.5 + kotlin.math.sin(it * 0.6) * 0.8) }, 1.4),
-            PaintStroke((0..10).map { Point(cx - 0.5 + it * 0.35, cy + 0.8 + it * 0.3) }, 1.1))
-        val pieces = PaintedZone.pieces(map, strokes)
-        shot("atout-zone-peinte") {
-            MapLive(map = focus(playground), paint = strokes, paintPieces = pieces, interactive = true, modifier = Modifier.fillMaxSize())
         }
     }
 }

@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
+import androidx.core.content.edit
+import fr.luba.poc.auth.AccountMode
 import fr.luba.poc.i18n.tr
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,21 +35,21 @@ object SetupProgress {
     fun showWizard(context: Context): Boolean {
         val p = prefs(context)
         if (p.getBoolean(WIZARD_DONE, false)) return false
-        if (existingInstall(context)) { p.edit().putBoolean(WIZARD_DONE, true).putBoolean(CHECKLIST_HIDDEN, true).apply(); return false }
+        if (existingInstall(context)) { p.edit { putBoolean(WIZARD_DONE, true); putBoolean(CHECKLIST_HIDDEN, true) }; return false }
         return true
     }
 
-    fun finishWizard(context: Context) { prefs(context).edit().putBoolean(WIZARD_DONE, true).apply(); saves.value++ }
+    fun finishWizard(context: Context) { prefs(context).edit { putBoolean(WIZARD_DONE, true) }; saves.value++ }
 
     fun done(context: Context): Set<SetupStep> = SetupStep.entries.filter { prefs(context).getBoolean(it.name, false) }.toSet()
 
     fun mark(context: Context, step: SetupStep) {
         if (prefs(context).getBoolean(step.name, false)) return
-        prefs(context).edit().putBoolean(step.name, true).apply(); saves.value++
+        prefs(context).edit { putBoolean(step.name, true) }; saves.value++
     }
 
     fun checklistHidden(context: Context) = prefs(context).getBoolean(CHECKLIST_HIDDEN, false)
-    fun hideChecklist(context: Context) { prefs(context).edit().putBoolean(CHECKLIST_HIDDEN, true).apply(); saves.value++ }
+    fun hideChecklist(context: Context) { prefs(context).edit { putBoolean(CHECKLIST_HIDDEN, true) }; saves.value++ }
 }
 
 /** Where a list item leads. */
@@ -61,7 +63,7 @@ data class ChecklistItem(val step: String, val title: String, val subtitle: Stri
  */
 object FirstMowingChecklist {
     fun items(done: Set<SetupStep>, ready: Boolean, mapComplete: Boolean, cutoffTested: Boolean,
-              localOnly: Boolean = fr.luba.poc.auth.AccountMode.localOnly): List<ChecklistItem> = listOf(
+              localOnly: Boolean = AccountMode.localOnly): List<ChecklistItem> = listOf(
         ChecklistItem("robot", tr("Connect the robot", "Connecter le robot"), tr("Through the gateway or over direct Bluetooth", "Par la passerelle ou en Bluetooth direct"),
             ready || SetupStep.ROBOT_CONNECTED in done, SetupTarget.CONNECTION),
         ChecklistItem("check", tr("Check the setup", "Vérifier l'installation"), tr("Wi-Fi, gateway, placement, link by link", "Wi-Fi, passerelle, placement, maillon par maillon"),

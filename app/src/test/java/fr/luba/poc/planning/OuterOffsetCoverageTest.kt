@@ -33,7 +33,7 @@ class OuterOffsetCoverageTest {
         assertTrue(historic.valid && historic.metrics!!.targetAreaM2 > wide.metrics!!.targetAreaM2 + 50)
     }
 
-    @Test(timeout = 1800000) fun everyReferenceZoneAcceptsALargeOuterOffset() {
+    @Test(timeout = 900000) fun everyReferenceZoneAcceptsALargeOuterOffset() {
         // Narrow zones included (Figuier, Potager): corners and bottlenecks rounded by the loop out of the target.
         for (zone in PlannerBenchmarkTest().referenceCases().keys) for (offset in listOf(0.5, CoveragePlanner.MAX_OUTER_OFFSET_M)) {
             val result = plan(zone, offset)

@@ -7,9 +7,9 @@ import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.planning.RoutePlanning
 import fr.luba.poc.simulation.ObstacleBypass
 import fr.luba.poc.simulation.SimEdge
+import kotlin.math.atan2
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.atan2
 
 /** Difficulty log: classification, heatmap, presumed obstacles, storage and use by routes. */
 class DifficultiesTest {

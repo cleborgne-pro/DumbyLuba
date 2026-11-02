@@ -1,7 +1,9 @@
 /.gradle/
 /.kotlin/
+/.kotlin.noindex/
 /local.properties
 **/build/
+**/build.noindex/
 *.iml
 .idea/
 .DS_Store
@@ -20,3 +22,6 @@ home-server/data/
 keystore.properties
 *.jks
 *.keystore
+
+# Local audit reports: kept on disk, never versioned
+docs/interne/ANALYSE_REPO_*.md

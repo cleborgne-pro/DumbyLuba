@@ -14,25 +14,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Animation
-import androidx.compose.material.icons.rounded.Brush
 import androidx.compose.material.icons.rounded.Bluetooth
+import androidx.compose.material.icons.rounded.BorderStyle
+import androidx.compose.material.icons.rounded.Brush
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Cloud
-import androidx.compose.material.icons.rounded.Landscape
-import androidx.compose.material.icons.rounded.Layers
-import androidx.compose.material.icons.rounded.BorderStyle
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Gamepad
-import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Grass
+import androidx.compose.material.icons.rounded.Landscape
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Straighten
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material.icons.rounded.Grass
 import androidx.compose.material.icons.rounded.Whatshot
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,6 +47,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -63,8 +64,10 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.auth.AccountMode
 import fr.luba.poc.difficulty.DifficultyKind
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.mapsync.MapSyncScreen
 import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.NavRow
 import fr.luba.poc.ui.components.SettingsGroup
@@ -128,7 +131,7 @@ fun MapSettingsSheet(
         MapSettingsContent(source, summary, heat, mapLoading, fetchEnabled, accountEnabled, demoEnabled, onSignal, onHeatVisible,
             onLayerBar, onFetch, onAccount, onToggleDemo, onHistory, onCalibration, corrections, correctionsEnabled, onCorrections,
             recordEnabled, onRecord, onBorderTypes = { onDismiss(); BorderTypeRepository.editorOpen = true },
-            onSync = { onDismiss(); fr.luba.poc.mapsync.MapSyncScreen.open = true }, mapReadFailure = mapReadFailure)
+            onSync = { onDismiss(); MapSyncScreen.open = true }, mapReadFailure = mapReadFailure)
     }
 }
 
@@ -180,7 +183,7 @@ fun MapSettingsContent(
                 modifier = Modifier.padding(start = 6.dp))
         }
 
-        SettingsGroup(tr("On the map", "Sur la carte")) {
+        SettingsGroup(title = tr("On the map", "Sur la carte")) {
             ToggleRow(tr("Zone names", "Noms des zones"), display.zoneNames, { on -> MapDisplaySettings.update { it.copy(zoneNames = on) } },
                 subtitle = tr("Hidden for a zone too small on screen", "Masqués pour une zone trop petite à l'écran"), icon = Icons.Rounded.TextFields)
             ToggleRow(tr("Scale", "Échelle"), display.scaleBar, { on -> MapDisplaySettings.update { it.copy(scaleBar = on) } },
@@ -199,7 +202,7 @@ fun MapSettingsContent(
                 subtitle = tr("Area actually mowed by the current or last mowing; gaps in orange once it ends", "Surface réellement tondue par la tonte en cours ou la dernière ; manques en orange une fois terminée"), icon = Icons.Rounded.Grass)
         }
 
-        SettingsGroup(tr("Signal heatmap", "Heatmap des signaux")) {
+        SettingsGroup(title = tr("Signal heatmap", "Heatmap des signaux")) {
             if (heat.layers.isEmpty()) InfoNote(tr("No signal survey on this map: open the history to show one.", "Aucun relevé de signaux sur cette carte : ouvrez l'historique pour en afficher un."))
             else {
                 ToggleRow(if (heat.simulated) tr("Show the simulated heatmap", "Afficher la heatmap simulée") else tr("Show the heatmap", "Afficher la heatmap"), heat.visible, onHeatVisible,
@@ -213,7 +216,7 @@ fun MapSettingsContent(
                 subtitle = tr("Tilt and orientation of the gateway phone, for the terrain", "Inclinaison et orientation du téléphone passerelle, pour le relief"), onClick = onCalibration)
         }
 
-        SettingsGroup(tr("Local corrections", "Corrections locales")) {
+        SettingsGroup(title = tr("Local corrections", "Corrections locales")) {
             NavRow(tr("Correct the map", "Corriger la carte"), icon = Icons.Rounded.Edit,
                 subtitle = tr("Zones, no-go zones and obstacles corrected on the phone, without touching the Mammotion map", "Zones, no-go et obstacles corrigés sur le téléphone, sans toucher à la carte Mammotion"),
                 value = if (corrections > 0) tr("$corrections active", "$corrections active${if (corrections > 1) "s" else ""}") else null,
@@ -235,16 +238,16 @@ fun MapSettingsContent(
                 enabled = correctionsEnabled && corrections > 0, onClick = onSync)
         }
 
-        SettingsGroup(tr("Map source", "Source de la carte")) {
+        SettingsGroup(title = tr("Map source", "Source de la carte")) {
             // Failed reading: its reason replaces the subtitle until the next reading (DumbyLuba#3).
             val failed = mapReadFailure != null && !mapLoading
             NavRow(when { mapLoading -> tr("Reading…", "Lecture en cours…"); failed -> tr("Retry the robot map reading", "Relancer la lecture de la carte du robot")
                     else -> tr("Read the robot map", "Lire la carte du robot") }, icon = Icons.Rounded.Bluetooth,
-                subtitle = if (failed) mapReadFailure!! else tr("Bluetooth or gateway", "Bluetooth ou passerelle"),
+                subtitle = mapReadFailure?.takeIf { failed } ?: tr("Bluetooth or gateway", "Bluetooth ou passerelle"),
                 value = tr("Shown", "Affichée").takeIf { source == MapSource.ROBOT && !failed },
                 enabled = fetchEnabled, onClick = onFetch)
             // Local mode: no account map entry.
-            if (!fr.luba.poc.auth.AccountMode.observe()) NavRow(tr("Mammotion account map", "Carte du compte Mammotion"), icon = Icons.Rounded.Cloud, subtitle = tr("Viewing and simulation, no mowing", "Consultation et simulation, sans tonte"),
+            if (!AccountMode.observe()) NavRow(tr("Mammotion account map", "Carte du compte Mammotion"), icon = Icons.Rounded.Cloud, subtitle = tr("Viewing and simulation, no mowing", "Consultation et simulation, sans tonte"),
                 value = tr("Shown", "Affichée").takeIf { source == MapSource.ACCOUNT }, enabled = accountEnabled, onClick = onAccount)
             NavRow(if (source == MapSource.DEMO) tr("Back to the real map", "Revenir à la carte réelle") else tr("Try the demo", "Essayer la démonstration"), icon = Icons.Rounded.Map,
                 subtitle = tr("Built-in fictional map", "Carte fictive embarquée"), enabled = demoEnabled, onClick = onToggleDemo)
@@ -284,7 +287,7 @@ private fun BackdropTile(backdrop: MapBackdrop, selected: Boolean, onClick: () -
 
 private fun DrawScope.drawBackdropPreview(backdrop: MapBackdrop, colors: LubaColors) {
     val r = 8.dp.toPx()
-    val clip = Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, size.width, size.height, CornerRadius(r))) }
+    val clip = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(r))) }
     clipPath(clip) {
         drawRect(colors.MapBackground)
         when (backdrop) {
@@ -377,7 +380,7 @@ fun MapLegend() {
             LegendEntry(tr("Last known position", "Dernière position connue"), tr("Gray ring: old position", "Anneau gris : position ancienne")) { c -> legendRobot(c, false) },
         ),
     )
-    SettingsGroup(tr("Legend", "Légende")) {
+    SettingsGroup(title = tr("Legend", "Légende")) {
         groups.forEachIndexed { index, (title, entries) ->
             Text(title, style = MaterialTheme.typography.labelLarge, color = MammotionColors.TextSecondary,
                 modifier = Modifier.padding(top = if (index == 0) 0.dp else 4.dp))
@@ -423,14 +426,14 @@ private fun DrawScope.legendZone(c: LubaColors, selected: Boolean) {
 /** Corrected boundary: filled zone, original Mammotion boundary as grey dashes. */
 private fun DrawScope.legendCorrected(c: LubaColors) {
     lawnRect(c, false)
-    val r = androidx.compose.ui.geometry.Rect(size.width * 0.18f, size.height * 0.25f, size.width * 0.70f, size.height * 0.75f)
+    val r = Rect(size.width * 0.18f, size.height * 0.25f, size.width * 0.70f, size.height * 0.75f)
     drawRect(c.TextSecondary, r.topLeft, r.size, style = Stroke(1.5f * u(),
-        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f * u(), 3f * u()))))
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f * u(), 3f * u()))))
 }
 
 private fun DrawScope.legendNoGo(c: LubaColors) {
     lawnRect(c, false)
-    val r = androidx.compose.ui.geometry.Rect(size.width * 0.25f, size.height * 0.22f, size.width * 0.75f, size.height * 0.78f)
+    val r = Rect(size.width * 0.25f, size.height * 0.22f, size.width * 0.75f, size.height * 0.78f)
     val shape = Path().apply { addOval(r) }
     drawPath(shape, c.NoGoFill)
     drawPath(shape, c.NoGoStroke.copy(alpha = 0.7f), style = Stroke(1f * u()))
@@ -438,7 +441,7 @@ private fun DrawScope.legendNoGo(c: LubaColors) {
 
 private fun DrawScope.legendMapObstacle(c: LubaColors) {
     lawnRect(c, false)
-    val r = androidx.compose.ui.geometry.Rect(size.width * 0.32f, size.height * 0.28f, size.width * 0.68f, size.height * 0.72f)
+    val r = Rect(size.width * 0.32f, size.height * 0.28f, size.width * 0.68f, size.height * 0.72f)
     drawRoundRect(c.ObstacleFill, r.topLeft, r.size, CornerRadius(3 * u()))
     drawRoundRect(c.ObstacleStroke, r.topLeft, r.size, CornerRadius(3 * u()), style = Stroke(1.25f * u()))
 }

@@ -1,11 +1,11 @@
 package fr.luba.poc.simulation
 
 import fr.luba.poc.map.*
+import kotlin.math.cos
+import kotlin.math.sin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
  * Point published by the LUBA 2 8 cm behind its rotation centre (mowing of 2026-10-15, 212 pivots): the tracking

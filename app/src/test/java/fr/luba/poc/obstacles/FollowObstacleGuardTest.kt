@@ -2,10 +2,10 @@ package fr.luba.poc.obstacles
 
 import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.Point
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.cos
 import kotlin.math.sin
+import org.junit.Assert.*
+import org.junit.Test
 
 class FollowObstacleGuardTest {
     /** Obstacle saved on 2026-10-14 at 13:17 (radius 0.2 m, margin 0.3 m) and robot pose at 14:36:57 (heading 216°, pivot). */

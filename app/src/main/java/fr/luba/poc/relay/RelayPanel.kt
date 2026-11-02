@@ -2,22 +2,28 @@ package fr.luba.poc.relay
 
 import android.Manifest
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
+import java.text.DateFormat
+import java.util.Date
+import kotlinx.coroutines.delay
 
 /** Relay to the home server (read-only web page): emits its titled groups into the calling page. */
 @Composable
@@ -25,12 +31,12 @@ fun RelayPanel() {
     val context = LocalContext.current
     val status by RelayService.status.collectAsStateWithLifecycle()
     val initial = remember { RelayConfig.read(context) }
-    var url by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initial.url) }
-    var code by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initial.code) }
+    var url by rememberSaveable { mutableStateOf(initial.url) }
+    var code by rememberSaveable { mutableStateOf(initial.code) }
     var error by remember { mutableStateOf("") }
     LaunchedEffect(url, code, status.running) {
         if (!status.running) {
-            kotlinx.coroutines.delay(400)
+            delay(400)
             runCatching { RelayConfig.save(context, RelayConfig(url.trim(), code, initial.id)) }
         }
     }
@@ -48,26 +54,26 @@ fun RelayPanel() {
         if (bluetoothGranted) start() else error = tr("Bluetooth permissions are required.", "Les permissions Bluetooth sont nécessaires.")
     }
     val exempt = power.isIgnoringBatteryOptimizations(context.packageName)
-    SettingsGroup(tr("Relay status", "État du relais")) {
+    SettingsGroup(title = tr("Relay status", "État du relais")) {
         InfoNote(tr("Independent of the robot gateway: this phone sends the robot state it sees (position, map, battery) " +
             "to the home server, viewable in a browser. No command goes through it.",
             "Indépendant de la passerelle robot : ce téléphone envoie l’état du robot qu’il voit (position, carte, batterie) " +
             "au serveur maison, consultable dans un navigateur. Aucune commande ne passe par là."))
         KeyValueRow(tr("Status", "État"), status.message)
-        status.lastSentAt?.let { KeyValueRow(tr("Last sent", "Dernier envoi"), java.text.DateFormat.getTimeInstance().format(java.util.Date(it))) }
+        status.lastSentAt?.let { KeyValueRow(tr("Last sent", "Dernier envoi"), DateFormat.getTimeInstance().format(Date(it))) }
         if (status.running) {
             KeyValueRow(tr("Battery exemption", "Exemption batterie"), if (exempt) tr("active", "active") else tr("missing", "absente"))
-            if (!exempt) StatusNote(tr("Battery exemption missing: set it up before a test with the screen off.", "Exemption batterie absente : à configurer avant un essai écran éteint."), NoteTone.WARNING)
+            if (!exempt) StatusNote(tr("Battery exemption missing: set it up before a test with the screen off.", "Exemption batterie absente : à configurer avant un essai écran éteint."), tone = NoteTone.WARNING)
         }
     }
-    SettingsGroup(tr("Relay settings", "Réglages du relais")) {
+    SettingsGroup(title = tr("Relay settings", "Réglages du relais")) {
         LubaTextField(url, { url = it }, tr("Home server", "Serveur maison"), enabled = !status.running, placeholder = "http://192.168.1.10:8765")
         LubaTextField(code, { code = it.filter { c -> c in '0'..'9' }.take(6) }, tr("Six-digit code", "Code à six chiffres"), enabled = !status.running,
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         InfoNote(tr("Same code on the server and its web page; address and code are saved automatically.", "Même code sur le serveur et sa page web ; adresse et code sont mémorisés automatiquement."))
         InfoNote(tr("Connect the robot (Service → Bluetooth connection) and read its map. Bluetooth stays active with the screen off; local tests stop in the background.",
             "Connectez le robot (Service → Connexion Bluetooth) et lisez sa carte. Le Bluetooth reste actif écran éteint ; les essais locaux s’arrêtent en arrière-plan."))
-        if (error.isNotBlank()) StatusNote(error, NoteTone.DANGER)
+        if (error.isNotBlank()) StatusNote(error, tone = NoteTone.DANGER)
         val toggle = {
             if (status.running) context.stopService(Intent(context, RelayService::class.java))
             else permissions.launch(if (Build.VERSION.SDK_INT >= 31) {
@@ -80,7 +86,7 @@ fun RelayPanel() {
         else PrimaryPillButton(tr("Start the relay", "Démarrer le relais"), toggle, Modifier.fillMaxWidth(), icon = Icons.Rounded.PlayArrow)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             TextAction(tr("Battery optimization", "Optimisation batterie"), { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }, Modifier.weight(1f))
-            TextAction(tr("Android settings", "Réglages Android"), { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }, Modifier.weight(1f))
+            TextAction(tr("Android settings", "Réglages Android"), { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())) }, Modifier.weight(1f))
         }
     }
 }

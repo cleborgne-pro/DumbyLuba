@@ -1,12 +1,15 @@
 package fr.luba.poc.map
 
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.KeyValueRow
@@ -18,16 +21,16 @@ import fr.luba.poc.ui.components.Segmented
 import fr.luba.poc.ui.components.SettingsGroup
 import fr.luba.poc.ui.components.TextAction
 import fr.luba.poc.ui.theme.MammotionColors
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Short label of a survey shown on the map: "Survey of Oct 12", "Continuous map of Oct 12". */
 fun surveyShortLabel(s: SignalSurvey): String {
     val day = if (s.startedAt > 0) tr(" of " + SimpleDateFormat("MMM d", Locale.ENGLISH).format(Date(s.startedAt)),
-        " du " + SimpleDateFormat("dd/MM", fr.luba.poc.i18n.I18n.locale).format(Date(s.startedAt))) else ""
+        " du " + SimpleDateFormat("dd/MM", I18n.locale).format(Date(s.startedAt))) else ""
     return (if (s.live) tr("Continuous map", "Carte continue") else if (s.simulated) tr("Simulated survey", "Relevé simulé")
         else tr("Survey", "Relevé")) + day
 }
@@ -40,12 +43,12 @@ fun SignalHistoryDialog(store: SignalSurveyStore, currentMap: RobotMap, mount: P
     var loading by remember { mutableStateOf(true) }
     var selected by remember { mutableStateOf<SignalSurvey?>(null) }
     var signal by remember { mutableStateOf(SurveySignal.WIFI) }
-    var filter by remember { mutableStateOf(0) }
+    var filter by remember { mutableIntStateOf(0) }
     var view3d by remember { mutableStateOf(false) }
     var shading by remember { mutableStateOf(true) }
-    var exaggeration by remember { mutableStateOf(5f) }
+    var exaggeration by remember { mutableFloatStateOf(5f) }
     LaunchedEffect(store) { history=withContext(Dispatchers.IO) { store.history() }; loading=false }
-    val date=remember { SimpleDateFormat(tr("yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy à HH:mm:ss"),fr.luba.poc.i18n.I18n.locale) }
+    val date=remember { SimpleDateFormat(tr("yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy à HH:mm:ss"),I18n.locale) }
     fun label(s: SignalSurvey) = if(s.startedAt>0) date.format(Date(s.startedAt)) else tr("Unknown date", "Date inconnue")
     fun modeLabel(s: SignalSurvey) = if(s.live) tr("Continuous map (today's version)", "Carte continue (version du jour)") else s.mode.label
     LubaDialog(onDismissRequest=onDismiss,title=tr("Heatmap history", "Historique des heatmaps"),content={
@@ -81,7 +84,7 @@ fun SignalHistoryDialog(store: SignalSurveyStore, currentMap: RobotMap, mount: P
             if(relief!=null && view3d) Relief3DContent(view,snapshot,"",exaggeration) { exaggeration=it }
             else MapLive(snapshot,modifier=Modifier.fillMaxWidth().height(400.dp).clip(MaterialTheme.shapes.medium).background(MammotionColors.MapBackground),
                 interactive=true,cameraReset=survey.sessionId.hashCode(),signalCells=cells,signal=signal,signalColor=view::color)
-            SettingsGroup(tr("Display", "Affichage")) {
+            SettingsGroup(title = tr("Display", "Affichage")) {
                 SignalReliefControls(view,survey.samples,onSignal={ signal=it },onShading={ shading=it },
                     mount=if(survey.simulated) null else mount,onMount=onMount,on3d=null,calibration=calibration)
             }

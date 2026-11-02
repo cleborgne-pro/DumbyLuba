@@ -1,5 +1,6 @@
 package fr.luba.poc.gateway
 
+import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -9,7 +10,13 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import androidx.core.content.edit
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
+import java.text.SimpleDateFormat
+import java.util.Date
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /** Pure decisions for keeping the gateway phone silent. */
 internal object SilencePolicy {
@@ -118,8 +125,10 @@ class SilenceKeeper(private val context: Context, private val report: (String) -
         private const val SETTLE_MS = 300L
         private const val PERIOD_MS = 30_000L
 
+        // Holds the application context only (install), never an activity.
+        @SuppressLint("StaticFieldLeak")
         private var installed: SilenceKeeper? = null
-        private val events = kotlinx.coroutines.flow.MutableStateFlow<List<String>>(emptyList())
+        private val events = MutableStateFlow<List<String>>(emptyList())
         /** Latest interventions, shown in Service → Gateway. */
         val lastEvents = events
 
@@ -127,9 +136,9 @@ class SilenceKeeper(private val context: Context, private val report: (String) -
         fun install(context: Context) {
             if (installed != null) return
             installed = SilenceKeeper(context.applicationContext) { text ->
-                val stamp = java.text.SimpleDateFormat("HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(java.util.Date())
+                val stamp = SimpleDateFormat("HH:mm:ss", I18n.locale).format(Date())
                 events.value = (events.value + "$stamp $text").takeLast(5)
-                android.util.Log.i("DumbyLubaSilence", text)
+                Log.i("DumbyLubaSilence", text)
             }.also { it.start() }
         }
 
@@ -137,10 +146,10 @@ class SilenceKeeper(private val context: Context, private val report: (String) -
         fun refresh() { installed?.let { keeper -> keeper.main.post { keeper.evaluate() } } }
 
         fun keep(context: Context) = context.getSharedPreferences(PREFS, 0).getBoolean(KEY, true)
-        fun setKeep(context: Context, value: Boolean) { context.getSharedPreferences(PREFS, 0).edit().putBoolean(KEY, value).apply(); refresh() }
+        fun setKeep(context: Context, value: Boolean) { context.getSharedPreferences(PREFS, 0).edit { putBoolean(KEY, value) }; refresh() }
         fun policyGranted(context: Context) =
             context.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
         private fun owned(context: Context) = context.getSharedPreferences(PREFS, 0).getBoolean(OWNED, false)
-        private fun setOwned(context: Context, value: Boolean) { context.getSharedPreferences(PREFS, 0).edit().putBoolean(OWNED, value).apply() }
+        private fun setOwned(context: Context, value: Boolean) { context.getSharedPreferences(PREFS, 0).edit { putBoolean(OWNED, value) } }
     }
 }

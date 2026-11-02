@@ -3,6 +3,9 @@ package fr.luba.poc.planning
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.Preview
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sqrt
 import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.operation.overlayng.OverlayNG
 import org.locationtech.jts.operation.overlayng.OverlayNGRobust
@@ -74,8 +77,9 @@ internal class MissionEvaluator(private val terrain: PlanningTerrain, val transi
             if (turn>1e-7) { angle+=turn; stops++ }
             previous=next; distance+=d; if (!leg.cutting) transit+=d
         } }
-        if (previous != null && request.startHeading != null) {
-            val turn=angleDifference(previous!!,request.startHeading)
+        val last = previous
+        if (last != null && request.startHeading != null) {
+            val turn=angleDifference(last,request.startHeading)
             if (turn>1e-7) { angle+=turn; stops++ }
         }
         return listOf(distance,transit,angle,stops)
@@ -90,7 +94,7 @@ internal class MissionEvaluator(private val terrain: PlanningTerrain, val transi
         // The cut is a disc centred on the reference point, an explicit assumption distinct from the chassis rectangle.
         val coverage = coverage(mission,terrain.target,config.cutWidthM/2,config.indexedCoverage,config.coverageCellM)
         mission.filter { it.cutting }.forEach { leg ->
-            if (!terrain.physical.covers(line(leg.path).buffer(config.cutWidthM/2/kotlin.math.cos(Math.PI/64),16))) violations++
+            if (!terrain.physical.covers(line(leg.path).buffer(config.cutWidthM/2/cos(Math.PI/64),16))) violations++
         }
         val (distance,transit,angle,stops) = movement(mission)
         // Opposition of the sweep passes: a link with two right angles counts as a U-turn.
@@ -100,7 +104,7 @@ internal class MissionEvaluator(private val terrain: PlanningTerrain, val transi
                 if(pass.size<2) false else {
                     val dx=b.x-a.x; val dy=b.y-a.y; val square=dx*dx+dy*dy
                     fun projection(p: Point) = ((p.x-a.x)*dx+(p.y-a.y)*dy)/square
-                    fun collinear(p: Point) = kotlin.math.abs((p.x-a.x)*dy-(p.y-a.y)*dx)<=1e-7*kotlin.math.sqrt(square)
+                    fun collinear(p: Point) = abs((p.x-a.x)*dy-(p.y-a.y)*dx)<=1e-7*sqrt(square)
                     val first=projection(pass.first()); val last=projection(pass.last())
                     collinear(pass.first()) && collinear(pass.last()) && minOf(1.0,maxOf(first,last))-maxOf(0.0,minOf(first,last))>1e-8
                 }
@@ -154,7 +158,7 @@ internal class MissionEvaluator(private val terrain: PlanningTerrain, val transi
                             val a=path[path.size-2]; val b=path.last()
                             val cross=(b.x-a.x)*(point.y-b.y)-(b.y-a.y)*(point.x-b.x)
                             val dot=(b.x-a.x)*(point.x-b.x)+(b.y-a.y)*(point.y-b.y)
-                            if(kotlin.math.abs(cross)<=1e-12*maxOf(1.0,a.distance(b)*b.distance(point)) && dot>0) path.removeAt(path.lastIndex)
+                            if(abs(cross)<=1e-12*maxOf(1.0,a.distance(b)*b.distance(point)) && dot>0) path.removeAt(path.lastIndex)
                         }
                         path.add(point)
                     }

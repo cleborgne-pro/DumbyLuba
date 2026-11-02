@@ -1,7 +1,7 @@
 package fr.luba.poc.mowing
 
-import fr.luba.poc.proto.CommonProto.CommDataCouple
 import fr.luba.poc.map.Point
+import fr.luba.poc.proto.CommonProto.CommDataCouple
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlNavProto.*
 import fr.luba.poc.protocol.Commands

@@ -1,8 +1,8 @@
 package fr.luba.poc.simulation
 
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.*
 import org.junit.Test
-import java.util.concurrent.atomic.AtomicInteger
 
 class PreparationPoolTest {
     @Test(timeout = 20_000) fun nestedCallsKeepOrderWithoutDeadlock() {

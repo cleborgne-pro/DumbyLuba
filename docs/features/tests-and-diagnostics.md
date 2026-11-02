@@ -6,13 +6,14 @@ released or on STOP.
 
 | | |
 |---|---|
-| **Access** | Service → *Robot* (Cutting height), *Supervised tests* (Command cutoff, Navigation test, Border following, Obstacle tests, Blade test, Trial mowing) and *Diagnostics* (Bluetooth diagnostics, Detailed telemetry, Sensors and perception, Logs, Advanced settings) groups |
-| **Code** | `diagnostics/`, `ui/RobotPanel.kt` (Service pages), `ui/BladesPanel.kt`, `ui/ObstaclesPanel.kt`, `ui/MowDebugPanel.kt`, `ui/BorderDebugPanel.kt`, `map/PaintedZone.kt`, `map/BorderFollow.kt` |
+| **Access** | Service → *Robot* (Cutting height), *Supervised tests* (Command cutoff, Navigation test, Border following, Obstacle tests, Blade test) and *Diagnostics* (Bluetooth diagnostics, Detailed telemetry, Sensors and perception, Logs, Advanced settings) groups |
+| **Code** | `diagnostics/`, `ui/RobotPanel.kt` (Service pages), `ui/BladesPanel.kt`, `ui/ObstaclesPanel.kt`, `ui/MowDebugPanel.kt` (finishing of the gaps), `ui/BorderDebugPanel.kt`, `map/BorderFollow.kt` |
 | **Recommended starting point** | [First test guide](../MILESTONE_1_TEST.md) |
 
 Recommended order for a new robot: Bluetooth diagnostics → telemetry → [manual control](manual-control.md) →
 [command cutoff](safety.md#command-cutoff-motor-watchdog) → navigation test → [obstacle tests](obstacles.md#service--obstacles-and-obstacle-tests)
-→ cutting height and blade test → trial mowing → [real mowing](real-mowing.md).
+→ cutting height and blade test → [real mowing](real-mowing.md) of a small [painted zone](mowing-preparation.md#paint-a-zone)
+(Map → Mow → Paint a zone) → whole zones.
 
 Shared rules: the pages that command the robot show "Robot not connected: this page unlocks as soon as it is
 (gateway or direct Bluetooth)." when needed, and refuse to start while a mowing is running ("Mowing is in progress:
@@ -25,7 +26,6 @@ battery.
 <p align="center">
   <img src="../images/diagnostics.png" width="170" alt="Bluetooth diagnostics">
   <img src="../images/blades.png" width="170" alt="Blade test">
-  <img src="../images/debug-mowing-paint.png" width="170" alt="Painted zone">
   <img src="../images/border.png" width="170" alt="Border">
 </p>
 
@@ -132,7 +132,9 @@ border, blades off by default, to measure in the field the distance it actually 
 - Tap a border (or **Choose from the list** / **Change border**): zone boundary or no-go zone contour.
 - **Offset between the robot and the outline** from 0 to 100 cm in 1 cm steps (starting from the mowing margin; at
   0 cm the robot's side passes 1 cm from the outline); **Blades running** off by default (with blades, a **Cutting
-  height** slider appears); **Travel speed** 10 to 100 %. **Compute**, then **Follow · blades OFF** or **Mow · X mm**.
+  height** slider appears); **Travel speed** 10 to 100 %. The loop is computed by itself as soon as the page opens and
+  again after every change of the border, the offset, the obstacles or the start (robot charging or not); the
+  computation stage, or the refusal, shows above **Follow · blades OFF** / **Mow · X mm**.
   The loop goes inside a zone and outside a no-go zone, bypassing other no-go zones, learned obstacles and the base
   surroundings.
 - After the test, **Use X cm for mowing** saves this gap as the *Outer margin* of the
@@ -145,22 +147,18 @@ border, blades off by default, to measure in the field the distance it actually 
 - A learned obstacle near the docking corridor no longer blocks the computation: see
   [obstacles near the base](obstacles.md#obstacles-near-the-base).
 - **Resume** (0.61.0): an interrupted loop (STOP, link, app restart) can be resumed from the point reached, from the
-  map, in the **Border following interrupted** panel; the same applies to trial mowing below
+  map, in the **Border following interrupted** panel; the same applies to a painted zone or a finishing
   ([resume](mowing-resume.md)).
 
-## Trial mowing (painted zone)
+## Finishing the gaps
 
-Real mowing limited to a small area painted with a finger, with the same engine and the same checks as mowing from
-the map.
+Service → **Finishing the gaps** has no entry in the summary: it opens from a mowing report, **Prepare the finishing**
+([finishing](mowing-history.md#finishing-of-the-gaps)). Real mowing limited to the gaps left by that mowing, with the same engine
+and the same checks as mowing from the map: **Cutting height**, **Pass spacing**, **Forward speed**, supervision box,
+then **Mow · X mm**. There is no **Compute** button: the route is computed as soon as the page opens, without waiting
+for the robot to be connected, and again after every change of the spacing, the obstacles or the start (robot charging
+or not); "Computing the route · stage", or the reason of a refusal, shows just above **Mow · X mm**. Without gaps to
+finish, the page says so ("No gaps to finish: open the report of a mowing in History…").
 
-- **Paint / Erase / Move** with a finger (**Brush size** Ø 0.6 to 4 m, Ø 1.2 m by default), **Undo**, **Clear all**;
-  one finger paints, two fingers pan and zoom; only paint inside existing zones is kept, no-go zones excluded
-  (retained area shown).
-- **Cutting height** (model's range, 25–70 mm on a LUBA 2), **Pass spacing** 15 to 35 cm in 5 cm steps (25 cm by default), **Forward speed**
-  10–100 %, **Border of the painted zone** (one lap of the retained outline before the passes, on by default).
-- **Compute** (target area, planned coverage, cutting and link meters), then **Mow · X mm** (blades running; links
-  blades stopped, return to base). Mowing continues if you leave the page; STOP stays available here and on the map.
-- Minimum coverage of 80 % (instead of 95 %, as small areas have proportionally more edges).
-- Interrupted (STOP, link, app closed): resume from the point reached, from the map.
-
-[Trial mowing and border following: details](../DEBUG_MOWING.md).
+The former **Trial mowing (painted zone)** page is replaced by **Paint a zone** in Map → Mow
+([paint a zone](mowing-preparation.md#paint-a-zone)). Details: [painted zone and border following](../DEBUG_MOWING.md).

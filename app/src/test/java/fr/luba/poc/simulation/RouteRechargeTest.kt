@@ -1,9 +1,9 @@
 package fr.luba.poc.simulation
 
 import fr.luba.poc.map.*
+import kotlin.math.*
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.*
 
 class RouteRechargeTest {
     private fun engine(): MowingSimulation {

@@ -24,7 +24,12 @@ object CoverageEngine {
     internal fun planPattern(input: PlanningRequest,mode: CoverageMode,checkpoint: () -> Unit): PlanningResult {
         require(mode!=CoverageMode.LINES)
         if(mode==CoverageMode.OPTIMIZED) return planOptimized(input,checkpoint)
-        return AutomaticPlanner.plan(input,mode,checkpoint)
+        val planned=AutomaticPlanner.plan(input,mode,checkpoint)
+        if(mode!=CoverageMode.ZAMBONI || !input.config.zamboniObliqueTurns || planned.selected.valid) return planned
+        // Zamboni whose oblique U-turns leave no valid route (Aire de jeux at a manual 10°: no safe link to the remaining
+        // blocks): the route without them, kept if valid.
+        val plain=AutomaticPlanner.plan(input.copy(config=input.config.copy(zamboniObliqueTurns=false)),mode,checkpoint)
+        return if(plain.selected.valid) plain else planned
     }
     /** Mixed orientations kept only if the complete evaluated mission (actual links,
      * U-turns, pivot duration measured on the robot) does at least as well as the simple
@@ -37,7 +42,7 @@ object CoverageEngine {
     /** Mission score with the pivot duration measured on the robot: same metrics,
      * only the rotation and stop durations change. Used to decide between mixed and simple. */
     internal fun robotScore(candidate: CandidateResult,config: PlanningConfig): Double {
-        val m=candidate.metrics!!
+        val m=requireNotNull(candidate.metrics) { "robot score of a candidate without metrics: ${candidate.name}" }
         val turnRate=minOf(config.turnDegreesPerSecond,ROBOT_TURN_DEGREES_PER_SECOND)
         val stop=maxOf(config.stopSeconds,ROBOT_STOP_SECONDS)
         val duration=m.distanceM/config.speedMps+m.turnDegrees/turnRate+m.pivots*stop
@@ -48,8 +53,7 @@ object CoverageEngine {
         val mixed=AutomaticPlanner.plan(input,CoverageMode.OPTIMIZED,checkpoint,orientation=false)
         val simple=AutomaticPlanner.plan(input,CoverageMode.LINES,checkpoint,orientation=false)
         val a=mixed.selected; val b=simple.selected
-        val keepMixed=a.valid && (!b.valid || robotScore(a,input.config)<=robotScore(b,input.config)+1e-6 &&
-            a.metrics!!.coveredAreaM2+1e-6>=b.metrics!!.coveredAreaM2-0.002*b.metrics.targetAreaM2)
+        val keepMixed=a.valid && (!b.valid || robotScore(a,input.config)<=robotScore(b,input.config)+1e-6 && coversAsMuch(a,b))
         val chosen=if(keepMixed) mixed else simple
         val selected=chosen.selected.copy(name="optimized-"+chosen.selected.name,
             preview=chosen.selected.preview?.let { p -> p.copy(mode=CoverageMode.OPTIMIZED,zoneModes=p.zoneModes.map { CoverageMode.OPTIMIZED }) })
@@ -98,13 +102,13 @@ object CoverageEngine {
             val reference=candidates.first()
             if(reference.valid) try {
                 val repaired=timed("neighborhood_search") { NeighborhoodSequencer(terrain,evaluator,checkpoint).optimize(baseline) }
-                candidates.add(timed("evaluation") { evaluator.evaluate("pattern-local-search",repaired,reference.metrics!!.coveredAreaM2) })
+                candidates.add(timed("evaluation") { evaluator.evaluate("pattern-local-search",repaired,reference.metrics?.coveredAreaM2 ?: 0.0) })
             } catch(e: org.locationtech.jts.geom.TopologyException) {
                 candidates.add(CandidateResult("pattern-local-search",PlanStatus.NUMERIC_FAILURE,null,null,null,listOf(e.message ?: tr("Numerical error", "Erreur numérique"))))
             } catch(e: IllegalArgumentException) {
                 candidates.add(CandidateResult("pattern-local-search",PlanStatus.NO_SOLUTION_FOUND,null,null,null,listOf(e.message ?: tr("Link refused", "Raccord refusé"))))
             }
-            val selected=candidates.filter { it.valid && preservesReference(it,reference) }.minByOrNull { it.score!! } ?: reference
+            val selected=candidates.filter { it.valid && preservesReference(it,reference) }.minByOrNull { it.score ?: Double.POSITIVE_INFINITY } ?: reference
             return PlanningResult(request.hash,strategy,selected,candidates.toList(),terrain.assumptions+
                 tr("Valid in the model; physical behavior not certified", "Validité dans le modèle ; comportement physique non certifié"),phases.toMap(),transitions.queries,transitions.hits)
         }
@@ -148,7 +152,7 @@ object CoverageEngine {
                 }
             }
             // Freeze phase 2 before any refinement: same search and same selection.
-            val phase2=candidates.filter { it.valid }.minByOrNull { it.score!! }
+            val phase2=candidates.filter { it.valid }.minByOrNull { it.score ?: Double.POSITIVE_INFINITY }
             fun refine(name: String,seed: Preview,useNeighborhood: Boolean) {
                 checkpoint()
                 try {
@@ -167,23 +171,23 @@ object CoverageEngine {
             val plateau=automatic && phase2!=null && phase2.planHash==candidates.first().planHash
             if(plateau) phases["neighborhood_skipped_plateau"]=0
             if(lns && phase2!=null && !plateau) {
-                refine("lns-phase2",phase2.preview!!,true)
+                phase2.preview?.let { refine("lns-phase2",it,true) }
                 // Two passes at most, same LNS budget in the ablation and the hybrid.
-                val seed=candidates.filter { it.valid }.minByOrNull { it.score!! }
-                if(seed!=null && seed.planHash!=phase2.planHash) refine("lns-refined",seed.preview!!,true)
+                val seed=candidates.filter { it.valid }.minByOrNull { it.score ?: Double.POSITIVE_INFINITY }
+                if(seed!=null && seed.planHash!=phase2.planHash) seed.preview?.let { refine("lns-refined",it,true) }
             }
             if(joint || lns) {
                 // The weighted score may buy a slower mission: here the phase 2 duration,
                 // distance and coverage are explicit safeguards.
                 val selected=candidates.filter { it.valid && (phase2==null || preservesReference(it,phase2)) }
-                    .minByOrNull { it.score!! } ?: candidates.maxBy { it.metrics?.coveredAreaM2 ?: -1.0 }
+                    .minByOrNull { it.score ?: Double.POSITIVE_INFINITY } ?: candidates.maxBy { it.metrics?.coveredAreaM2 ?: -1.0 }
                 return PlanningResult(request.hash,strategy,selected,candidates.toList(),terrain.assumptions+
                     tr("Tool modelled as a disc; time without recharge, level B; no execution authorization",
                         "Outil modélisé par un disque ; temps sans recharge, niveau B ; aucune autorisation d'exécution"),
                     phases.toMap(),transitions.queries,transitions.hits)
             }
         }
-        val selected=candidates.filter { it.valid }.minByOrNull { it.score!! }
+        val selected=candidates.filter { it.valid }.minByOrNull { it.score ?: Double.POSITIVE_INFINITY }
             ?: candidates.maxBy { it.metrics?.coveredAreaM2 ?: -1.0 }
         return PlanningResult(request.hash,strategy,selected,candidates.toList(),terrain.assumptions+
             tr("Tool modelled as a disc; time without recharge, level B; no execution authorization",
@@ -193,8 +197,16 @@ object CoverageEngine {
     internal fun preservesReference(candidate: CandidateResult,reference: CandidateResult): Boolean {
         val a=candidate.metrics ?: return false
         val b=reference.metrics ?: return false
+        val scoreA=candidate.score ?: return false
+        val scoreB=reference.score ?: return false
         return candidate.valid && a.coveredAreaM2+1e-6>=b.coveredAreaM2 &&
             a.durationSeconds<=b.durationSeconds+1e-6 && a.distanceM<=b.distanceM+1e-6 &&
-            a.transitM<=b.transitM+1e-6 && candidate.score!!<=reference.score!!+1e-6
+            a.transitM<=b.transitM+1e-6 && scoreA<=scoreB+1e-6
+    }
+    /** The mixed plan [a] sweeps at least the area of the simple plan [b], within 0.2 point of its target. */
+    private fun coversAsMuch(a: CandidateResult,b: CandidateResult): Boolean {
+        val mixed=a.metrics ?: return false
+        val simple=b.metrics ?: return true
+        return mixed.coveredAreaM2+1e-6>=simple.coveredAreaM2-0.002*simple.targetAreaM2
     }
 }

@@ -1,6 +1,7 @@
 package fr.luba.poc.map
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
@@ -22,8 +23,10 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -35,15 +38,17 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.core.content.edit
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.Format
 import fr.luba.poc.ui.theme.LubaColors
 import fr.luba.poc.ui.theme.MammotionColors
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.GeometryFactory
 
 /** Background of the full-screen map, chosen in the **Map** sheet. Labels evaluated at display time. */
 enum class MapBackdrop(private val labelEn: String, private val labelFr: String, private val detailEn: String,
@@ -94,7 +99,7 @@ data class MapDisplay(
  */
 object MapDisplaySettings {
     private const val KEY = "map_display"
-    private var prefs: android.content.SharedPreferences? = null
+    private var prefs: SharedPreferences? = null
     var current by mutableStateOf(MapDisplay())
         private set
 
@@ -109,7 +114,7 @@ object MapDisplaySettings {
         val next = transform(current)
         if (next == current) return
         current = next
-        prefs?.edit()?.putString(KEY, next.encode())?.apply()
+        prefs?.edit { putString(KEY, next.encode()) }
     }
 
     /** Reset for tests (no preference written). */
@@ -138,7 +143,7 @@ fun DrawScope.drawMetricGrid(proj: MapProjection, view: MapCamera, unit: Float, 
     val dark = colors.Background.luminance() < 0.5f
     val fine = colors.MapGrid.copy(alpha = if (dark) 0.10f else 0.13f)
     val strong = colors.MapGrid.copy(alpha = if (dark) 0.22f else 0.30f)
-    fun isMajor(v: Double) = kotlin.math.abs(v / major - Math.round(v / major)) < 1e-6
+    fun isMajor(v: Double) = abs(v / major - Math.round(v / major)) < 1e-6
     var x = floor(minX / minor) * minor
     while (x <= maxX) {
         val m = isMajor(x)
@@ -246,11 +251,11 @@ fun MapScaleBar(pxPerMeter: Double, modifier: Modifier = Modifier) {
  * Travel with blades stopped (return, link, access, move to a point): blue dashes on a light edging, distinct from the
  * mowing passes and borders (white). [unit] = 1 dp on screen.
  */
-fun DrawScope.drawTransitPath(path: androidx.compose.ui.graphics.Path, unit: Float, colors: LubaColors, width: Float = 2f) {
+fun DrawScope.drawTransitPath(path: Path, unit: Float, colors: LubaColors, width: Float = 2f) {
     val dark = colors.Background.luminance() < 0.5f
     drawPath(path, (if (dark) Color.Black else Color.White).copy(alpha = 0.7f),
-        style = Stroke((width + 2.5f) * unit, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-    drawPath(path, colors.Transit, style = Stroke(width * unit, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round,
+        style = Stroke((width + 2.5f) * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    drawPath(path, colors.Transit, style = Stroke(width * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f * unit, 4f * unit))))
 }
 
@@ -258,11 +263,11 @@ fun DrawScope.drawTransitPath(path: androidx.compose.ui.graphics.Path, unit: Flo
  * Section of a move beyond the mapped zones: orange dots on an opaque halo laid over the route, so that the dashes of
  * the mapped part do not show through.
  */
-fun DrawScope.drawOffMapPath(path: androidx.compose.ui.graphics.Path, unit: Float, colors: LubaColors, width: Float = 3.5f) {
+fun DrawScope.drawOffMapPath(path: Path, unit: Float, colors: LubaColors, width: Float = 3.5f) {
     val dark = colors.Background.luminance() < 0.5f
     drawPath(path, if (dark) Color.Black else Color.White,
-        style = Stroke((width + 3f) * unit, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
-    drawPath(path, colors.Warning, style = Stroke(width * unit, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round,
+        style = Stroke((width + 3f) * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    drawPath(path, colors.Warning, style = Stroke(width * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(0.01f * unit, width * 2f * unit))))
 }
 

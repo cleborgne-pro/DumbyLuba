@@ -4,14 +4,14 @@ import androidx.compose.ui.geometry.Offset
 import fr.luba.poc.planning.PlanningConfig
 import fr.luba.poc.planning.PlanningRequest
 import fr.luba.poc.planning.RoutePlanning
-import org.junit.Assert.*
-import org.junit.Test
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import org.junit.Assert.*
+import org.junit.Test
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.GeometryFactory
 
 /** Guide lines of the manual direction ([OrientationGuide]): same direction as the planner's passes, clipped to the zones. */
 class OrientationGuideTest {

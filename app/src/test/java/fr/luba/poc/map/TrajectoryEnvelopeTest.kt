@@ -2,12 +2,12 @@ package fr.luba.poc.map
 
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.simulation.*
+import kotlin.math.*
 import org.junit.Assert.*
 import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.Geometry as JtsGeometry
-import kotlin.math.*
+import org.locationtech.jts.geom.GeometryFactory
 
 class TrajectoryEnvelopeTest {
     private val factory = GeometryFactory()

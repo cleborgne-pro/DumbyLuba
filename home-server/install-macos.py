@@ -36,7 +36,9 @@ def main():
     interpreter = shutil.which("python3") or sys.executable
     definition = {
         "Label": label,
-        "ProgramArguments": ["/usr/bin/caffeinate", "-i", interpreter, str(root / "server.py"), "--data", str(root / "data" / "relay.sqlite3")],
+        # --lan: the phones and the browser reach this machine from the local network; without it the server only
+        # listens on 127.0.0.1.
+        "ProgramArguments": ["/usr/bin/caffeinate", "-i", interpreter, str(root / "server.py"), "--lan", "--data", str(root / "data" / "relay.sqlite3")],
         "WorkingDirectory": str(root), "RunAtLoad": True, "KeepAlive": True,
         "ThrottleInterval": 5,
         "StandardOutPath": str(root / "server.log"), "StandardErrorPath": str(root / "server-error.log"),

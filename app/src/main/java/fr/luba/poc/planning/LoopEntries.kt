@@ -16,7 +16,7 @@ internal object LoopEntries {
         val result=linkedMapOf<Pair<Int,Point>,Entry>()
         for((direction,loop) in listOf(path,path.reversed()).withIndex()) {
             loop.zipWithNext().forEachIndexed { i,(a,b) ->
-                val dx=b.x-a.x;val dy=b.y-a.y;val square=dx*dx+dy*dy
+                val dx=b.x-a.x; val dy=b.y-a.y; val square=dx*dx+dy*dy
                 val t=if(square<1e-12) 0.0 else (((from.x-a.x)*dx+(from.y-a.y)*dy)/square).coerceIn(0.0,1.0)
                 for(point in listOf(Point(a.x+t*dx,a.y+t*dy),a)) {
                     result.getOrPut(direction to point) { Entry(point,loop) {

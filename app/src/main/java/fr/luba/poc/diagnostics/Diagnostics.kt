@@ -1,9 +1,12 @@
 package fr.luba.poc.diagnostics
 
 import fr.luba.poc.i18n.tr
-import fr.luba.poc.protocol.*
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlSysProto.*
+import fr.luba.poc.protocol.*
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlinx.coroutines.CancellationException
 
  data class CampaignConfig(val durationMinutes: Int = 30, val zeros: Boolean = true,
     val cycles: Boolean = true, val watchdog: Boolean = true, val batteryFloor: Int = 30,
@@ -45,7 +48,7 @@ class TimingStats {
     fun percentile(percent: Int): Long? {
         require(percent in 1..100)
         if (count == 0L) return null
-        val target = kotlin.math.ceil(count * percent / 100.0).toLong()
+        val target = ceil(count * percent / 100.0).toLong()
         var cumulative = 0L
         histogram.forEachIndexed { value, samples -> cumulative += samples; if (cumulative >= target) return value.toLong() }
         return 10000
@@ -98,7 +101,7 @@ object LocalChecks {
                 val loc = rpt_dev_location.newBuilder().setRealPosX(-123450).setRealPosY(234560).setRealToward(924000)
                 val msg = LubaMsg.newBuilder().setSys(MctlSys.newBuilder().setToappReportData(report_info_data.newBuilder().addLocations(loc))).build()
                 val r = TelemetryReducer(); check(r.accept(msg, 1, 1))
-                check(r.value.x == -12.345 && r.value.y == 23.456 && kotlin.math.abs(requireNotNull(r.value.heading) - 357.6) < 1e-9 && r.value.rawHeading == 92.4)
+                check(r.value.x == -12.345 && r.value.y == 23.456 && abs(requireNotNull(r.value.heading) - 357.6) < 1e-9 && r.value.rawHeading == 92.4)
             }
         )
         return cases.mapIndexed { index, (title, block) ->
@@ -120,7 +123,7 @@ object CampaignRunner {
             onStart(step)
             val start = now()
             try { execute(step) }
-            catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+            catch (cancel: CancellationException) { throw cancel }
             catch (error: Exception) {
                 val detail = error.message ?: error.javaClass.simpleName
                 onResult(TestResult(step.id, step.title, "FAILED", now() - start, detail))

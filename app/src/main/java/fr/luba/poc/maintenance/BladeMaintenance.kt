@@ -1,11 +1,13 @@
 package fr.luba.poc.maintenance
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.core.content.edit
 import fr.luba.poc.auth.Maintenance
 import fr.luba.poc.i18n.tr
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.math.roundToInt
 
 /** Last blade change noted in the app: robot blade counter (`blade_used_time`, s) and date at that moment. */
 data class BladeChange(val counterSeconds: Int, val at: Long)
@@ -46,7 +48,7 @@ object BladeMaintenanceSettings {
 
     const val DEFAULT_HOURS = 100
     val HOURS = 20..300
-    private var prefs: android.content.SharedPreferences? = null
+    private var prefs: SharedPreferences? = null
     private val state = MutableStateFlow(Values())
     val flow: StateFlow<Values> get() = state
 
@@ -68,13 +70,13 @@ object BladeMaintenanceSettings {
     fun setInterval(hours: Int) {
         val clean = hours.coerceIn(HOURS)
         state.value = state.value.copy(intervalHours = clean)
-        prefs?.edit()?.putInt(INTERVAL, clean)?.apply()
+        prefs?.edit { putInt(INTERVAL, clean) }
     }
 
     /** Blades replaced now: the robot counter read at this moment becomes the reference. */
     fun markChanged(robotId: String, counterSeconds: Int, now: Long) {
         state.value = state.value.copy(changes = state.value.changes + (robotId to BladeChange(counterSeconds, now)))
-        prefs?.edit()?.putInt(COUNTER + robotId, counterSeconds)?.putLong(AT + robotId, now)?.apply()
+        prefs?.edit { putInt(COUNTER + robotId, counterSeconds); putLong(AT + robotId, now) }
     }
 
     private const val INTERVAL = "blade_interval_h"

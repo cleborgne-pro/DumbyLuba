@@ -12,7 +12,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import fr.luba.poc.Clock
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.maintenance.BladeLimitSource
 import fr.luba.poc.maintenance.BladeMaintenanceSettings
@@ -41,7 +43,7 @@ internal fun MaintenancePage(state: RobotUi, back: () -> Unit, modifier: Modifie
             else tr("Connect the robot (gateway or direct Bluetooth) to read its maintenance counters.", "Connectez le robot (passerelle ou Bluetooth direct) pour lire ses compteurs d'entretien."))
         m?.let { counters ->
             val status = BladeWear.status(counters, settings.changes[robotId], settings.intervalHours)
-            SettingsGroup(tr("Blades", "Lames")) {
+            SettingsGroup(title = tr("Blades", "Lames")) {
                 val ratio = status.ratio
                 KeyValueRow(tr("Used since the change", "Utilisées depuis le changement").takeIf { status.source == BladeLimitSource.LOCAL } ?: tr("Robot blade counter", "Compteur lames du robot"),
                     "${Format.num(status.usedHours, 1)} h" + (status.limitSeconds?.let { " / ${(it / 3600.0).roundToInt()} h" } ?: ""),
@@ -49,7 +51,7 @@ internal fun MaintenancePage(state: RobotUi, back: () -> Unit, modifier: Modifie
                 ratio?.let { LubaProgress(it.toFloat().coerceIn(0f, 1f), Modifier.fillMaxWidth()) }
                 when (status.source) {
                     BladeLimitSource.LOCAL -> KeyValueRow(tr("Last change", "Dernier changement"),
-                        SimpleDateFormat("dd/MM/yyyy", fr.luba.poc.i18n.I18n.locale).format(Date(requireNotNull(status.changedAt))))
+                        SimpleDateFormat("dd/MM/yyyy", I18n.locale).format(Date(requireNotNull(status.changedAt))))
                     BladeLimitSource.ROBOT -> InfoNote(tr("Threshold set in the Mammotion app. Tap Blades replaced after a change to follow your own interval.",
                         "Seuil réglé dans l'app Mammotion. Appuyez sur Lames changées après un changement pour suivre votre propre intervalle."))
                     BladeLimitSource.NONE -> InfoNote(tr("Date of the last change unknown: tap Blades replaced when you replace them; a reminder is then sent after the interval below.",
@@ -61,13 +63,13 @@ internal fun MaintenancePage(state: RobotUi, back: () -> Unit, modifier: Modifie
                     valueLabel = tr("${settings.intervalHours} h of rotation", "${settings.intervalHours} h de rotation"),
                     steps = (BladeMaintenanceSettings.HOURS.last - BladeMaintenanceSettings.HOURS.first) / 10 - 1)
             }
-            SettingsGroup(tr("Robot counters", "Compteurs du robot")) {
+            SettingsGroup(title = tr("Robot counters", "Compteurs du robot")) {
                 KeyValueRow(tr("Distance traveled", "Distance parcourue"), "${Format.num(counters.mileageMeters / 1000.0, 1)} km")
                 KeyValueRow(tr("Working time", "Temps de travail"), "${Format.num(counters.workSeconds / 3600.0, 1)} h")
                 KeyValueRow(tr("Battery cycles", "Cycles de batterie"), "${counters.batteryCycles}")
                 KeyValueRow(tr("Blade counter (robot)", "Compteur lames (robot)"), "${Format.num(counters.bladeUsedSeconds / 3600.0, 1)} h" +
                     if (counters.bladeWarnSeconds > 0) tr(" / alert at ${(counters.bladeWarnSeconds / 3600.0).roundToInt()} h", " / alerte à ${(counters.bladeWarnSeconds / 3600.0).roundToInt()} h") else "")
-                state.telemetry.lastMaintenanceAt?.let { KeyValueRow(tr("Read at", "Lu à"), SimpleDateFormat("HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(Date(it))) }
+                state.telemetry.lastMaintenanceAt?.let { KeyValueRow(tr("Read at", "Lu à"), SimpleDateFormat("HH:mm:ss", I18n.locale).format(Date(it))) }
             }
         }
     }
@@ -81,7 +83,7 @@ internal fun MaintenancePage(state: RobotUi, back: () -> Unit, modifier: Modifie
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
                 SecondaryPillButton(tr("Cancel", "Annuler"), { confirm = false }, Modifier.weight(1f))
                 PrimaryPillButton(tr("Confirm", "Confirmer"), {
-                    BladeMaintenanceSettings.markChanged(robotId, m.bladeUsedSeconds, System.currentTimeMillis()); confirm = false
+                    BladeMaintenanceSettings.markChanged(robotId, m.bladeUsedSeconds, Clock.now()); confirm = false
                 }, Modifier.weight(1f))
             }
         })

@@ -30,7 +30,7 @@ fun StartPointGroup(map: RobotMap, request: StartRequest?, firstZoneId: Long?, s
                     onSave: () -> Unit, onForget: () -> Unit) {
     fun zoneName(id: Long?) = map.shapes.firstOrNull { it.id == id }?.name?.trim()?.ifBlank { null } ?: tr("the zone", "la zone")
     val chosenSaved = request?.source == StartSource.CHOSEN && request.zoneId != null && saved[request.zoneId] == request.point
-    SettingsGroup(tr("Start point", "Point de départ")) {
+    SettingsGroup(title = tr("Start point", "Point de départ")) {
         KeyValueRow(tr("Start", "Départ"), when (request?.source) {
             StartSource.SAVED -> tr("Saved for ${zoneName(request.zoneId)}", "Enregistré pour ${zoneName(request.zoneId)}")
             StartSource.CHOSEN -> tr("Chosen on the map · ${zoneName(request.zoneId)}", "Choisi sur la carte · ${zoneName(request.zoneId)}") +
@@ -45,7 +45,8 @@ fun StartPointGroup(map: RobotMap, request: StartRequest?, firstZoneId: Long?, s
             if (request != null && request.source != StartSource.NEAREST)
                 SecondaryPillButton(tr("Nearest", "Au plus près"), onNearest, Modifier.weight(1f), enabled = enabled && !picking, icon = Icons.Rounded.MyLocation)
         }
-        if (request?.source == StartSource.CHOSEN && !chosenSaved)
+        // A painted zone is temporary: its start is not saved for the next tasks.
+        if (request?.source == StartSource.CHOSEN && !chosenSaved && request.zoneId?.let(PaintedZone::isTemporary) != true)
             SecondaryPillButton(tr("Save for ${zoneName(request.zoneId)}", "Enregistrer pour ${zoneName(request.zoneId)}"), onSave, Modifier.fillMaxWidth(),
                 enabled = enabled && !picking, icon = Icons.Rounded.BookmarkAdd)
         if (firstZoneId != null && saved.containsKey(firstZoneId))

@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.Clock
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
 import fr.luba.poc.i18n.tr
@@ -22,22 +23,18 @@ import fr.luba.poc.map.BorderValidation
 import fr.luba.poc.map.BorderValidationEntry
 import fr.luba.poc.map.BorderValidationStatus
 import fr.luba.poc.map.BorderValidationStore
-import fr.luba.poc.map.RecordedBoundary
 import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.MapLive
 import fr.luba.poc.map.MapOverlay
 import fr.luba.poc.map.MapPaintInput
 import fr.luba.poc.map.OuterOffsetSetting
 import fr.luba.poc.map.Point
+import fr.luba.poc.map.RecordedBoundary
+import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.simulation.BaseStore
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.MammotionColors
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Measurement during the loop: deviation from the recorded outline and from the planned route, in metres. */
@@ -91,24 +88,29 @@ internal fun BorderDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, 
     fun validate(m: BorderMission) {
         val border = BorderDraft.samples.map { it.toBorderM }.sorted()
         validations = validationStore.save(BorderValidationEntry(m.choice.shape.id, m.requestedOffsetM, m.appliedOffsetM,
-            System.currentTimeMillis(), BorderValidation.fingerprint(m.choice.shape), border.firstOrNull(), border.getOrNull(border.size / 2)))
+            Clock.now(), BorderValidation.fingerprint(m.choice.shape), border.firstOrNull(), border.getOrNull(border.size / 2)))
     }
     val offset = BorderDraft.offsetM
     var height by rememberSaveable { mutableIntStateOf(state.telemetry.bladeHeightMm ?: state.cutHeights.defaultMm) }
     // Range of the connected model (higher on the H versions): a height chosen for another robot is brought back into it.
     LaunchedEffect(state.cutHeights) { height = state.cutHeights.clamp(height) }
     var supervised by rememberSaveable { mutableStateOf(false) }
-    var mission by remember { mutableStateOf<BorderMission?>(null) }
-    var computing by remember { mutableStateOf(false) }
-    var stage by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf("") }
     var pendingTap by remember { mutableStateOf<Point?>(null) }
-    val scope = rememberCoroutineScope()
     val route = state.robotRoute
     val routeStarted = route.started && route.running
     val t = state.telemetry
-
-    LaunchedEffect(map, selected?.shape?.id, offset, state.obstacles, base) { mission = null; error = "" }
+    // Start closest to the robot; from the base if it is charging or its position is unknown. Only the switch between
+    // the two prepares again: the robot moving does not.
+    val fromBase = t.x == null || t.y == null || t.chargeState in setOf(1, 2)
+    val preparing: Preparing<BorderMission>? = if (base == null || selected == null) null else { checkpoint, progress ->
+        val start = if (!fromBase && t.x != null && t.y != null) Point(t.x, t.y) else base.point
+        BorderFollow.prepare(map, selected.shape.id, offset.toDouble(), start, base, accesses, state.obstacles, 0.3, checkpoint, progress)
+    }
+    // Prepared on arrival and again on every change of the border, the offset, the map, the obstacles or the start.
+    val preparation = rememberAutoPreparation(listOf(map, selected?.shape?.id, offset, state.obstacles, base, accesses, fromBase), preparing) {
+        robot.recordMapPreview(it.preview)
+    }
+    val mission = preparation.result
 
     // Field measurement: only on the loop (within 35 cm of the planned route), not during links.
     LaunchedEffect(t.x, t.y, route.running) {
@@ -125,30 +127,6 @@ internal fun BorderDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, 
         !state.teach.running && !state.campaign.running && !state.bladeTestActive && !state.mapLoading && !state.bladeHeightPending &&
         !state.heightSequence.running
 
-    fun compute() {
-        val b = base ?: return
-        val choice = selected ?: return
-        // Start closest to the robot; from the base if it is charging or its position is unknown.
-        val start = if (t.x != null && t.y != null && t.chargeState !in setOf(1, 2)) Point(t.x, t.y) else b.point
-        val inputs = choice.shape.id to offset
-        computing = true; error = ""; mission = null; stage = tr("Preparing", "Préparation")
-        scope.launch {
-            try {
-                val prepared = withContext(Dispatchers.Default) {
-                    val coroutine = currentCoroutineContext()
-                    BorderFollow.prepare(map, choice.shape.id, offset.toDouble(), start, b, accesses, state.obstacles, 0.3,
-                        checkpoint = { coroutine.ensureActive() }, progress = { scope.launch { stage = it } })
-                }
-                if (inputs == (BorderDraft.shapeId to BorderDraft.offsetM) && map == robot.state.value.robotMap) {
-                    mission = prepared
-                    robot.recordMapPreview(prepared.preview)
-                } else error = tr("Border or offset changed during the computation: compute again", "Bordure ou retrait modifiés pendant le calcul : recalculez")
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { error = e.message ?: tr("Computation impossible", "Calcul impossible") }
-            finally { computing = false }
-        }
-    }
-
     // One finger: tap to pick the nearest border; two fingers: pan and zoom.
     val picker = remember(map) {
         MapPaintInput(begin = { pendingTap = it }, extend = {}, finish = { committed ->
@@ -156,10 +134,10 @@ internal fun BorderDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, 
             pendingTap = null
         })
     }
-    val locked = routeStarted || computing
+    val locked = routeStarted
 
     PushedPage(ServicePage.BORDER.title, back, bottomBar = {
-        MowDebugActions(robot, state, mission?.engine, height, supervised, idle, computing, base != null && selected != null && idle, latestAction(::compute),
+        MowDebugActions(robot, state, mission?.engine, height, supervised, idle, preparation,
             onStart = { BorderDraft.followed = mission; BorderDraft.samples.clear() }, blades = BorderDraft.blades)
     }) {
         header()
@@ -172,21 +150,19 @@ internal fun BorderDebugPage(robot: RobotBle, state: RobotUi, back: () -> Unit, 
             onReuse = { BorderDraft.offsetM = it.offsetM.toFloat() },
             onForget = { validations = validationStore.clear(it) })
         // Nothing to track: no empty card.
-        if (base == null || computing || error.isNotBlank() || mission != null || BorderDraft.followed != null || route.started) SettingsGroup(tr("Tracking", "Suivi")) {
+        if (base == null || mission != null || BorderDraft.followed != null || route.started) SettingsGroup(title = tr("Tracking", "Suivi")) {
             if (base == null) StatusNote(tr("Base unknown or without a docking axis: leave the robot charging so it can be observed, or read the map again.",
-                "Base inconnue ou sans axe d'accostage : laissez le robot en charge pour l'observer, ou relisez la carte."), NoteTone.WARNING)
-            if (computing) ProgressNote(tr("Computing the loop · $stage", "Calcul du tour · $stage"))
-            if (error.isNotBlank()) StatusNote(error, NoteTone.DANGER)
+                "Base inconnue ou sans axe d'accostage : laissez le robot en charge pour l'observer, ou relisez la carte."), tone = NoteTone.WARNING)
             mission?.let { BorderMissionSummary(it) }
             BorderMeasure(BorderDraft.followed, BorderDraft.samples, route.running)
             BorderDraft.followed?.takeIf { !route.running }?.let { followed ->
                 val current = choices.firstOrNull { it.shape.id == followed.choice.shape.id }
                 val entry = current?.let { BorderValidation.validFor(it.shape, validations) }
-                val already = entry != null && kotlin.math.abs(entry.offsetM - followed.requestedOffsetM) < 0.005
-                if (current == null) StatusNote(tr("Border missing from the current map: validation impossible.", "Bordure absente de la carte actuelle : validation impossible."), NoteTone.WARNING)
+                val already = entry != null && abs(entry.offsetM - followed.requestedOffsetM) < 0.005
+                if (current == null) StatusNote(tr("Border missing from the current map: validation impossible.", "Bordure absente de la carte actuelle : validation impossible."), tone = NoteTone.WARNING)
                 else if (BorderValidation.fingerprint(current.shape) != BorderValidation.fingerprint(followed.choice.shape))
-                    StatusNote(tr("Outline changed since this loop: run the loop again before validating it.", "Contour modifié depuis ce tour : refaites le tour avant de le valider."), NoteTone.WARNING)
-                else if (already) StatusNote(tr("Border validated at ${cm(followed.requestedOffsetM)}.", "Bordure validée à ${cm(followed.requestedOffsetM)}."), NoteTone.SUCCESS)
+                    StatusNote(tr("Outline changed since this loop: run the loop again before validating it.", "Contour modifié depuis ce tour : refaites le tour avant de le valider."), tone = NoteTone.WARNING)
+                else if (already) StatusNote(tr("Border validated at ${cm(followed.requestedOffsetM)}.", "Bordure validée à ${cm(followed.requestedOffsetM)}."), tone = NoteTone.SUCCESS)
                 else SecondaryPillButton(tr("Validate this border at ${cm(followed.requestedOffsetM)}", "Valider cette bordure à ${cm(followed.requestedOffsetM)}"), { validate(followed) },
                     Modifier.fillMaxWidth(), icon = Icons.Rounded.Verified)
             }
@@ -210,7 +186,7 @@ private fun BorderDebugMap(state: RobotUi, choices: List<BorderChoice>, validati
             val validated = BorderValidation.status(choice.shape, validations) == BorderValidationStatus.VALIDATED
             MapOverlay(choice.shape.points, if (validated) colors.Mowed else colors.Danger, widthDp = if (validated) 3f else 2f, closed = true)
         }
-    SettingsGroup(tr("Map", "Carte")) {
+    SettingsGroup(title = tr("Map", "Carte")) {
         Box(Modifier.fillMaxWidth().height(420.dp).clip(MaterialTheme.shapes.medium).background(MammotionColors.MapBackground)) {
             MapLive(map = state.robotMap, x = t.x, y = t.y, heading = t.heading,
                 trail = if (route.started) route.trail else emptyList(),
@@ -249,7 +225,7 @@ private fun BorderLegend() {
 
 /** Short label of the validation state, for the list and the summary. */
 private fun validationText(status: BorderValidationStatus, entry: BorderValidationEntry?): String = when (status) {
-    BorderValidationStatus.VALIDATED -> tr("Validated · ${cm(entry!!.offsetM)}", "Validée · ${cm(entry!!.offsetM)}")
+    BorderValidationStatus.VALIDATED -> entry?.let { tr("Validated · ${cm(it.offsetM)}", "Validée · ${cm(it.offsetM)}") } ?: tr("Validated", "Validée")
     BorderValidationStatus.CHANGED -> tr("Outline changed · to validate again", "Contour modifié · à revalider")
     BorderValidationStatus.NOT_VALIDATED -> tr("To validate", "À valider")
 }
@@ -259,7 +235,7 @@ private fun BorderChoiceGroup(choices: List<BorderChoice>, validations: Map<Long
                               onSelect: (BorderChoice) -> Unit, onReuse: (BorderValidationEntry) -> Unit, onForget: (Long) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val colors = MammotionColors
-    SettingsGroup(tr("Followed border", "Bordure suivie")) {
+    SettingsGroup(title = tr("Followed border", "Bordure suivie")) {
         KeyValueRow(tr("Validated borders", "Bordures validées"), "${BorderValidation.validatedCount(choices, validations)} / ${choices.size}")
         KeyValueRow(tr("Choice", "Choix"), selected?.label ?: "—")
         selected?.let { choice ->
@@ -275,7 +251,7 @@ private fun BorderChoiceGroup(choices: List<BorderChoice>, validations: Map<Long
                 KeyValueRow(tr("Chosen · applied offset", "Écart choisi · appliqué"), "${cm(entry.offsetM)} · ${cm(entry.appliedOffsetM)}")
                 if (entry.measuredMinM != null && entry.measuredMedianM != null)
                     KeyValueRow(tr("Measured offset · min · median", "Écart mesuré · min · médian"), "${cm(entry.measuredMinM)} · ${cm(entry.measuredMedianM)}")
-                if (status == BorderValidationStatus.VALIDATED && kotlin.math.abs(BorderDraft.offsetM - entry.offsetM) > 0.005)
+                if (status == BorderValidationStatus.VALIDATED && abs(BorderDraft.offsetM - entry.offsetM) > 0.005)
                     SecondaryPillButton(tr("Reuse the validated offset (${cm(entry.offsetM)})", "Reprendre l'écart validé (${cm(entry.offsetM)})"), { onReuse(entry) }, Modifier.fillMaxWidth(),
                         enabled = !locked, icon = Icons.Rounded.Restore)
                 SecondaryPillButton(tr("Remove the validation", "Retirer la validation"), { onForget(choice.shape.id) }, Modifier.fillMaxWidth(),
@@ -316,7 +292,7 @@ private fun BorderDebugSettings(robot: RobotBle, state: RobotUi, selected: Borde
                                 supervised: Boolean, onSupervised: (Boolean) -> Unit, locked: Boolean) {
     val offset = BorderDraft.offsetM
     val outer by OuterOffsetSetting.flow.collectAsState()
-    SettingsGroup(tr("Loop settings", "Réglages du tour")) {
+    SettingsGroup(title = tr("Loop settings", "Réglages du tour")) {
         SliderRow(tr("Offset between the robot and the outline", "Écart entre le robot et le contour"), offset, { BorderDraft.offsetM = (it * 100).roundToInt() / 100f },
             0f..BorderFollow.MAX_OFFSET_M.toFloat(), valueLabel = cm(offset.toDouble()),
             steps = (BorderFollow.MAX_OFFSET_M * 100).toInt() - 1, enabled = !locked)
@@ -331,18 +307,18 @@ private fun BorderDebugSettings(robot: RobotBle, state: RobotUi, selected: Borde
             valueLabel = "${state.trajectorySpeedPercent} %", enabled = !locked)
         LubaCheckRow(tr("I am supervising on site, area cleared", "Je supervise sur place, zone dégagée"), supervised, onSupervised, enabled = !state.robotRoute.running)
     }
-    SettingsGroup(tr("Outer loop of the mowing", "Tour extérieur de la tonte")) {
+    SettingsGroup(title = tr("Outer loop of the mowing", "Tour extérieur de la tonte")) {
         KeyValueRow(tr("Current offset", "Écart actuel"), cm(outer))
         if (selected != null && !selected.noGo) SecondaryPillButton(tr("Use ${cm(offset.toDouble())} for mowing", "Utiliser ${cm(offset.toDouble())} pour la tonte"),
             { OuterOffsetSetting.set(offset.toDouble()) }, Modifier.fillMaxWidth(),
-            enabled = !locked && offset >= OuterOffsetSetting.MIN_M && kotlin.math.abs(outer - offset) > 0.005, icon = Icons.Rounded.Check)
+            enabled = !locked && offset >= OuterOffsetSetting.MIN_M && abs(outer - offset) > 0.005, icon = Icons.Rounded.Check)
         InfoNote(tr("Mowing uses the offset chosen here (5 cm minimum).", "La tonte reprend l'écart choisi ici (5 cm minimum)."))
     }
     InfoNote(tr("The recorded outline is the outer side of the robot: the offset is measured from the side of the chassis, its center passes " +
-        "${cm(RecordedBoundary.centerInsetM(fr.luba.poc.obstacles.RobotEnvelope.LUBA2))} further in. Corner too tight to pivot: " +
+        "${cm(RecordedBoundary.centerInsetM(RobotEnvelope.LUBA2))} further in. Corner too tight to pivot: " +
         "rounded corners, then the offset is increased in 2 cm steps (at most +${cm(BorderFollow.MAX_EXTRA_M)}).",
         "Le contour enregistré est le côté extérieur du robot : l'écart se mesure depuis le côté du châssis, son centre passe " +
-        "${cm(RecordedBoundary.centerInsetM(fr.luba.poc.obstacles.RobotEnvelope.LUBA2))} plus loin. Angle trop serré pour pivoter : " +
+        "${cm(RecordedBoundary.centerInsetM(RobotEnvelope.LUBA2))} plus loin. Angle trop serré pour pivoter : " +
         "coins arrondis puis retrait augmenté par pas de 2 cm (au plus +${cm(BorderFollow.MAX_EXTRA_M)})."))
 }
 

@@ -27,6 +27,7 @@ struct Power {
   bool vin = false;     // external 5 V present (USB or dock contacts); reported as "charging"
   bool full = false;    // IP5306 only: charge full (unknown on the Olimex board)
   int level = -1;       // battery level (%), -1 unknown
+  int step = -1;        // IP5306 only: raw level step (100, 75, 50, 25 or 0 %); the gateway estimates [level] between steps
   int batteryMv = -1;   // cell voltage (mV), -1 if the board does not measure it (T-Call)
 };
 

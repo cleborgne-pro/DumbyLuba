@@ -6,6 +6,8 @@ import android.content.Intent
 import android.media.AudioManager
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import java.time.Duration
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -13,8 +15,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import java.time.Duration
-import java.util.concurrent.CopyOnWriteArrayList
 
 /** Gateway phone kept silent: volumes at minimum, silent mode, "Do not disturb" taken then given back. */
 @RunWith(RobolectricTestRunner::class)

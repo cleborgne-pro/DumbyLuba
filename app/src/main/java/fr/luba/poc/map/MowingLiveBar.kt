@@ -23,8 +23,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.Clock
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.history.CoverageText
+import fr.luba.poc.history.LiveEta
+import fr.luba.poc.history.LiveTracking
+import fr.luba.poc.history.RealCoverage
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.simulation.RoutePhase
 import fr.luba.poc.ui.MowingLiveStats
 import fr.luba.poc.ui.components.LubaProgress
 import fr.luba.poc.ui.components.StopAction
@@ -46,8 +52,8 @@ fun MowingLiveBar(state: RobotUi, onStop: () -> Unit, onDetails: () -> Unit) {
         recharges = record?.recharges, expectedRecharges = record?.forecast?.recharges)
     // End recomputed on the measured cutting speed, battery use and charge rate of this mowing.
     val eta = record?.takeIf { route.running && route.cutProgress?.let { it < 1.0 } == true }?.let {
-        fr.luba.poc.history.LiveEta.of(it, state.telemetry.battery, route.cutProgress, System.currentTimeMillis(),
-            charging = route.phase == fr.luba.poc.simulation.RoutePhase.CHARGING, chargeTarget = route.chargeTarget)
+        LiveEta.of(it, state.telemetry.battery, route.cutProgress, Clock.now(),
+            charging = route.phase == RoutePhase.CHARGING, chargeTarget = route.chargeTarget)
     }
     Surface(shape = MaterialTheme.shapes.large, color = colors.Surface, shadowElevation = 4.dp, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(top = 4.dp, bottom = 10.dp)) {
@@ -65,8 +71,8 @@ fun MowingLiveBar(state: RobotUi, onStop: () -> Unit, onDetails: () -> Unit) {
                         LiveCoverageLabel(state.mowingRecord?.id)
                     }
                     // Mission control: deviation from the edge being driven and waypoint aimed at (direct or gateway).
-                    fr.luba.poc.history.LiveTracking.of(route, state.telemetry.x, state.telemetry.y)?.takeIf { route.running }?.let {
-                        Text(fr.luba.poc.history.LiveTracking.text(it), style = MaterialTheme.typography.labelMedium, color = colors.TextSecondary,
+                    LiveTracking.of(route, state.telemetry.x, state.telemetry.y)?.takeIf { route.running }?.let {
+                        Text(LiveTracking.text(it), style = MaterialTheme.typography.labelMedium, color = colors.TextSecondary,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     eta?.let { Text(MowingLiveStats.etaText(it), style = MaterialTheme.typography.labelMedium, color = colors.TextPrimary,
@@ -84,7 +90,7 @@ fun MowingLiveBar(state: RobotUi, onStop: () -> Unit, onDetails: () -> Unit) {
 /** Share of the task zones actually mowed so far ([fr.luba.poc.history.RealCoverage]), once something is mowed. */
 @Composable
 private fun LiveCoverageLabel(taskId: String?) {
-    val view by fr.luba.poc.history.RealCoverage.flow.collectAsState()
+    val view by RealCoverage.flow.collectAsState()
     val coverage = view?.takeIf { it.running && it.taskId == taskId && it.coverage.coveredM2 > 0 }?.coverage ?: return
-    Text(fr.luba.poc.history.CoverageText.live(coverage), style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary)
+    Text(CoverageText.live(coverage), style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary)
 }

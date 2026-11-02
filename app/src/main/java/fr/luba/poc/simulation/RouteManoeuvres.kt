@@ -3,6 +3,7 @@ package fr.luba.poc.simulation
 import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.TurnOptimizer
+import java.util.Locale
 import kotlin.math.abs
 
 /**
@@ -96,7 +97,7 @@ object RouteManoeuvres {
     /** Short text of the manoeuvres for the route log: kind, edge range, degrees, metres and planned seconds. */
     fun describe(edges: List<SimEdge>, manoeuvres: List<Manoeuvre>, speedMps: Double, limit: Int = 120): String =
         manoeuvres.take(limit).joinToString(";") { m ->
-            "%s %d-%d %.0f° %.2f m %.1f s".format(java.util.Locale.ROOT, m.kind.name, m.first, m.last, m.degrees, m.lengthM, plannedSeconds(edges, m, speedMps))
+            "%s %d-%d %.0f° %.2f m %.1f s".format(Locale.ROOT, m.kind.name, m.first, m.last, m.degrees, m.lengthM, plannedSeconds(edges, m, speedMps))
         } + if (manoeuvres.size > limit) ";…" else ""
 }
 

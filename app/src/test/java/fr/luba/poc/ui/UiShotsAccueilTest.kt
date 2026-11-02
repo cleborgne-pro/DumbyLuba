@@ -1,7 +1,5 @@
 package fr.luba.poc.ui
 
-import fr.luba.poc.i18n.tr
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +19,7 @@ import com.github.takahirom.roborazzi.captureScreenRoboImage
 import fr.luba.poc.auth.CloudUi
 import fr.luba.poc.ble.ConnectionState
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.ui.components.PushedPage
@@ -148,7 +147,7 @@ class UiShotsAccueilTest {
         val wifi = signalReliefView(samples, SurveySignal.WIFI, relief, true)
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             MapLive(reliefMap, modifier = Modifier.fillMaxWidth().height(300.dp), signalCells = wifi.cells, signal = wifi.signal, signalColor = wifi::color)
-            SettingsGroup(tr("Measured heatmap · ${samples.size} readings", "Heatmap mesurée · ${samples.size} relevés")) {
+            SettingsGroup(title = tr("Measured heatmap · ${samples.size} readings", "Heatmap mesurée · ${samples.size} relevés")) {
                 SignalReliefControls(wifi, samples, {}, {}, PhoneMount.CALIBRATED, {}, {}, onHide = {},
                     calibration = TiltCalibration(PhoneGravity(0.2, -0.1, 9.8), 0.0, 0), onCalibrate = {})
             }
@@ -159,7 +158,7 @@ class UiShotsAccueilTest {
         val relief = ReliefModel.result(samples, PhoneMount.TOP_FORWARD)!!
         val view = signalReliefView(samples, SurveySignal.RELIEF, relief, true)
         Column(Modifier.padding(16.dp)) {
-            SettingsGroup(tr("Measured heatmap", "Heatmap mesurée")) { SignalReliefControls(view, samples, {}, {}, PhoneMount.AUTO, {}, {}) }
+            SettingsGroup(title = tr("Measured heatmap", "Heatmap mesurée")) { SignalReliefControls(view, samples, {}, {}, PhoneMount.AUTO, {}, {}) }
         }
     }
     @Test fun relief3d() = dialogShot("relief-3d") {

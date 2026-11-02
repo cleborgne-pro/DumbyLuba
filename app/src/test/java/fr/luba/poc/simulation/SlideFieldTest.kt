@@ -1,10 +1,6 @@
 package fr.luba.poc.simulation
 
 import fr.luba.poc.map.*
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -12,6 +8,10 @@ import java.io.DataOutputStream
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 /** Pivot slide map learnt during mowing (2026-10-15: 3.5 cm/s downhill at the bottom of the Jardin d'Eden). */
 class SlideFieldTest {
@@ -99,7 +99,7 @@ class SlideFieldTest {
      * Execution bench on the Jardin d'Eden route, slope modelled as on 2026-10-15 (downhill slide of 3.5 cm/s at the
      * bottom of the zone, 2 cm/s in the middle, 0.9 cm/s at the top): a first mowing learns the map, the second uses it.
      */
-    @Test(timeout = 900000) fun learnedSlideFieldBringsTheRobotBackOnTheEdenStripes() {
+    @Test(timeout = 600000) fun learnedSlideFieldBringsTheRobotBackOnTheEdenStripes() {
         val (map, base) = ReferenceRoutes.referenceMap()
         val zone = map.shapes.single { it.kind == ShapeKind.ZONE && it.name.trim() == "Jardin d’Eden" }
         val (edges, approach) = ReferenceRoutes.routeEdges(map, base, zone)

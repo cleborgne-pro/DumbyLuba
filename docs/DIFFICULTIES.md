@@ -80,8 +80,10 @@ In the layer bar, two toggles independent of the displayed signal, kept between 
   saving, the card sets the **size of the exclusion zone**: type (a pole suggests a 0.10 m radius,
   a tree 0.30 m…), **Object radius** (0.05 to 2 m) and **Margin around the object** (0 to 2 m), in 5 cm steps,
   shortcuts **Margin 0.3 m / 0.5 m / 1.0 m**; the **Excluded zone** line gives radius + margin and the minimum
-  distance of the robot's center (+ 0.43 m). Tapping inside the dotted circle of a presumed obstacle opens its
-  contact; the saved obstacle then takes the center and radius of the contact group. Tapping a **saved obstacle**
+  distance of the robot's center (+ 0.43 m). Tapping inside the dotted circle of a presumed obstacle opens its own
+  card (Unreleased): contacts, last contact, **Open the latest contact**, the same size editor prefilled with its
+  estimated radius and margin, **Dismiss** (all its contacts) or **Save the obstacle** at its center. Presumed
+  obstacles avoided by routes (option on) are drawn and tappable even with both layers off, as in the mowing preview. Tapping a **saved obstacle**
   opens the same size editor, with **Save** and **Delete** (then **Confirm deletion**).
 - **Difficulties**: yellow → red heatmap, dots colored by type for the other difficulties, presumed
   obstacles.

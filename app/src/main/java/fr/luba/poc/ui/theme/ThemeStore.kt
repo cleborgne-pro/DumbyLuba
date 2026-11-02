@@ -1,6 +1,7 @@
 package fr.luba.poc.ui.theme
 
 import android.content.Context
+import androidx.core.content.edit
 
 /** Theme choice remembered between launches; [ThemeMode.SYSTEM] is the default. */
 class ThemeStore(context: Context) {
@@ -11,6 +12,6 @@ class ThemeStore(context: Context) {
             ?.let { name -> ThemeMode.entries.firstOrNull { it.name == name } }
             ?: ThemeMode.SYSTEM
         set(value) {
-            prefs.edit().putString("mode", value.name).apply()
+            prefs.edit { putString("mode", value.name) }
         }
 }

@@ -33,7 +33,7 @@ internal object AutomaticPlanner {
         val request=(if(mode.isSurvey) input.copy(config=input.config.copy(minimumCoverage=0.0)) else input).snapshot()
         val phases=linkedMapOf<String,Long>()
         fun <T> timed(name: String,block: () -> T): T {
-            checkpoint();val start=System.nanoTime()
+            checkpoint(); val start=System.nanoTime()
             return try { block() } finally { phases[name]=(phases[name] ?: 0)+System.nanoTime()-start }
         }
         var terrain: PlanningTerrain?=null
@@ -45,9 +45,9 @@ internal object AutomaticPlanner {
                     "Ordre local par cellules ; outil disque et arrêt–pivot non calibrés ; aucune validation physique"),
             phases.toMap(),transitions?.queries ?: 0,transitions?.hits ?: 0)
         try {
-            val t=timed("preprocessing") { PlanningTerrain(request) };terrain=t
-            val links=TransitionPlanner(t);transitions=links
-            val evaluator=MissionEvaluator(t,links);val c=request.config
+            val t=timed("preprocessing") { PlanningTerrain(request) }; terrain=t
+            val links=TransitionPlanner(t); transitions=links
+            val evaluator=MissionEvaluator(t,links); val c=request.config
             // Manual direction: the requested angle is the only candidate of every zone, never replaced by another one.
             val manual=orientation && mode.usesOrientation && c.orientation==OrientationMode.MANUAL
             // Change every session: zones whose last mowing is remembered for their current outline (outline as recorded,
@@ -92,7 +92,7 @@ internal object AutomaticPlanner {
                     checkpoint()
                     val cost=costs.getOrPut(p.cuttingPaths) { evaluator.travelCost(prefix+p.cuttingPaths) }
                     if(cost.isFinite()) p to cost else null
-                } catch(e: IllegalArgumentException) { failure=e;null }
+                } catch(e: IllegalArgumentException) { failure=e; null }
                 val policies=if(geometry.borders.size>1) listOf(false,true) else listOf(false)
                 data class Choice(val all: Boolean,val first: Int?,val preview: Preview,val cost: Double)
                 val choices=policies.mapNotNull { all -> schedule(all,null,null)?.let { Choice(all,null,it.first,it.second) } }.toMutableList()
@@ -170,14 +170,14 @@ internal object AutomaticPlanner {
                         val geometry=try { CoveragePlanner.plan(zone.points,t.holes,c.spacingM,c.marginM,mode,c.borders,
                             c.borderPasses,c.noGoPasses,t.obstacleDiscs,request.robot,
                             c.boundary==BoundaryMeaning.RECORDED_TRACE,entry,
-                            sweepOptions=if(mode.isSurvey) null else SweepOptions(angles),continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,
+                            sweepOptions=if(mode.isSurvey) null else SweepOptions(angles),continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,obliqueTurns=c.zamboniObliqueTurns,
                             orientationRule=rule,observeAutomatic=if(rule==null) null else { p -> automatic=p },
                             observeCandidate=if(mode.isSurvey) null else { preview ->
                                 // Historical reference chosen in the order of the orientations.
                                 val legacyCost=preview.meters+preview.runs.size*10
                                 if(preview.angle in coarse && (legacyCost<referenceCost ||
                                         legacyCost==referenceCost && preview.angle<(reference?.angle ?: Int.MAX_VALUE))) {
-                                    reference=preview;referenceCost=legacyCost
+                                    reference=preview; referenceCost=legacyCost
                                 }
                             },
                             candidateCost=rank,checkpoint=checkpoint,spiralDirection=c.spiralDirection)
@@ -194,7 +194,7 @@ internal object AutomaticPlanner {
                                 CoveragePlanner.plan(zone.points,t.holes,c.spacingM,c.marginM,mode,c.borders,
                                     c.borderPasses,c.noGoPasses,t.obstacleDiscs,request.robot,
                                     c.boundary==BoundaryMeaning.RECORDED_TRACE,entry,sweepOptions=SweepOptions(listOf(r.angle)),
-                                    continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM)
+                                    continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,obliqueTurns=c.zamboniObliqueTurns)
                                     .takeUnless { sameCoveragePaths(it.runs,r.runs) }
                             } catch(e: IllegalArgumentException) { null }
                             catch(e: org.locationtech.jts.geom.TopologyException) { null }
@@ -206,7 +206,7 @@ internal object AutomaticPlanner {
                             CoveragePlanner.plan(zone.points,t.holes,c.spacingM,c.marginM,mode,c.borders,
                                 c.borderPasses,c.noGoPasses,t.obstacleDiscs,request.robot,
                                 c.boundary==BoundaryMeaning.RECORDED_TRACE,entry,sweepOptions=SweepOptions(listOf(auto.angle),rule.phase),
-                                continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,
+                                continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,obliqueTurns=c.zamboniObliqueTurns,
                                 candidateCost=rank,checkpoint=checkpoint)
                         }
                         // Spiral from the centre: the same zone planned from the edge, used if no order from the centre has safe
@@ -215,7 +215,7 @@ internal object AutomaticPlanner {
                             CoveragePlanner.plan(zone.points,t.holes,c.spacingM,c.marginM,mode,c.borders,
                                 c.borderPasses,c.noGoPasses,t.obstacleDiscs,request.robot,
                                 c.boundary==BoundaryMeaning.RECORDED_TRACE,entry,sweepOptions=SweepOptions(angles),
-                                continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,
+                                continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,obliqueTurns=c.zamboniObliqueTurns,
                                 candidateCost=rank,checkpoint=checkpoint,spiralDirection=SpiralDirection.FROM_EDGE)
                                 .let { p -> p.copy(zoneReorderedCells=listOf(if(p.zoneModes==listOf(CoverageMode.SPIRAL)) -1 else 0)) }
                         }
@@ -227,7 +227,7 @@ internal object AutomaticPlanner {
                     // base if it is charging) in this zone; each next zone starts from the exit of the previous one.
                     for(zone in geometries) {
                         val previous=parts.lastOrNull()?.cuttingPaths?.lastOrNull()
-                        referenceParts.add(zone.reference);orderedZones.add(zone.zone)
+                        referenceParts.add(zone.reference); orderedZones.add(zone.zone)
                         val ordered=timed("local_order") {
                             try { order(zone.geometry,previous,parts.flatMap { it.cuttingPaths }) }
                             catch(e: IllegalArgumentException) {
@@ -285,11 +285,11 @@ internal object AutomaticPlanner {
             return report(selected)
         } catch(e: org.locationtech.jts.geom.TopologyException) {
             val failed=CandidateResult("geometry",PlanStatus.NUMERIC_FAILURE,null,null,null,listOf(e.message ?: tr("Geometry error", "Erreur géométrique")))
-            candidates.add(failed);return report(failed)
+            candidates.add(failed); return report(failed)
         } catch(e: IllegalArgumentException) {
             val failed=CandidateResult("input",if(terrain==null) PlanStatus.INVALID_INPUT else PlanStatus.NO_SOLUTION_FOUND,
                 null,null,null,listOf(e.message ?: tr("Unsafe route", "Trajet non sûr")))
-            candidates.add(failed);return report(failed)
+            candidates.add(failed); return report(failed)
         }
     }
 }

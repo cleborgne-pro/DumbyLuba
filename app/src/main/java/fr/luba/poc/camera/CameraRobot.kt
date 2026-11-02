@@ -1,7 +1,7 @@
 package fr.luba.poc.camera
 
-import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 
 /**
  * Video state read from the robot telemetry (read-only):

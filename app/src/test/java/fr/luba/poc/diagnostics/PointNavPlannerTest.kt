@@ -1,9 +1,9 @@
 package fr.luba.poc.diagnostics
 
 import fr.luba.poc.map.*
+import fr.luba.poc.obstacles.*
 import fr.luba.poc.simulation.PointPlanner
 import fr.luba.poc.simulation.TrajectoryPlanner
-import fr.luba.poc.obstacles.*
 import org.junit.Assert.*
 import org.junit.Test
 

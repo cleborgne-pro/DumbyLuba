@@ -1,12 +1,13 @@
 package fr.luba.poc.planning
 
 import android.content.Context
+import androidx.core.content.edit
 import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
-import fr.luba.poc.map.kind
 import fr.luba.poc.map.excludes
+import fr.luba.poc.map.kind
 
 /** Origin of the start point of a mowing or survey preview. */
 enum class StartSource { NEAREST, SAVED, CHOSEN }
@@ -76,7 +77,7 @@ class ZoneStartStore(context: Context) {
     fun save(zoneId: Long, point: Point): Map<Long, Point> = write(read() + (zoneId to point))
     fun clear(zoneId: Long): Map<Long, Point> = write(read() - zoneId)
     private fun write(saved: Map<Long, Point>): Map<Long, Point> {
-        prefs.edit().putString(KEY, ZoneStart.encode(saved)).apply()
+        prefs.edit { putString(KEY, ZoneStart.encode(saved)) }
         return saved
     }
     private companion object { const val KEY = "starts" }

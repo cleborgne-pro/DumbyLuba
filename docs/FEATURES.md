@@ -47,7 +47,7 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 |---|---|
 | [Safety](features/safety.md) | global STOP, continuous guards, lift detection, 664 error codes, command cutoff |
 | [Local alerts](features/notifications.md) | robot stuck or lifted, battery, link or RTK loss, rain… no cloud; notification list and settings |
-| [Rain and weather](features/rain-and-weather.md) | RainViewer radar, Open-Meteo forecast, warnings |
+| [Rain and weather](features/rain-and-weather.md) | RainViewer radar, Open-Meteo forecast, warnings, optional return to base on confirmed rain |
 | [Robot camera](features/camera.md) | live video, movable and resizable thumbnail, photo of the obstacle after a contact |
 | [Maintenance](features/maintenance.md) | robot counters read over Bluetooth (distance, hours, battery cycles, blades), blade change reminder |
 
@@ -56,7 +56,7 @@ painted zone, remembered last position, obstacle photo, debug tools) is summariz
 | Page | In short |
 |---|---|
 | [Signal surveys and terrain](features/signal-surveys-and-terrain.md) | Wi-Fi, RTK, Bluetooth, mobile, GNSS heatmaps; dedicated survey route (Full loop or Grid); estimated terrain and 3D view; history |
-| [Tests and diagnostics](features/tests-and-diagnostics.md) | Bluetooth diagnostics, detailed telemetry, sensors and perception, cutting height and blade test, navigation test, border following (validated borders), trial mowing (painted zone) |
+| [Tests and diagnostics](features/tests-and-diagnostics.md) | Bluetooth diagnostics, detailed telemetry, sensors and perception, cutting height and blade test, navigation test, border following (validated borders), finishing of the gaps |
 | [Logs and local data](features/logs-and-data.md) | JSONL logs, ZIP export, data stored on the phone |
 
 ## Going further

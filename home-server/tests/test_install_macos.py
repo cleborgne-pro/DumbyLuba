@@ -62,7 +62,7 @@ class InstallMacOSTest(unittest.TestCase):
             definition = plistlib.load(f)
         self.assertEqual(definition["Label"], "fr.luba.home-server")
         self.assertEqual(definition["ProgramArguments"], ["/usr/bin/caffeinate", "-i", "/usr/bin/python3",
-                                                          str(self.root / "server.py"), "--data", str(database)])
+                                                          str(self.root / "server.py"), "--lan", "--data", str(database)])
         self.assertTrue(definition["RunAtLoad"])
         self.assertTrue(definition["KeepAlive"])
         self.assertEqual(definition["WorkingDirectory"], str(self.root))

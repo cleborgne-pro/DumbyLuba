@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -135,7 +134,7 @@ internal fun ObstacleSimPage(state: RobotUi, back: () -> Unit) {
         InfoNote(tr("Simulation only, no command sent to the robot. The object, unknown to the planner, is only discovered on contact, as in real mowing.", "Simulation seule, aucune commande envoyée au robot. L'objet, inconnu du planificateur, n'est découvert qu'au contact, comme en tonte réelle."))
         ObstacleSimMap(state, route?.takeIf { routeReady }, probe, frame, painter, cameraReset) { cameraReset++ }
         frame?.let { f -> ObstacleSimStatus(f) }
-        SettingsGroup(tr("Object", "Objet")) {
+        SettingsGroup(title = tr("Object", "Objet")) {
             Segmented(ProbeShape.entries.map { it to it.label }, shape, { shape = it })
             SliderRow(if (shape == ProbeShape.CIRCLE) tr("Diameter", "Diamètre") else tr("Side", "Côté"), size, { size = (it * 10).let(Math::round) / 10f },
                 ProbeObject.MIN_SIZE_M.toFloat()..ProbeObject.MAX_SIZE_M.toFloat(), valueLabel = "${Format.num(size.toDouble(), 1)} m")
@@ -145,14 +144,14 @@ internal fun ObstacleSimPage(state: RobotUi, back: () -> Unit) {
                 else KeyValueRow(tr("Position (tap or drag to move)", "Position (touchez ou glissez pour déplacer)"), "${Format.num(c.x, 1)} ; ${Format.num(c.y, 1)} m")
             }
         }
-        SettingsGroup(tr("Simulated route", "Trajet simulé")) {
+        SettingsGroup(title = tr("Simulated route", "Trajet simulé")) {
             if (zones.isEmpty()) InfoNote(tr("No zone: read the robot map.", "Aucune zone : lisez la carte du robot."))
             else ChipChoice(zones.map { it.id to it.name.ifBlank { "Zone ${it.id}" } }, zoneId, { zoneId = it }, enabled = !computing)
             if (base == null) InfoNote(tr("Base unknown or without a docking axis: leave the robot charging so it can be observed, or read the map again.", "Base inconnue ou sans axe d'accostage : laissez le robot en charge pour l'observer, ou relisez la carte."))
             SliderRow(tr("Playback speed", "Vitesse de lecture"), speed, { speed = Math.round(it).toFloat() }, 1f..40f, valueLabel = "× ${speed.toInt()}")
             ToggleRow(tr("Start near the object", "Départ près de l'objet"), nearStart, { nearStart = it }, subtitle = tr("A few meters before the first pass near the object", "Quelques mètres avant le premier passage près de l'objet"))
             if (computing) ProgressNote(stage)
-            if (error.isNotBlank()) StatusNote(error, NoteTone.DANGER)
+            if (error.isNotBlank()) StatusNote(error, tone = NoteTone.DANGER)
             if (routeReady) route?.let { KeyValueRow(tr("Prepared route", "Trajet préparé"), "${Format.num(it.edges.sumOf { e -> e.meters }, 0)} m · ${it.edges.size} segments") }
         }
     }
@@ -170,7 +169,7 @@ private fun ObstacleSimMap(state: RobotUi, route: EncounterRoute?, probe: ProbeO
         probe?.let { add(MapOverlay(it.outline(), colors.Danger, 1.5f, closed = true, fill = colors.Danger.copy(alpha = 0.55f))) }
         frame?.contacts?.takeIf { it.isNotEmpty() }?.let { c -> add(MapOverlay(c.map { it.pose.position }, colors.Danger, 2f, dots = true)) }
     }
-    SettingsGroup(tr("Map", "Carte")) {
+    SettingsGroup(title = tr("Map", "Carte")) {
         Box(Modifier.fillMaxWidth().height(420.dp).clip(MaterialTheme.shapes.medium).background(colors.MapBackground)) {
             MapLive(map = state.robotMap, x = frame?.pose?.position?.x, y = frame?.pose?.position?.y, heading = frame?.pose?.headingDegrees, publishedPosition = false,
                 trail = frame?.trail.orEmpty(), obstacles = state.obstacles + frame?.discovered.orEmpty(),
@@ -183,8 +182,8 @@ private fun ObstacleSimMap(state: RobotUi, route: EncounterRoute?, probe: ProbeO
 
 @Composable
 private fun ObstacleSimStatus(frame: EncounterFrame) {
-    SettingsGroup(tr("Tracking", "Suivi")) {
-        StatusNote(frame.message, when (frame.phase) {
+    SettingsGroup(title = tr("Tracking", "Suivi")) {
+        StatusNote(frame.message, tone = when (frame.phase) {
             EncounterPhase.STOPPED -> NoteTone.DANGER
             EncounterPhase.BACKING_OFF -> NoteTone.WARNING
             else -> NoteTone.INFO

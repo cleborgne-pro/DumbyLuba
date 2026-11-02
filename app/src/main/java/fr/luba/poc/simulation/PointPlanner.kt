@@ -1,11 +1,19 @@
 package fr.luba.poc.simulation
 
+import fr.luba.poc.diagnostics.MapNavFollower
 import fr.luba.poc.diagnostics.MapNavPlan
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.RobotEnvelope
+import fr.luba.poc.planning.RoutePlanning
+import fr.luba.poc.protocol.OffMapLatch
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as Area
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.LineString
 import org.locationtech.jts.geom.Polygon
@@ -14,9 +22,6 @@ import org.locationtech.jts.operation.linemerge.LineMerger
 import org.locationtech.jts.operation.overlayng.OverlayNG
 import org.locationtech.jts.operation.overlayng.OverlayNGRobust
 import org.locationtech.jts.operation.union.UnaryUnionOp
-import kotlin.math.cos
-import kotlin.math.sin
-import org.locationtech.jts.geom.Geometry as Area
 
 /**
  * Move to a point: path computed by the same navigation as mowing transits (recorded outline, chassis margin, no-go
@@ -48,12 +53,12 @@ object PointPlanner {
         require(map.complete && !map.source.contains("DÉMONSTRATION", true)) { tr("A complete real map is required", "Carte réelle complète obligatoire") }
         requireInterpretedLines(map)
         require(listOf(robot.x, robot.y, target.x, target.y).all { it.isFinite() }) { tr("Invalid position", "Position invalide") }
-        require(robot.distance(target) > fr.luba.poc.diagnostics.MapNavFollower.ARRIVAL_M) { tr("The robot is already at the requested point", "Le robot est déjà au point demandé") }
+        require(robot.distance(target) > MapNavFollower.ARRIVAL_M) { tr("The robot is already at the requested point", "Le robot est déjà au point demandé") }
         require(!BaseDeparture.inSafetyZone(base, target)) { tr("Destination inside the base safety zone: use Recharge to return to the base",
             "Destination dans la zone de sécurité de la base : utiliser Recharger pour revenir à la base") }
         val departure = BaseDeparture.required(base, robot, charging)
         val start = departure?.approach ?: robot
-        require(start.distance(target) > fr.luba.poc.diagnostics.MapNavFollower.ARRIVAL_M) { tr("The destination is the link point in front of the base: use Leave the station", "La destination est le point de liaison devant la base : utiliser Sortir de la station") }
+        require(start.distance(target) > MapNavFollower.ARRIVAL_M) { tr("The destination is the link point in front of the base: use Leave the station", "La destination est le point de liaison devant la base : utiliser Sortir de la station") }
         val dock = base?.takeIf { it.entryHeadingDegrees != null }
         val zones = map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
         require(zones.isNotEmpty()) { tr("No mapped zone", "Aucune zone cartographiée") }
@@ -64,7 +69,7 @@ object PointPlanner {
         val passages = map.shapes.filter { it.kind == ShapeKind.PASSAGE && it.points.size >= 2 }
         val margin = RobotEnvelope.LUBA2.halfWidthM + 0.05
         val holes = holes(map, obstacles)
-        val planner = fr.luba.poc.planning.RoutePlanning.navigation(map.copy(shapes = zones + passages), margin, holes, accesses, base = dock, recordedBoundary = true)
+        val planner = RoutePlanning.navigation(map.copy(shapes = zones + passages), margin, holes, accesses, base = dock, recordedBoundary = true)
         val surface = planner.navigableSurface
         val startSafe = planner.safe(start, start)
         val targetSafe = planner.safe(target, target)
@@ -89,7 +94,7 @@ object PointPlanner {
         val shortest = options.first().sumOf { length(it) }
         require(shortest <= MAX_OFF_MAP_M) {
             tr("Too far beyond the mapped zones: %.1f m without a map (maximum %.0f m)", "Trop loin au-delà des zones cartographiées : %.1f m hors carte (maximum %.0f m)")
-                .format(fr.luba.poc.i18n.I18n.locale, shortest, MAX_OFF_MAP_M)
+                .format(I18n.locale, shortest, MAX_OFF_MAP_M)
         }
         var failure: Exception? = null
         for (legs in options.filter { legs -> legs.sumOf { length(it) } <= MAX_OFF_MAP_M }) {
@@ -100,7 +105,7 @@ object PointPlanner {
             }
             val corridors = legs.mapIndexed { i, leg -> MapShape(-1000L - i, 0, corridor(leg), tr("Beyond the map", "Hors carte")) }
             try {
-                val routes = fr.luba.poc.planning.RoutePlanning.navigation(map.copy(shapes = zones + corridors + passages), margin, holes, accesses, base = dock, recordedBoundary = true)
+                val routes = RoutePlanning.navigation(map.copy(shapes = zones + corridors + passages), margin, holes, accesses, base = dock, recordedBoundary = true)
                 require(routes.safe(start, start)) { robotOutside() }
                 require(routes.safe(target, target)) { tr("Destination too close to a no-go zone or an obstacle", "Destination trop proche d’une zone interdite ou d’un obstacle") }
                 return build(zones + corridors, passages, holes, margin, routes, start, target, surface).copy(departure = departure)
@@ -114,7 +119,7 @@ object PointPlanner {
      * docking corridor; checks the straight exit from the base ([BaseDeparture]) when the path has none.
      */
     fun stationRoutes(map: RobotMap, obstacles: List<LocalObstacle>, base: MapBase, accesses: List<List<Point>> = emptyList()): TrajectoryPlanner =
-        fr.luba.poc.planning.RoutePlanning.navigation(map.copy(shapes = map.shapes.filter {
+        RoutePlanning.navigation(map.copy(shapes = map.shapes.filter {
             (it.kind == ShapeKind.ZONE && it.points.size >= 3) || (it.kind == ShapeKind.PASSAGE && it.points.size >= 2) }),
             RobotEnvelope.LUBA2.halfWidthM + 0.05, holes(map, obstacles), accesses, base = base, recordedBoundary = true)
 
@@ -191,7 +196,7 @@ object PointPlanner {
                 val margin = RobotEnvelope.LUBA2.halfWidthM + 0.05
                 val mapped = UnaryUnionOp.union(zones.map { polygon(it.points).let { area -> if (area.isValid) area else area.buffer(0.0) } } +
                     shapes.filter { it.kind == ShapeKind.PASSAGE && it.points.size >= 2 }.map { line(it.points).buffer(margin + 0.4) })
-                org.locationtech.jts.geom.prep.PreparedGeometryFactory.prepare(mapped.buffer(-fr.luba.poc.protocol.OffMapLatch.INSIDE_TOLERANCE_M))
+                org.locationtech.jts.geom.prep.PreparedGeometryFactory.prepare(mapped.buffer(-OffMapLatch.INSIDE_TOLERANCE_M))
             } catch (_: RuntimeException) { null }
             innerCache = shapes to built
             built
@@ -214,7 +219,7 @@ object PointPlanner {
             val noGos = shapes.filter { it.kind == ShapeKind.NO_GO && it.points.size >= 3 }
             val built = if (noGos.isEmpty()) null else try {
                 org.locationtech.jts.geom.prep.PreparedGeometryFactory.prepare(UnaryUnionOp.union(noGos.map { polygon(it.points).let { area -> if (area.isValid) area else area.buffer(0.0) } })
-                    .buffer(fr.luba.poc.protocol.OffMapLatch.INSIDE_TOLERANCE_M))
+                    .buffer(OffMapLatch.INSIDE_TOLERANCE_M))
             } catch (_: RuntimeException) { null }
             exclusionCache = shapes to built
             built
@@ -249,7 +254,7 @@ object PointPlanner {
         val zones = map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
         require(zones.isNotEmpty()) { tr("No mapped zone", "Aucune zone cartographiée") }
         val passages = map.shapes.filter { it.kind == ShapeKind.PASSAGE && it.points.size >= 2 }
-        return fr.luba.poc.planning.RoutePlanning.navigation(map.copy(shapes = zones + passages), RobotEnvelope.LUBA2.halfWidthM + 0.05,
+        return RoutePlanning.navigation(map.copy(shapes = zones + passages), RobotEnvelope.LUBA2.halfWidthM + 0.05,
             holes(map, obstacles), accesses, recordedBoundary = true)
     }
 
@@ -279,7 +284,7 @@ object PointPlanner {
         return parts.mapNotNull { part ->
             val nearest = DistanceOp.nearestPoints(part, here)[0]
             val dx = nearest.x - p.x; val dy = nearest.y - p.y
-            val d = kotlin.math.hypot(dx, dy)
+            val d = hypot(dx, dy)
             if (d < 1e-6) return@mapNotNull null
             // Slightly inside the surface, along the approach direction.
             listOf(0.05, 0.15, 0.3).map { push -> Point(nearest.x + dx / d * push, nearest.y + dy / d * push) }

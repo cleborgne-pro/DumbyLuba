@@ -50,6 +50,9 @@ enum class AlertKind(private val titleEn: String, val titleFr: String, private v
     GATEWAY_LOST("Gateway disconnected", "Passerelle déconnectée",
         "Check that the gateway phone is on, the app open and the Wi-Fi in range; check that the robot has stopped before restarting.",
         "Vérifier que le téléphone passerelle est allumé, l'application ouverte et le Wi-Fi à portée ; contrôler l'arrêt du robot avant de relancer."),
+    GATEWAY_RESTARTED("Gateway restarted", "Passerelle redémarrée",
+        "The ESP32 gateway restarted by itself (power cut, crash or watchdog): check its power supply from the robot and its cable; the link was lost meanwhile.",
+        "La passerelle ESP32 a redémarré d'elle-même (coupure d'alimentation, plantage ou watchdog) : vérifier son alimentation par le robot et son câble ; la liaison a été perdue entre-temps."),
     GATEWAY_DETACHED("Gateway fell off the robot", "Passerelle tombée du robot",
         "The robot was stopped. Pick up the gateway phone at the indicated position (marker on the map), put it back on the robot, then resume.",
         "Le robot a été arrêté. Récupérer le téléphone passerelle à la position indiquée (repère sur la carte), le remettre sur le robot, puis reprendre."),
@@ -87,7 +90,7 @@ object AlertDedup {
     const val COOLDOWN_MS = 15 * 60 * 1000L
     fun decide(previous: AlertRecord?, severity: Severity, now: Long): AlertDecision {
         val audible = previous == null || severity > previous.severity || now < previous.soundedAt || now - previous.soundedAt >= COOLDOWN_MS
-        return AlertDecision(AlertRecord(if (previous != null && !audible && previous.severity > severity) previous.severity else severity, if (audible) now else previous!!.soundedAt, (previous?.count ?: 0) + 1), audible)
+        return AlertDecision(AlertRecord(if (previous != null && !audible && previous.severity > severity) previous.severity else severity, if (audible || previous == null) now else previous.soundedAt, (previous?.count ?: 0) + 1), audible)
     }
 }
 

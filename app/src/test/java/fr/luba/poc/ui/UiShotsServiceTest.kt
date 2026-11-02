@@ -1,17 +1,15 @@
 package fr.luba.poc.ui
 
-import fr.luba.poc.i18n.tr
-
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
 import fr.luba.poc.ble.ConnectionState
@@ -21,6 +19,7 @@ import fr.luba.poc.diagnostics.MotorWatchdogResult
 import fr.luba.poc.diagnostics.TestResult
 import fr.luba.poc.gateway.GatewayConfig
 import fr.luba.poc.gateway.GatewayRole
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.ui.theme.LubaTheme
 import org.junit.Assume.assumeTrue

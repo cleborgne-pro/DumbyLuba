@@ -42,8 +42,10 @@ keys only, no RTK station, pool cleaner or charging pile key. Each device left o
 characters, e.g. `RTK-AB`, otherwise 3 characters, never more than half of the name) and the name length, never the full name, the serial number or the iotId, so the anonymized export keeps
 it. When the account has devices but none is recognized, the status says "N devices in the account, none recognized
 as a Mammotion mower: export the diagnostics (Service → Logs → Export all) and report the model"; an empty account
-says "No device in the account", or "Your LUBA is on Mammotion's older cloud (Aliyun)…" when the account's owned
-devices list a robot that the device page leaves out ([Mammotion account](mammotion-account.md)). A robot listed by its product key only gains nothing else: motion stays bound to
+says "No device in the account", unless the robots come from Mammotion's older Aliyun cloud, where the robots sold
+before 2025 (LUBA 1 among them) stay bound: they are read through that cloud ("1 LUBA in the account (older Aliyun
+cloud)"), otherwise "Your LUBA is on Mammotion's older cloud (Aliyun)…" gives the reason
+([Mammotion account](mammotion-account.md#older-aliyun-cloud)). A robot listed by its product key only gains nothing else: motion stays bound to
 the validated name prefixes, so it stays in read-only mode.
 
 **Navigation receiver of the LUBA 1.** The navigation messages (map reading, task stop, return cancellation…) of a

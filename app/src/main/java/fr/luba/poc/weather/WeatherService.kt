@@ -1,10 +1,19 @@
 package fr.luba.poc.weather
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
+import androidx.annotation.VisibleForTesting
+import androidx.core.content.edit
 import fr.luba.poc.BuildConfig
+import fr.luba.poc.Clock
+import fr.luba.poc.i18n.tr
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.Locale
+import kotlin.math.floor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,11 +27,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.Locale
-import kotlin.math.floor
-import fr.luba.poc.i18n.tr
 
 /** Garden position for the weather (WGS84 degrees) and source declared by the user. */
 data class GardenLocation(val lat: Double, val lon: Double, val source: String) {
@@ -37,6 +41,8 @@ data class RadarFrame(val stats: FrameStats, val complete: Boolean) {
 data class WeatherState(
     val location: GardenLocation? = null,
     val monitoring: Boolean = true,
+    /** Return to base on confirmed rain and resume after it ([RainReturn]); off by default. */
+    val rainReturn: Boolean = false,
     val frames: List<RadarFrame> = emptyList(),
     val forecast: PrecipForecast? = null,
     val assessment: RainAssessment = RainAssessment(RainLevel.UNKNOWN, tr("Garden position not set", "Position du jardin non configurée")),
@@ -67,12 +73,12 @@ object WeatherService {
     const val FORECAST_STEPS = 32
 
     /** Refresh thread and network access; replaced only by JVM tests (no Internet call). */
-    @androidx.annotation.VisibleForTesting internal var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    @androidx.annotation.VisibleForTesting internal var http: (String) -> ByteArray = ::download
+    @VisibleForTesting internal var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @VisibleForTesting internal var http: (String) -> ByteArray = ::download
     private val mutex = Mutex()
     private val state = MutableStateFlow(WeatherState())
     val flow: StateFlow<WeatherState> get() = state
-    private var prefs: android.content.SharedPreferences? = null
+    private var prefs: SharedPreferences? = null
     private var loop: Job? = null
     private var monitor = RainMonitor()
     /** Frames already analysed, per garden and RainViewer path (immutable): `position|path`. */
@@ -86,42 +92,47 @@ object WeatherService {
         val p = context.applicationContext.getSharedPreferences("weather", Context.MODE_PRIVATE)
         prefs = p
         // Preference of the old radar panel, removed.
-        if (p.contains("overlay")) p.edit().remove("overlay").apply()
+        if (p.contains("overlay")) p.edit { remove("overlay") }
         val location = if (p.contains("lat") && p.contains("lon"))
             GardenLocation(Double.fromBits(p.getLong("lat", 0)), Double.fromBits(p.getLong("lon", 0)), p.getString("source", null) ?: "manuelle")
         else null
-        state.value = WeatherState(location = location, monitoring = p.getBoolean("monitoring", true),
+        state.value = WeatherState(location = location, monitoring = p.getBoolean("monitoring", true), rainReturn = p.getBoolean("rainReturn", false),
             assessment = if (location == null) WeatherState().assessment else RainAssessment(RainLevel.UNKNOWN, tr("Loading the weather…", "Chargement de la météo…")))
         start()
     }
 
     fun setLocation(location: GardenLocation?) {
-        prefs?.edit()?.apply {
-            if (location == null) remove("lat").remove("lon").remove("source")
-            else putLong("lat", location.lat.toBits()).putLong("lon", location.lon.toBits()).putString("source", location.source)
-        }?.apply()
+        prefs?.edit {
+            if (location == null) {
+                remove("lat"); remove("lon"); remove("source")
+            } else {
+                putLong("lat", location.lat.toBits()); putLong("lon", location.lon.toBits()); putString("source", location.source)
+            }
+        }
         synchronized(frameCache) { frameCache.clear() }
         forecastAtMs = 0
         // "End of rain" hysteresis specific to the old garden.
         monitor = RainMonitor()
-        state.update { WeatherState(location = location, monitoring = it.monitoring,
+        state.update { WeatherState(location = location, monitoring = it.monitoring, rainReturn = it.rainReturn,
             assessment = if (location == null) WeatherState().assessment else RainAssessment(RainLevel.UNKNOWN, tr("Loading the weather…", "Chargement de la météo…"))) }
         refreshNow()
     }
 
     /** Screenshots and tests: forced state, without network. */
-    @androidx.annotation.VisibleForTesting
+    @VisibleForTesting
     internal fun setStateForTest(value: WeatherState) { state.value = value }
 
     /** Tests: service reset to a first-launch state (preferences not read, caches empty, loop stopped). */
-    @androidx.annotation.VisibleForTesting
+    @VisibleForTesting
     internal fun resetForTest() {
         loop?.cancel(); loop = null; prefs = null; monitor = RainMonitor()
         synchronized(frameCache) { frameCache.clear() }
         forecastAtMs = 0; hourlyAtMs = 0; state.value = WeatherState()
     }
 
-    fun setMonitoring(on: Boolean) { prefs?.edit()?.putBoolean("monitoring", on)?.apply(); state.update { it.copy(monitoring = on) }; if (on) refreshNow() }
+    fun setMonitoring(on: Boolean) { prefs?.edit { putBoolean("monitoring", on) }; state.update { it.copy(monitoring = on) }; if (on) refreshNow() }
+
+    fun setRainReturn(on: Boolean) { prefs?.edit { putBoolean("rainReturn", on) }; state.update { it.copy(rainReturn = on) } }
 
     fun refreshNow() { scope.launch { refresh(force = true) } }
 
@@ -146,7 +157,7 @@ object WeatherService {
                 if (it is CancellationException) throw it
                 Log.w(TAG, "Radar", it); errors += tr("Radar: ${it.message ?: it.javaClass.simpleName}", "Radar : ${it.message ?: it.javaClass.simpleName}"); null
             }
-            val now = System.currentTimeMillis()
+            val now = Clock.now()
             var forecast = state.value.forecast
             if (force || now - forecastAtMs >= FORECAST_REFRESH_MS) {
                 runCatching { forecast(location) }.onSuccess { forecast = it; forecastAtMs = now }
@@ -224,7 +235,7 @@ object WeatherService {
     private fun forecast(l: GardenLocation): PrecipForecast {
         val url = "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&minutely_15=precipitation&past_minutely_15=8&forecast_minutely_15=%d&timeformat=unixtime&timezone=GMT"
             .format(Locale.US, l.lat, l.lon, FORECAST_STEPS)
-        return PrecipForecast.parse(http(url).decodeToString(), System.currentTimeMillis())
+        return PrecipForecast.parse(http(url).decodeToString(), Clock.now())
     }
 
     /** Hourly weather of the last 3 days and today (temperature, dew, humidity, rain, vapour pressure deficit). */

@@ -1,13 +1,15 @@
 package fr.luba.poc.gateway
 
+import fr.luba.poc.BuildConfig
+import fr.luba.poc.i18n.I18n
+import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.PhoneGravity
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
 import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
-import fr.luba.poc.i18n.I18n
-import fr.luba.poc.i18n.tr
 
 /**
  * Wi-Fi tunnel between the pilot phone and the gateway phone mounted on the robot.
@@ -52,7 +54,7 @@ object GatewayProtocol {
      * line, so it changes nothing for them; the ESP32 does not send it.
      */
     private const val APP_LINE = "app="
-    fun welcome(capabilities: List<String> = listOf(CAP_AUTONOMY, CAP_DOCK_EXIT), appVersion: String? = fr.luba.poc.BuildConfig.VERSION_NAME): ByteArray =
+    fun welcome(capabilities: List<String> = listOf(CAP_AUTONOMY, CAP_DOCK_EXIT), appVersion: String? = BuildConfig.VERSION_NAME): ByteArray =
         (GATEWAY_NAME + (if (capabilities.isEmpty()) "" else "\ncaps=" + capabilities.joinToString(",")) +
             (appVersion?.let { "\n$APP_LINE$it" } ?: "")).toByteArray(Charsets.UTF_8)
     fun capabilities(welcome: Frame): Set<String> = welcome.text().lineSequence().drop(1).firstOrNull { it.startsWith("caps=") }
@@ -85,8 +87,8 @@ object GatewayProtocol {
 
     /** Readable refusal for a protocol version mismatch, with both versions, in the current language. */
     fun versionMismatch(gatewayVersion: Int): String = tr(
-        "Different gateway protocol (gateway v$gatewayVersion, this phone v$VERSION): install the same DumbyLuba version on both phones (this phone: ${fr.luba.poc.BuildConfig.VERSION_NAME})",
-        "Protocole de passerelle différent (passerelle v$gatewayVersion, ce téléphone v$VERSION) : installer la même version de DumbyLuba sur les deux téléphones (ce téléphone : ${fr.luba.poc.BuildConfig.VERSION_NAME})")
+        "Different gateway protocol (gateway v$gatewayVersion, this phone v$VERSION): install the same DumbyLuba version on both phones (this phone: ${BuildConfig.VERSION_NAME})",
+        "Protocole de passerelle différent (passerelle v$gatewayVersion, ce téléphone v$VERSION) : installer la même version de DumbyLuba sur les deux téléphones (ce téléphone : ${BuildConfig.VERSION_NAME})")
 
     /** Period at which the gateway health is sent to the pilot. */
     const val HEALTH_MS = 5000L
@@ -201,7 +203,7 @@ data class GatewayHealth(val batteryPercent: Int = -1, val charging: Boolean = f
     val wifiRssiDbm: Int = -1000, val wifiMbps: Int = -1, val thermalStatus: Int = -1,
     val powerSave: Boolean = false, val batteryExempt: Boolean = true, val screenOn: Boolean = false,
     /** Acceleration of the gateway phone (m/s², Android frame) and its age when sent, for the terrain; null if absent. */
-    val gravity: fr.luba.poc.map.PhoneGravity? = null, val gravityAgeMs: Int = 0) {
+    val gravity: PhoneGravity? = null, val gravityAgeMs: Int = 0) {
     fun encode(): ByteArray = GatewayProtocol.ints(batteryPercent, if (charging) 1 else 0, batteryTempDeciC, wifiRssiDbm, wifiMbps,
         thermalStatus, if (powerSave) 1 else 0, if (batteryExempt) 1 else 0, if (screenOn) 1 else 0) +
         (gravity?.let { g -> GatewayProtocol.ints((g.x * 1000).toInt(), (g.y * 1000).toInt(), (g.z * 1000).toInt(), gravityAgeMs.coerceAtLeast(0)) }
@@ -251,7 +253,7 @@ data class GatewayHealth(val batteryPercent: Int = -1, val charging: Boolean = f
             fun int(i: Int) = ((payload[i * 4].toInt() and 255) shl 24) or ((payload[i * 4 + 1].toInt() and 255) shl 16) or
                 ((payload[i * 4 + 2].toInt() and 255) shl 8) or (payload[i * 4 + 3].toInt() and 255)
             // Fields added at the end of the frame: absent from older gateways (and from the ESP32).
-            val gravity = if (payload.size >= 13 * 4) fr.luba.poc.map.PhoneGravity(int(9) / 1000.0, int(10) / 1000.0, int(11) / 1000.0) else null
+            val gravity = if (payload.size >= 13 * 4) PhoneGravity(int(9) / 1000.0, int(10) / 1000.0, int(11) / 1000.0) else null
             return GatewayHealth(int(0), int(1) == 1, int(2), int(3), int(4), int(5), int(6) == 1, int(7) == 1, int(8) == 1,
                 gravity, if (gravity != null) int(12) else 0)
         }

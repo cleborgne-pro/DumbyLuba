@@ -65,14 +65,20 @@ object CloudOwnedDevices {
     )
 
     /**
-     * Account status once the owned devices are known: robots missing from the device page are on the older Aliyun cloud,
-     * which the app cannot reach; otherwise [found]'s status ("No device in the account"…). [missing]: [missingRobots].
+     * Account status once the owned devices are known and the Aliyun cloud gave no robot: robots missing from the device
+     * page are on the older Aliyun cloud, which could not be reached ([aliyunFailure], null: reached but no robot listed);
+     * otherwise [found]'s status ("No device in the account"…). [missing]: [missingRobots].
      */
-    fun status(found: CloudRobotFilter.Result, missing: List<Owned>): String = when {
-        found.robots.isNotEmpty() || missing.isEmpty() -> found.status
-        missing.size == 1 -> tr("Your LUBA is on Mammotion's older cloud (Aliyun), which this app does not support yet; Bluetooth control still works.",
-            "Votre LUBA est sur l'ancien cloud Mammotion (Aliyun), que l'application ne prend pas encore en charge ; le contrôle Bluetooth fonctionne toujours.")
-        else -> tr("${missing.size} robots of your account are on Mammotion's older cloud (Aliyun), which this app does not support yet; Bluetooth control still works.",
-            "${missing.size} robots de votre compte sont sur l'ancien cloud Mammotion (Aliyun), que l'application ne prend pas encore en charge ; le contrôle Bluetooth fonctionne toujours.")
+    fun status(found: CloudRobotFilter.Result, missing: List<Owned>, aliyunFailure: String?): String {
+        if (found.robots.isNotEmpty() || missing.isEmpty()) return found.status
+        val reason = aliyunFailure?.let { tr("could not be reached ($it)", "n'a pas pu être joint ($it)") }
+            ?: tr("does not list it", "ne le liste pas")
+        return if (missing.size == 1) tr("Your LUBA is on Mammotion's older cloud (Aliyun), which $reason; Bluetooth control still works. Export the diagnostics (Service → Logs → Export all) to report it.",
+            "Votre LUBA est sur l'ancien cloud Mammotion (Aliyun), qui $reason ; le contrôle Bluetooth fonctionne toujours. Exportez les diagnostics (Service → Journaux → Tout exporter) pour le signaler.")
+        else tr("${missing.size} robots of your account are on Mammotion's older cloud (Aliyun), which $reason; Bluetooth control still works. Export the diagnostics (Service → Logs → Export all) to report it.",
+            "${missing.size} robots de votre compte sont sur l'ancien cloud Mammotion (Aliyun), qui $reason ; le contrôle Bluetooth fonctionne toujours. Exportez les diagnostics (Service → Journaux → Tout exporter) pour le signaler.")
     }
+
+    /** Robots read on the older Aliyun cloud. */
+    fun aliyunStatus(robots: Int): String = tr("$robots LUBA in the account (older Aliyun cloud)", "$robots LUBA dans le compte (ancien cloud Aliyun)")
 }

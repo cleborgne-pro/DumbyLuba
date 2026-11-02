@@ -1,14 +1,35 @@
 package fr.luba.poc.map
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.IntSize
+import fr.luba.poc.auth.CloudReturnUi
+import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.diagnostics.MapNavPlan
+import fr.luba.poc.i18n.tr
+import fr.luba.poc.planning.PlanningResult
+import fr.luba.poc.planning.RoutePlanning
+import fr.luba.poc.planning.StartOverride
+import fr.luba.poc.planning.StartRequest
+import fr.luba.poc.planning.ZoneStartStore
+import fr.luba.poc.protocol.Telemetry
+import fr.luba.poc.simulation.MapBase
 import fr.luba.poc.simulation.MissionResume
 import fr.luba.poc.simulation.MowingSimulation
+import fr.luba.poc.simulation.SpeedReason
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /*
  * State holders of the map screen. MapScreen is a single Compose method: every `var x by remember { mutableStateOf() }`
@@ -68,41 +89,41 @@ internal fun rememberMapSheets(): MapSheets = rememberSaveable(saver = MapSheets
 @Stable
 internal class MowingTaskForm(saved: MowingTaskSettings) {
     // Simulation settings.
-    var initialProgress by mutableStateOf(0f)
-    var initialBattery by mutableStateOf(100f)
-    var autonomy by mutableStateOf(60f)
-    var chargeTime by mutableStateOf(30f)
+    var initialProgress by mutableFloatStateOf(0f)
+    var initialBattery by mutableFloatStateOf(100f)
+    var autonomy by mutableFloatStateOf(60f)
+    var chargeTime by mutableFloatStateOf(30f)
     // Task settings.
-    var chargeLow by mutableStateOf(saved.chargeLow)
-    var chargeHigh by mutableStateOf(saved.chargeHigh)
-    var returnReserve by mutableStateOf(saved.returnReserve)
-    var spacing by mutableStateOf(saved.spacingM)
-    var mowingHeight by mutableStateOf(saved.heightMm)
+    var chargeLow by mutableFloatStateOf(saved.chargeLow)
+    var chargeHigh by mutableFloatStateOf(saved.chargeHigh)
+    var returnReserve by mutableFloatStateOf(saved.returnReserve)
+    var spacing by mutableFloatStateOf(saved.spacingM)
+    var mowingHeight by mutableFloatStateOf(saved.heightMm)
     /** Tall grass: successive passes lower and lower down to the cutting height ([CutPasses]). */
-    var heightPasses by mutableStateOf(saved.heightPasses)
-    var firstPassHeight by mutableStateOf(saved.firstPassHeightMm)
-    var mowingSpeed by mutableStateOf(saved.speedMps)
+    var heightPasses by mutableIntStateOf(saved.heightPasses)
+    var firstPassHeight by mutableFloatStateOf(saved.firstPassHeightMm)
+    var mowingSpeed by mutableFloatStateOf(saved.speedMps)
     /** Task pages: 1 settings, 2 route preview. */
-    var mowingStep by mutableStateOf(0)
-    var signalGridSpacing by mutableStateOf(3f)
-    var borderPasses by mutableStateOf(saved.borderPasses)
-    var noGoPasses by mutableStateOf(saved.noGoPasses)
+    var mowingStep by mutableIntStateOf(0)
+    var signalGridSpacing by mutableFloatStateOf(3f)
+    var borderPasses by mutableIntStateOf(saved.borderPasses)
+    var noGoPasses by mutableIntStateOf(saved.noGoPasses)
     var bordersFirst by mutableStateOf(saved.bordersFirst)
     var nearbyNoGo by mutableStateOf(saved.nearbyNoGo)
     var turnStyle by mutableStateOf(saved.turnStyle)
     /** Direction of the passes and angle of the manual direction ([OrientationMode]). */
     var orientation by mutableStateOf(saved.orientation)
-    var manualAngle by mutableStateOf(saved.manualAngleDeg)
+    var manualAngle by mutableIntStateOf(saved.manualAngleDeg)
     /** Spiral mode: from the edge or from the centre ([SpiralDirection]). */
     var spiralDirection by mutableStateOf(saved.spiralDirection)
 
     // Not saved across a configuration change (as before).
-    var margin by mutableStateOf(0.6f)
+    var margin by mutableFloatStateOf(0.6f)
     var mode by mutableStateOf(saved.mode)
     /** Last chosen mowing mode: restored when leaving a survey route, and the only one remembered. */
     var mowingMode by mutableStateOf(saved.mode)
     var borders by mutableStateOf(true)
-    var cutWidth by mutableStateOf(Geometry.CUT_WIDTH_M.toFloat())
+    var cutWidth by mutableFloatStateOf(Geometry.CUT_WIDTH_M.toFloat())
 
     /** Settings written for the next task ([MowingTaskStore]). */
     fun settings(): MowingTaskSettings = MowingTaskSettings(heightMm = mowingHeight, speedMps = mowingSpeed, mode = mowingMode,
@@ -153,8 +174,34 @@ internal class PointMoveState {
 @Stable
 internal class PointTarget {
     var destination by mutableStateOf<Point?>(null)
-    var pointPlan by mutableStateOf<fr.luba.poc.diagnostics.MapNavPlan?>(null)
+    var pointPlan by mutableStateOf<MapNavPlan?>(null)
     var pointError by mutableStateOf("")
+}
+
+/**
+ * Path of the move to a point, computed again when the destination, the map, the obstacles, the mode, the base or the
+ * charging state change.
+ */
+@Composable
+internal fun PointPlanEffect(pointTarget: PointTarget, pointMove: PointMoveState, state: RobotUi, map: RobotMap, mapBase: MapBase?,
+                             accesses: List<List<Point>>) {
+    LaunchedEffect(pointTarget.destination, map, state.obstacles, pointMove.pointMode, mapBase, state.telemetry.chargeState in setOf(1,2)) {
+        pointTarget.pointPlan = null; pointTarget.pointError = ""; pointMove.pointComputing = false
+        val target = pointTarget.destination
+        if (pointMove.pointMode && target != null && !state.navTest.running) {
+            pointMove.pointComputing = true
+            try {
+                val start = Point(requireNotNull(state.telemetry.x) { tr("Robot position unavailable", "Position robot indisponible") },
+                    requireNotNull(state.telemetry.y) { tr("Robot position unavailable", "Position robot indisponible") })
+                pointTarget.pointPlan = withContext(Dispatchers.Default) {
+                    RoutePlanning.point(map,start,target,state.obstacles,offMap=true,base=mapBase,
+                        charging=state.telemetry.chargeState in setOf(1,2),accesses=accesses)
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (e: Exception) { pointTarget.pointError = e.message ?: tr("No safe path", "Aucun chemin sûr") }
+            finally { pointMove.pointComputing = false }
+        }
+    }
 }
 
 /** Signal and terrain layers: chosen signal, heatmap shown, layer bar, shading, phone mount and tilt reference. */
@@ -177,16 +224,38 @@ internal class MapLayersState(choice: MapLayerChoice, mount: PhoneMount, calibra
 /** Route computation and preparation of the simulation: progress, stages, check report, estimate, errors. */
 @Stable
 internal class RoutePreparationState {
-    var computing by mutableStateOf(false)
-    var progress by mutableStateOf(Triple(0, 1, fr.luba.poc.i18n.tr("Preparing", "Préparation")))
+    var computing by mutableStateOf(false); private set
+    /** Planning inputs of the route computed or being computed ([AutoRouteComputation]); null once abandoned. */
+    var computedFor: Any? = null; private set
+    private var job: Job? = null
+    var progress by mutableStateOf(Triple(0, 1, tr("Preparing", "Préparation")))
     var error by mutableStateOf("")
     var simBuilding by mutableStateOf(false)
-    var simulationPreparationStage by mutableStateOf(fr.luba.poc.i18n.tr("Checking the links", "Vérification des liaisons"))
-    var planningReport by mutableStateOf<fr.luba.poc.planning.PlanningResult?>(null)
-    var preparationStartedNanos by mutableStateOf(0L)
+    var simulationPreparationStage by mutableStateOf(tr("Checking the links", "Vérification des liaisons"))
+    var planningReport by mutableStateOf<PlanningResult?>(null)
+    var preparationStartedNanos by mutableLongStateOf(0L)
     var preparationTimingInputs by mutableStateOf("")
     var estimate by mutableStateOf<MowingEstimate?>(null)
     var estimateError by mutableStateOf("")
+    /** Metres of the prepared route driven slower ([AdaptiveSpeed]), by reason; shown while a route is prepared. */
+    var slowed by mutableStateOf<Map<SpeedReason, Double>>(emptyMap())
+
+    /** Computation of the route of [inputs] started by [launch]; the one in progress is abandoned. */
+    fun begin(inputs: Any?, launch: () -> Job) {
+        job?.cancel()
+        computing = true; computedFor = inputs
+        job = launch()
+    }
+
+    /** End of the computation [ended]: an abandoned one finishing late leaves the state of the current one alone. */
+    fun end(ended: Job?) { if (ended === job) { computing = false; job = null } }
+
+    /** Computation in progress abandoned (inputs changed, task pages closed): computed again when needed. */
+    fun cancel() {
+        if (!computing) return
+        job?.cancel(); job = null
+        computing = false; computedFor = null
+    }
 }
 
 /** Station, manual accesses and mowing resume: supervision tick, station route being prepared, access being drawn. */
@@ -204,13 +273,13 @@ internal class MapActionState {
 /** Start of the previewed route: choice made in the preview and request used (remembered with the zones and the selection as keys). */
 @Stable
 internal class PreviewStartState {
-    var startOverride by mutableStateOf<fr.luba.poc.planning.StartOverride?>(null)
-    var previewStart by mutableStateOf<fr.luba.poc.planning.StartRequest?>(null)
+    var startOverride by mutableStateOf<StartOverride?>(null)
+    var previewStart by mutableStateOf<StartRequest?>(null)
 }
 
 /** Saved start point of each zone ([fr.luba.poc.planning.ZoneStartStore]). */
 @Stable
-internal class ZoneStartsState(private val store: fr.luba.poc.planning.ZoneStartStore) {
+internal class ZoneStartsState(private val store: ZoneStartStore) {
     var starts by mutableStateOf(store.read())
         private set
     fun save(zoneId: Long, point: Point) { starts = store.save(zoneId, point) }
@@ -221,7 +290,7 @@ internal class ZoneStartsState(private val store: fr.luba.poc.planning.ZoneStart
 @Stable
 internal class MapViewState(demo: Boolean) {
     var demo by mutableStateOf(demo)
-    var mapSize by mutableStateOf(androidx.compose.ui.unit.IntSize.Zero)
+    var mapSize by mutableStateOf(IntSize.Zero)
 }
 
 /** View (zoom, rotation, offset) and zone selection of a map: reset when its zones change (remembered with them as key). */
@@ -235,7 +304,7 @@ internal class MapFrameState {
 @Stable
 internal class ResumeSkipState {
     var skipMode by mutableStateOf(false)
-    var skipMeters by mutableStateOf(0f)
+    var skipMeters by mutableFloatStateOf(0f)
 }
 
 /**
@@ -252,7 +321,7 @@ internal class MapScreenArgs(
     val openSurvey: Boolean,
     val onSurveyOpened: () -> Unit,
     val cloud: Boolean,
-    val apiPosition: fr.luba.poc.protocol.Telemetry?,
+    val apiPosition: Telemetry?,
     val apiKnown: LastKnownPosition?,
     val onPreview: (Preview) -> Unit,
     val onSimulationPreparation: (String, Map<String, Any?>) -> Unit,
@@ -264,7 +333,7 @@ internal class MapScreenArgs(
     val onDiscardMissionCheckpoint: () -> Unit,
     val onStopMammotionTask: () -> Unit,
     /** Native return through the Mammotion account (null if the account does not follow this robot). */
-    val cloudReturn: fr.luba.poc.auth.CloudReturnUi?,
+    val cloudReturn: CloudReturnUi?,
     val onCloudReturn: () -> Unit,
     val onCancelCloudReturn: () -> Unit,
     val cloudRobotName: String?,

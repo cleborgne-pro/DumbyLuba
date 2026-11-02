@@ -1,6 +1,7 @@
 package fr.luba.poc.map
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.difficulty.DifficultyKind
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.theme.MammotionColors
 
@@ -126,7 +128,7 @@ internal fun LayerChip(signal: SurveySignal, active: Boolean, onClick: () -> Uni
 private fun ExtraChip(layer: MapExtraLayer, active: Boolean, onClick: () -> Unit) {
     val colors = MammotionColors
     val accent = when (layer) {
-        MapExtraLayer.ENCOUNTERS -> MapExtraLayers.kindColor(fr.luba.poc.difficulty.DifficultyKind.CONTACT)
+        MapExtraLayer.ENCOUNTERS -> MapExtraLayers.kindColor(DifficultyKind.CONTACT)
         MapExtraLayer.COVERAGE -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
         MapExtraLayer.DIFFICULTIES -> androidx.compose.ui.graphics.Color(0xFFF59E0B)
     }
@@ -136,7 +138,7 @@ private fun ExtraChip(layer: MapExtraLayer, active: Boolean, onClick: () -> Unit
         modifier = Modifier.semantics { role = Role.Switch; selected = active; contentDescription = layer.description }) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            androidx.compose.foundation.Canvas(Modifier.size(8.dp)) { drawCircle(if (active) accent else colors.TextTertiary) }
+            Canvas(Modifier.size(8.dp)) { drawCircle(if (active) accent else colors.TextTertiary) }
             Text(layer.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }

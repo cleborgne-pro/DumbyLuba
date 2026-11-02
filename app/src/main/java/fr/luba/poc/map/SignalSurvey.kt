@@ -2,7 +2,9 @@ package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.protocol.Telemetry
+import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.sin
 
 enum class SurveySignal(private val en: String, private val fr: String) {
     WIFI("Wi-Fi", "Wi-Fi"), RTK("RTK FIX", "RTK FIX"), BLE("Bluetooth", "Bluetooth"), MOBILE("Mobile", "Mobile"),
@@ -69,11 +71,11 @@ object SignalCoverage {
     /** Deterministic fictional model, for simulation only; never radio readings. */
     fun simulated(point: Point, base: Point, elapsedSeconds: Double, heading: Double? = null): SignalSample {
         val distance = point.distance(base)
-        val shadow = kotlin.math.sin(point.x*0.27)*kotlin.math.cos(point.y*0.19)
+        val shadow = sin(point.x*0.27)*cos(point.y*0.19)
         val wifi = (-40-distance*1.1+shadow*12).toInt().coerceIn(-110,-35)
         val ble = (-38-distance*1.6+shadow*8).toInt().coerceIn(-115,-30)
-        val mobile = (-70+kotlin.math.cos(point.x*0.11+point.y*0.09)*20).toInt()
-        val fix = if (kotlin.math.sin(point.x*0.17)+kotlin.math.cos(point.y*0.23)>-0.5) 0 else 1
+        val mobile = (-70+cos(point.x*0.11+point.y*0.09)*20).toInt()
+        val fix = if (sin(point.x*0.17)+cos(point.y*0.23)>-0.5) 0 else 1
         return SignalSample(point,(elapsedSeconds*1000).toLong(),wifi,ble,mobile,fix,if(fix==0) 28 else 12,
             heading,heading?.let { ReliefModel.syntheticGravity(point,it) })
     }

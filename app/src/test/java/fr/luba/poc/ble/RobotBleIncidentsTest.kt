@@ -1,12 +1,13 @@
 package fr.luba.poc.ble
 
-import fr.luba.poc.simulation.PositioningGrace
 import fr.luba.poc.difficulty.DifficultyKind
 import fr.luba.poc.history.MowingOutcome
 import fr.luba.poc.map.Point
 import fr.luba.poc.mowing.WorkWindow
 import fr.luba.poc.mowing.WorkWindowSetting
+import fr.luba.poc.simulation.PositioningGrace
 import fr.luba.poc.simulation.RoutePhase
+import java.time.LocalTime
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,7 +18,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.time.LocalTime
 
 /**
  * Incidents during real mowing: bumper contact against a real object (back-off, bypass, resume),
@@ -128,7 +128,7 @@ class RobotBleIncidentsTest {
         bench.until(5000, "closing") { bench.state.connection == ConnectionState.Disconnected }
         val saved = requireNotNull(bench.state.missionCheckpoint)
         assertEquals("STOP manuel", saved.interruption)
-        assertTrue(saved.progress > 0.05)
+        assertTrue("progress ${saved.progress} · ${bench.dump()}", saved.progress > 0.05)
         // Resume refused while disconnected, then with a route re-prepared differently.
         bench.ble.connect(bench.device)
         bench.until(10_000, "reconnection") { bench.state.connection == ConnectionState.Receiving && bench.state.telemetry.x != null }

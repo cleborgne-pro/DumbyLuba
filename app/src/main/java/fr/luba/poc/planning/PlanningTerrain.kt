@@ -4,12 +4,13 @@ import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.ObstacleDisc
 import fr.luba.poc.simulation.TrajectoryPlanner
+import kotlin.math.cos
+import kotlin.math.sin
 import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.Polygon
 import org.locationtech.jts.operation.union.UnaryUnionOp
-import org.locationtech.jts.geom.Geometry as JtsGeometry
-import kotlin.math.cos
 
 internal val geometryFactory = GeometryFactory()
 internal fun polygon(points: List<Point>): Polygon {
@@ -90,8 +91,8 @@ internal class PlanningTerrain(val request: PlanningRequest) {
             val base=navigation.base
             requireNotNull(base)
             val angle=Math.toRadians(heading)
-            listOf(base.point,Point(base.point.x-kotlin.math.cos(angle)*base.approachDistanceM,
-                base.point.y-kotlin.math.sin(angle)*base.approachDistanceM))
+            listOf(base.point,Point(base.point.x-cos(angle)*base.approachDistanceM,
+                base.point.y-sin(angle)*base.approachDistanceM))
         }
         val localAccesses=navigation?.accesses.orEmpty()+listOfNotNull(dock)
         if(localAccesses.isNotEmpty()) {
@@ -116,7 +117,7 @@ internal class PlanningTerrain(val request: PlanningRequest) {
                 // (pivot radius); without an outer loop, pass ends at this loop's distance + half a cut
                 // (at least at the chassis pivot radius, tolerated overhang deducted). No-go loops at the same margin (2026-10-14).
                 val loopCenter = RecordedBoundary.centerInsetM(robot) + config.outerOffsetM
-                val bare = maxOf(loopCenter + fr.luba.poc.map.CoveragePlanner.ZIGZAG_LOOP_INSET_M,
+                val bare = maxOf(loopCenter + CoveragePlanner.ZIGZAG_LOOP_INSET_M,
                     robot.turnClearanceM + 0.02 - RecordedBoundary.PHYSICAL_TOLERANCE_M)
                 val inset = if (config.borders && config.borderPasses > 0) loopCenter else bare
                 val noGoInset = if (config.borders && config.noGoPasses > 0) loopCenter else bare

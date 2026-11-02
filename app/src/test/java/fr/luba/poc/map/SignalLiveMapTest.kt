@@ -1,11 +1,11 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.protocol.Telemetry
+import java.util.TimeZone
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.util.TimeZone
 
 class SignalLiveMapTest {
     @get:Rule val temp = TemporaryFolder()

@@ -2,6 +2,8 @@ package fr.luba.poc.history
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -71,7 +73,7 @@ internal class SegmentGrid(polylines: List<List<Point>>, private val cell: Doubl
         polylines.forEach { line ->
             line.zipWithNext { a, b ->
                 // Pieces no longer than a cell: a long diagonal stripe only fills the cells it crosses.
-                val pieces = max(1, kotlin.math.ceil(a.distance(b) / cell).toInt())
+                val pieces = max(1, ceil(a.distance(b) / cell).toInt())
                 for (k in 0 until pieces) {
                     val s = Point(a.x + (b.x - a.x) * k / pieces, a.y + (b.y - a.y) * k / pieces)
                     val e = Point(a.x + (b.x - a.x) * (k + 1) / pieces, a.y + (b.y - a.y) * (k + 1) / pieces)
@@ -97,7 +99,7 @@ internal class SegmentGrid(polylines: List<List<Point>>, private val cell: Doubl
             // Every segment closer than r cells has been seen once ring r - 1 is done.
             if (best <= (r - 1) * cell) break
             for (x in cx - r..cx + r) for (y in cy - r..cy + r) {
-                if (max(kotlin.math.abs(x - cx), kotlin.math.abs(y - cy)) != r) continue
+                if (max(abs(x - cx), abs(y - cy)) != r) continue
                 cells[pack(x, y)]?.forEach { i -> best = min(best, segment(p, i)) }
             }
         }

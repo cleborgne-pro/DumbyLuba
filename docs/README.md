@@ -33,6 +33,7 @@
 |---|---|
 | [ROBOT_ROUTE_BLE.md](ROBOT_ROUTE_BLE.md) | route applied to the robot over BLE, continuous tracking (written for 0.11.0) |
 | [TRACKING_EXECUTION.md](TRACKING_EXECUTION.md) | modeled tracking bench (175 robots per speed, 2026-10-10) |
+| [DISTURBANCE_BENCH.md](DISTURBANCE_BENCH.md) | disturbance bench: slopes, wheel held by a branch, blockages, degraded RTK, border overruns (2026-11-01) |
 | [TRACKING_DELAY.md](TRACKING_DELAY.md) | command delay and the "deviation greater than 30 cm" stop |
 | [BLE_NAVIGATION_AUDIT.md](BLE_NAVIGATION_AUDIT.md) | audit of local BLE navigation and the built-in recharge cycle (2026-10-08) |
 | [MOWING_RESUME.md](MOWING_RESUME.md) | saving and resuming a mowing session |
@@ -91,4 +92,5 @@
 |---|---|
 | [../CHANGELOG.md](../CHANGELOG.md) | version history |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) · [../SECURITY.md](../SECURITY.md) | contributing, reporting a vulnerability, threat model |
+| [CODE_GUIDELINES.md](CODE_GUIDELINES.md) | structure of the app (robot model and collaborators, UI state projections), Kotlin, size and test rules, the checks that enforce them |
 | [../THIRD_PARTY.md](../THIRD_PARTY.md) | third-party sources, licenses and services |

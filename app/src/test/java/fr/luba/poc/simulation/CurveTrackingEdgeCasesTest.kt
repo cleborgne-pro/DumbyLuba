@@ -4,9 +4,9 @@ import fr.luba.poc.map.Point
 import fr.luba.poc.map.TurnOptimizer
 import fr.luba.poc.mapsync.MapSyncPlanner
 import fr.luba.poc.mapsync.SyncKind
+import kotlin.math.*
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.*
 
 /**
  * Edge cases of the curve tracking (turn tracking plan, step C of docs/TRACKING_TURNS_AND_BORDER_CONTACTS.md): arc-edge

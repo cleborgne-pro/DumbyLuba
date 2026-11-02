@@ -1,9 +1,10 @@
 package fr.luba.poc.weather
 
-import org.json.JSONObject
+import fr.luba.poc.i18n.I18n
+import fr.luba.poc.i18n.tr
 import kotlin.math.exp
 import kotlin.math.min
-import fr.luba.poc.i18n.tr
+import org.json.JSONObject
 
 /** Hourly garden weather (Open-Meteo, model): start time (s), temperature, dew point, humidity, rain, vapour pressure deficit. */
 data class HourlyWeather(val timeSec: Long, val temperatureC: Double, val dewPointC: Double, val humidityPct: Double,
@@ -76,7 +77,7 @@ data class GrassWetness(val index: Double, val rainMm: Double, val dewIndex: Dou
             val index = maxOf(rainIndex, dewIndex)
             val reason = when {
                 index < 0.1 -> tr("dry grass", "herbe sèche")
-                rainIndex >= dewIndex -> tr("recent rain (%.1f mm weighted)", "pluie récente (%.1f mm pondérés)").format(fr.luba.poc.i18n.I18n.locale, rain)
+                rainIndex >= dewIndex -> tr("recent rain (%.1f mm weighted)", "pluie récente (%.1f mm pondérés)").format(I18n.locale, rain)
                 lastSaturated == recent.lastIndex -> tr("saturated air: dew", "air saturé : rosée")
                 else -> tr("dew drying", "rosée en train de sécher")
             }

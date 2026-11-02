@@ -7,7 +7,6 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -94,10 +93,10 @@ class RobotBleMapReadFailureTest {
             assertTrue(fields.getBoolean("accountEcho"))
             assertFalse(fields.getString("decoded"), fields.getString("decoded").contains("subtype"))
         }
-        // Raw log: only the raw BLE frames (hex) carry it; the anonymized export removes them too.
-        lines.filterNot { it.contains("\"ble_rx\"") }.forEach { assertFalse(it, it.contains("$account")) }
+        // Raw frames (hex, which carry it) are logged only when their message fails to decode: not here.
+        assertFalse(lines.any { it.contains("\"ble_rx\"") })
+        lines.forEach { assertFalse(it, it.contains("$account")) }
         val sanitizer = LogSanitizer()
         lines.map(sanitizer::line).forEach { assertFalse(it, it.contains("$account")) }
-        assertNotNull(sanitizer.counts["ble frame"])
     }
 }

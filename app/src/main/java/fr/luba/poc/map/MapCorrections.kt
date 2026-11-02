@@ -1,6 +1,10 @@
 package fr.luba.poc.map
 
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
@@ -14,10 +18,6 @@ import org.locationtech.jts.operation.overlayng.OverlayNG
 import org.locationtech.jts.operation.overlayng.OverlayNGRobust
 import org.locationtech.jts.precision.GeometryPrecisionReducer
 import org.locationtech.jts.simplify.DouglasPeuckerSimplifier
-import java.util.Locale
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.sin
 
 /*
  * Local map corrections: a layer laid over the Mammotion map, never written to the robot nor to its cache. The map
@@ -267,7 +267,7 @@ object MapCorrections {
                     }
                 }
                 is AddedZone, is AddedPassage -> {
-                    val shapeId = shapeOf(c)!!
+                    val shapeId = if (c is AddedZone) c.shapeId else (c as AddedPassage).shapeId
                     if (shapes.containsKey(shapeId)) { status[c.id] = CorrectionStatus.REFUSED; reasons[c.id] = tr("Identifier already used", "Identifiant déjà utilisé"); continue }
                     val result = if (c is AddedZone) normalize({ polygon(c.points) }, ShapeKind.ZONE, null) else checkPath((c as AddedPassage).points)
                     when (result) {
@@ -280,7 +280,7 @@ object MapCorrections {
                     }
                 }
                 is ShapePatch, is ShapeOffset -> {
-                    val targetId = target(c)!!
+                    val targetId = if (c is ShapePatch) c.target else (c as ShapeOffset).target
                     val fingerprint = if (c is ShapePatch) c.baseFingerprint else (c as ShapeOffset).baseFingerprint
                     val target = shapes[targetId]
                     if (target == null || target.kind !in listOf(ShapeKind.ZONE, ShapeKind.NO_GO)) {
@@ -446,9 +446,9 @@ object MapCorrections {
     /** Displayed name of a shape: its Mammotion name, otherwise "Zone" / "No-go". */
     fun shapeName(shape: MapShape): String = shape.name.trim().ifEmpty { if (shape.kind == ShapeKind.NO_GO) "No-go" else "Zone" }
 
-    fun meters(value: Double): String = String.format(fr.luba.poc.i18n.I18n.locale, "%.1f", value)
-    fun squareMeters(value: Double): String = String.format(fr.luba.poc.i18n.I18n.locale, "%.1f m²", value)
-    fun centimeters(value: Double): String = String.format(fr.luba.poc.i18n.I18n.locale, "%+d cm", Math.round(value * 100))
+    fun meters(value: Double): String = String.format(I18n.locale, "%.1f", value)
+    fun squareMeters(value: Double): String = String.format(I18n.locale, "%.1f m²", value)
+    fun centimeters(value: Double): String = String.format(I18n.locale, "%+d cm", Math.round(value * 100))
 
     /** Summary of an edit: "+4,2 m² / −0,8 m²". */
     fun balance(add: String, cut: String): String {

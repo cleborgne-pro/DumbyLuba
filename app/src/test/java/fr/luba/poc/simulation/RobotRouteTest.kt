@@ -90,7 +90,7 @@ class RobotRouteTest {
     }
     @Test fun playbackCannotStartWithoutScenarioOrRestartFinishedScenario() {
         assertFalse(toggleSimulation(SimulationUi()).playing)
-        val e=engine();val s=e.start()
+        val e=engine(); val s=e.start()
         val ui=SimulationUi(e,s,false)
         assertTrue(toggleSimulation(ui).playing)
         assertFalse(toggleSimulation(toggleSimulation(ui)).playing)

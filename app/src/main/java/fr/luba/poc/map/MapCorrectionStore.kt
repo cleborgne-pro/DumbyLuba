@@ -1,9 +1,9 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 /**
  * Format of the local corrections (`map-corrections.json`): `{schemaVersion: 1, corrections: [...]}` in application

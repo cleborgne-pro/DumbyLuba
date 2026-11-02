@@ -17,6 +17,11 @@ class RobotErrorCatalogTest {
         assertEquals("response of $code", response, info.response)
     }
 
+    @Test fun `table found from a class of another package, as after R8 renames the packages`() {
+        assertTrue(RobotErrorCatalog.RESOURCE.startsWith("/"))
+        assertTrue(LiftGuard::class.java.getResourceAsStream(RobotErrorCatalog.RESOURCE).use { it != null })
+    }
+
     @Test fun `embedded table covers every Mammotion code with a French label`() {
         assertEquals(664, RobotErrorCatalog.size)
         for (code in RobotErrorCatalog.codes) {

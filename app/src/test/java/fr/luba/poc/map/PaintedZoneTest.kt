@@ -2,7 +2,16 @@ package fr.luba.poc.map
 
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleKind
+import fr.luba.poc.planning.BoundaryMeaning
+import fr.luba.poc.planning.DockClearance
+import fr.luba.poc.planning.PlanningConfig
+import fr.luba.poc.planning.PlanningNavigation
+import fr.luba.poc.planning.PlanningRequest
+import fr.luba.poc.planning.RoutePlanning
 import fr.luba.poc.simulation.MapBase
+import fr.luba.poc.simulation.MissionTask
+import fr.luba.poc.simulation.MowingSimulation
+import fr.luba.poc.simulation.SimConfig
 import fr.luba.poc.simulation.RobotRoute
 import fr.luba.poc.simulation.RouteIntent
 import org.json.JSONObject
@@ -11,7 +20,7 @@ import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
 
-/** Debug mowing: zone painted with a finger, limited to the existing zones, prepared like real mowing. */
+/** Zone painted with a finger, limited to the existing zones, planned and prepared like real mowing. */
 class PaintedZoneTest {
     private val shapes: List<MapShape> = run {
         val json = JSONObject(javaClass.getResourceAsStream("/planner-reference-map.json")!!.bufferedReader().use { it.readText() })
@@ -88,9 +97,51 @@ class PaintedZoneTest {
         // Blades running continuously in each temporary zone: a single blades-on range per zone, all internal links
         // included.
         val ranges = edges.zipWithNext().count { (x, y) -> !x.bladesOn && y.bladesOn } + if (edges.first().bladesOn) 1 else 0
-        println("PaintedZone : ${mission.zones.size} zone(s), ${ranges} plage(s) lames en marche, ${edges.count { !it.cutting && it.bladesOn }} arêtes de liaison lames en marche")
+        println("PaintedZone : ${mission.zones.size} zone(s), $ranges plage(s) lames en marche, ${edges.count { !it.cutting && it.bladesOn }} arêtes de liaison lames en marche")
         assertTrue(edges.any { !it.cutting && it.bladesOn })
         assertTrue("Ranges $ranges for ${mission.zones.size} zone(s)", ranges <= mission.zones.size)
+    }
+
+    @Test fun paintedAreaBecomesTemporaryZonesOrderedFromTheStart() {
+        // Zone choice by painting (Mow): two separate strokes in Aire de jeux, the one nearest to the start comes first.
+        val near = PaintStroke(listOf(Point(-13.0, -4.0)), 1.0)
+        val far = PaintStroke(listOf(Point(-11.0, 7.0)), 1.0)
+        val area = PaintedZone.area(map, listOf(far, near), start = Point(-13.0, -6.0))
+        assertEquals(2, area.zones.size)
+        assertTrue(Geometry.inside(Point(-13.0, -4.0), area.zones[0].points))
+        assertTrue(area.zones.all { PaintedZone.isTemporary(it.id) && it.kind == ShapeKind.ZONE })
+        assertTrue(shapes.none { PaintedZone.isTemporary(it.id) })
+        assertEquals(PaintedZone.mowable(map, area.zones.map { it.points }).area, area.areaM2, 1e-6)
+        assertEquals(2, area.outlines.size)
+        // Same painting, same zones: the selection and the prepared route stay valid while nothing changes.
+        assertEquals(area, PaintedZone.area(map, listOf(far, near), start = Point(-13.0, -6.0)))
+        assertEquals(PaintedArea.EMPTY, PaintedZone.area(map, emptyList(), start = null))
+    }
+
+    @Test(timeout = 120_000) fun paintedTaskIsPlannedOnItsTemporaryZonesAndPreparedOnTheRobotMap() {
+        // The Mow task plans the painted zones like recorded zones (any mode, here zigzag), on the planning map.
+        val strokes = listOf(PaintStroke(listOf(Point(-15.0, -4.0), Point(-10.0, -4.0)), 1.2))
+        val painted = PaintedZone.area(map, strokes, base.point)
+        val planningMap = PaintedZone.withZones(map, painted.zones)
+        val config = PlanningConfig(spacingM = 0.25, marginM = 0.6, cutWidthM = Geometry.CUT_WIDTH_M, minimumCoverage = PaintedZone.MIN_COVERAGE,
+            boundary = BoundaryMeaning.RECORDED_TRACE)
+        val planned = RoutePlanning.coverage(PlanningRequest(planningMap, painted.zones.map { it.id }, base.point, config = config,
+            obstacles = DockClearance.planning(emptyList(), base), navigation = PlanningNavigation(emptyList(), base)), CoverageMode.LINES)
+        assertFalse(planned.preview.localOnly)
+        // Route prepared and checked on the unchanged robot map, blades kept running in the painted zones only.
+        val blades = PaintedZone.bladeZones(planningMap, planned.preview.zoneIds)
+        assertEquals(painted.zones.map { it.points }, blades)
+        val engine = MowingSimulation(RoutePlanning.mission(map, emptyList(), emptyList(), base), base.point, planned.preview, map,
+            SimConfig(instantCharging = true, baseEntryHeadingDegrees = base.entryHeadingDegrees, baseApproachMeters = base.approachDistanceM), blades)
+        assertSame(map, engine.map)
+        assertEquals(MissionTask.TRIAL, MissionTask.of(engine.preview, cutting = true, bladeZones = engine.bladeZones))
+        val area = PaintedZone.painted(strokes).buffer(0.05)
+        engine.edges.filter { it.cutting }.forEach { e ->
+            assertTrue(area.covers(factory.createPoint(Coordinate(e.a.x, e.a.y))))
+            assertTrue(area.covers(factory.createPoint(Coordinate(e.b.x, e.b.y))))
+        }
+        // Recorded zones keep the blades of the preview's own zones.
+        assertNull(PaintedZone.bladeZones(planningMap, listOf(shapes.first { it.kind == ShapeKind.ZONE }.id)))
     }
 
     /** Capture of 2026-10-10 15:10: painting in Aire de jeux against the north boundary, around the elongated no-go

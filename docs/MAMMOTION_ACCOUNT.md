@@ -9,11 +9,14 @@ Inventory of 2026-10-11. Sources: PyMammotion 0.10.10 (commit `967c7ac9`), Mammo
 | Channel | Access | Used by the app |
 |---|---|---|
 | OAuth2 `id.mammotion.com/oauth2/token` | Bearer token + refresh (refused refresh: new password sign-in with the saved account, since 1.1.3) | yes |
-| `{iot}/v1/user/device/page` | list of robots (`deviceName`, `iotId`, `productKey`, `status`); robots bound to the older Aliyun cloud are not listed | yes |
+| `{iot}/v1/user/device/page` | list of robots (`deviceName`, `iotId`, `productKey`, `status`); robots bound to the older Aliyun cloud are not listed (read through that cloud, below) | yes |
 | `https://domestic.mammotion.com/device-server/v1/device/list` (GET, same Bearer, `Client-Id`, `Client-Type: 1`) | owned devices, Aliyun ones included (`DeviceInfo`: `iotId`, `deviceName`, `deviceType`, `series`, `productSeries`, `generation`…, no `productKey` in the PyMammotion model) | yes, only when the device page is empty: diagnosis of a robot on the Aliyun cloud |
 | `{iot}/v1/mqtt/auth/jwt` + MQTT TLS | robot events | yes |
 | `{iot}/v1/mqtt/rpc/thing/service/invoke` | sends a protobuf `LubaMsg` to the robot | yes, filtered by `CloudReadOnly` |
 | `https://domestic.mammotion.com` (same Bearer) | application API (history, firmware, error codes…) | yes: 2 reads, update launch, wake-up |
+| `id.mammotion.com/authorization/code` (Bearer, `clientId` `MADKALUBAS`) | authorization code of the Aliyun sign-in (PyMammotion `fetch_authorization_token`) | yes, Aliyun sign-in only; the `authorization_code` of the last sign-in otherwise |
+| Aliyun API gateway (`api.link.aliyun.com`, `sdk.openaccount.aliyun.com`, `{region}.api-iot.aliyuncs.com`, `living-account.{region}.aliyuncs.com`) | older cloud of the robots sold before 2025: `living/account/region/get`, `api/prd/connect.json`, `api/prd/loginbyoauth.json`, `app/aepauth/handle`, `account/createSessionByAuthCode`, `account/checkOrRefreshSession`, `uc/listBindingByAccount`, `thing/service/invoke` (PyMammotion `CloudIOTGateway`, commit `963209b5`) | yes, only when the device page is empty; invoke filtered by `CloudReadOnly`; shares never accepted |
+| Aliyun MQTT `{productKey}.iot-as-mqtt.{region}.aliyuncs.com:8883` (HMAC-SHA1 identity, account bind with the IoT token) | events of the Aliyun robots (`thing/events`, `device_protobuf_msg_event`) | yes, Aliyun robots; publishes only the account bind |
 
 ## Read by the app (0.26.0, Me → Mammotion account screen)
 

@@ -45,9 +45,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import fr.luba.poc.ui.components.MapSideButton
-import fr.luba.poc.ui.theme.MammotionColors
+import androidx.core.content.edit
+import fr.luba.poc.auth.AccountMode
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.ui.components.MapSideButton
+import fr.luba.poc.ui.components.SecondaryPillButton
+import fr.luba.poc.ui.theme.MammotionColors
 
 /**
  * Live camera: shown as a thumbnail on the map (a single one, top right) as soon as the robot moves, and large in manual control.
@@ -115,7 +118,7 @@ object LiveCamera {
 
     fun setVisible(context: Context, shown: Boolean) {
         visible = shown
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean(KEY_VISIBLE, shown).apply()
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit { putBoolean(KEY_VISIBLE, shown) }
     }
 
     /** View shown: movement in progress, manual request or automatic stream still open (end of movement). */
@@ -236,7 +239,7 @@ object LiveCamera {
 @Composable
 fun LiveCameraButton(modifier: Modifier = Modifier, enabled: Boolean = true) {
     // Local mode: the video only goes through the Mammotion cloud, no button.
-    if (fr.luba.poc.auth.AccountMode.observe()) return
+    if (AccountMode.observe()) return
     val context = LocalContext.current
     LaunchedEffect(Unit) { LiveCamera.load(context) }
     val shown = LiveCamera.shown
@@ -274,14 +277,14 @@ fun BoxScope.LiveCameraWindow(modifier: Modifier = Modifier, width: Dp = 168.dp)
 /** View to show? Otherwise, a button to show it if [button]. Counts the screen as a host of the view. */
 @Composable
 private fun liveCameraShown(button: Boolean, large: Boolean, modifier: Modifier): Boolean {
-    if (fr.luba.poc.auth.AccountMode.observe()) return false
+    if (AccountMode.observe()) return false
     val context = LocalContext.current
     LaunchedEffect(Unit) { LiveCamera.load(context) }
     DisposableEffect(Unit) { LiveCamera.hostEnter(); onDispose { LiveCamera.hostLeave() } }
     val live = LiveCamera
     if (!live.shown) {
         // Large view (manual control): full-width labelled pill; map thumbnail: round button.
-        if (button && large) fr.luba.poc.ui.components.SecondaryPillButton(tr("Show camera", "Afficher la caméra"), { live.open(context) }, modifier, icon = Icons.Rounded.Videocam)
+        if (button && large) SecondaryPillButton(tr("Show camera", "Afficher la caméra"), { live.open(context) }, modifier, icon = Icons.Rounded.Videocam)
         else if (button) MapSideButton(Icons.Rounded.Videocam, tr("Show camera", "Afficher la caméra"), { live.open(context) }, modifier)
         return false
     }

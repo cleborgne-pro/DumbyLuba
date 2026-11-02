@@ -3,18 +3,25 @@ package fr.luba.poc.diagnostics
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.LocalObstacle
+import fr.luba.poc.obstacles.ObstacleCourse
 import fr.luba.poc.obstacles.RobotEnvelope
+import fr.luba.poc.planning.RoutePlanning
+import fr.luba.poc.simulation.BaseDeparture
+import fr.luba.poc.simulation.PathFollower
+import fr.luba.poc.simulation.PointPlanner
+import fr.luba.poc.simulation.SimEdge
+import fr.luba.poc.simulation.TrajectoryPlanner
+import kotlin.math.*
 import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as Area
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.LineString
 import org.locationtech.jts.geom.Polygon
-import org.locationtech.jts.geom.Geometry as Area
-import kotlin.math.*
 
 data class MapNavPlan(
     val zone: List<Point>, val holes: List<List<Point>>, val points: List<Point>,
     val bands: List<List<Point>>, val borders: List<List<Point>>, val labels: List<String>,
-    val routes: fr.luba.poc.simulation.TrajectoryPlanner? = null,
+    val routes: TrajectoryPlanner? = null,
     /** Move to a point: checks use the physical footprint of the LUBA 2 (as mowing does),
      * not the fixed margin of the map test. */
     val physicalGuard: Boolean = false,
@@ -22,7 +29,7 @@ data class MapNavPlan(
      * ([fr.luba.poc.simulation.PointPlanner]); null for the other courses. */
     val mapped: Area? = null,
     /** Straight exit from the base to the link point, driven before [points] (robot on its base); null otherwise. */
-    val departure: fr.luba.poc.simulation.BaseDeparture.Exit? = null,
+    val departure: BaseDeparture.Exit? = null,
     /** Each range starts with an in-place pivot towards its first edge ([fr.luba.poc.simulation.PathFollower.alignFirst]),
      * kept for the paths replanned by a recovery. */
     val alignAtStart: Boolean = false,
@@ -30,7 +37,7 @@ data class MapNavPlan(
     val meters: Double get() = points.zipWithNext().sumOf { (a, b) -> a.distance(b) }
 
     /** Sections of the route beyond the mapped zones (shown dotted, driven without map checks). */
-    val offMap: List<List<Point>> by lazy { mapped?.let { fr.luba.poc.simulation.PointPlanner.offMapSections(it, points) }.orEmpty() }
+    val offMap: List<List<Point>> by lazy { mapped?.let { PointPlanner.offMapSections(it, points) }.orEmpty() }
     val offMapMeters: Double get() = offMap.sumOf { s -> s.zipWithNext().sumOf { (a, b) -> a.distance(b) } }
 
     /** Cutting test: edge [edge] (points[edge] → points[edge+1]) is driven with the blades running. */
@@ -97,7 +104,7 @@ object MapNavPlanner {
             }
             tr("Start %.2f m from a map limit or a no-go zone; clearance required: 0.95 m", "Départ à %.2f m d'une limite ou d'une exclusion ; dégagement requis : 0,95 m").format(clearance)
         }
-        val routes = fr.luba.poc.planning.RoutePlanning.navigation(map.copy(shapes=listOf(zone)),MARGIN_M+0.05,holes,limitCenter=start,limitRadius=radius-0.3,curveSegments=16)
+        val routes = RoutePlanning.navigation(map.copy(shapes=listOf(zone)),MARGIN_M+0.05,holes,limitCenter=start,limitRadius=radius-0.3,curveSegments=16)
         val path = mutableListOf(start)
         val labels = mutableListOf(BladeCourse.START)
         val bands = mutableListOf<List<Point>>()
@@ -156,14 +163,14 @@ object MapNavPlanner {
 object ObstacleCoursePlanner {
     fun plan(map: RobotMap, start: Point, far: Point, home: Point, obstacles: List<LocalObstacle>, includeFar: Boolean = true): MapNavPlan {
         if (!includeFar) {
-            val back = fr.luba.poc.planning.RoutePlanning.point(map, start, home, obstacles)
-            return back.copy(labels = back.labels.dropLast(1) + fr.luba.poc.obstacles.ObstacleCourse.HOME_LABEL)
+            val back = RoutePlanning.point(map, start, home, obstacles)
+            return back.copy(labels = back.labels.dropLast(1) + ObstacleCourse.HOME_LABEL)
         }
-        val out = fr.luba.poc.planning.RoutePlanning.point(map, start, far, obstacles)
-        val back = fr.luba.poc.planning.RoutePlanning.point(map, far, home, obstacles)
+        val out = RoutePlanning.point(map, start, far, obstacles)
+        val back = RoutePlanning.point(map, far, home, obstacles)
         return out.copy(points = out.points + back.points.drop(1),
-            labels = out.labels.dropLast(1) + fr.luba.poc.obstacles.ObstacleCourse.FAR_LABEL +
-                back.labels.drop(1).dropLast(1) + fr.luba.poc.obstacles.ObstacleCourse.HOME_LABEL)
+            labels = out.labels.dropLast(1) + ObstacleCourse.FAR_LABEL +
+                back.labels.drop(1).dropLast(1) + ObstacleCourse.HOME_LABEL)
     }
 }
 
@@ -173,7 +180,7 @@ object MapNavFollower {
     const val MAX_DEVIATION_M = 0.3
     fun command(position: Point, heading: Double, target: Point, linear: Int, angular: Int, arrivalM: Double = ARRIVAL_M): Pair<Int,Int> {
         if (position.distance(target) <= arrivalM) return 0 to 0
-        val command = fr.luba.poc.simulation.PathFollower(listOf(fr.luba.poc.simulation.SimEdge(position,target,false)),0,1,arrivalM)
+        val command = PathFollower(listOf(SimEdge(position,target,false)),0,1,arrivalM)
             .command(position,heading,linear,angular)
         return command.linear to command.angular
     }

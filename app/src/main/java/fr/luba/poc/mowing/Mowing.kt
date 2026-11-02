@@ -1,10 +1,15 @@
 package fr.luba.poc.mowing
 
-import fr.luba.poc.protocol.Telemetry
+import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
 import fr.luba.poc.map.kind
-import fr.luba.poc.i18n.tr
+import fr.luba.poc.proto.MctrlNavProto
+import fr.luba.poc.protocol.CutHeightRange
+import fr.luba.poc.protocol.ModelSupport
+import fr.luba.poc.protocol.SelfCheck
+import fr.luba.poc.protocol.Telemetry
 
 /** Native mission: the firmware chooses the points and links, no external joystick. */
 data class MowConfig(val zones: List<Long>, val heightMm: Int = 60, val checkerboard: Boolean = false, val spacingCm: Int = 25, val speedMps: Float = 0.3f) {
@@ -12,7 +17,7 @@ data class MowConfig(val zones: List<Long>, val heightMm: Int = 60, val checkerb
         require(zones.isNotEmpty() && zones.size == zones.distinct().size && zones.none { it == 0L }) { tr("Invalid zones", "Zones invalides") }
         require(spacingCm in 5..35) { tr("Spacing out of range 5–35 cm", "Espacement hors plage 5–35 cm") }
         require(speedMps.isFinite() && speedMps in 0.2f..0.6f) { tr("Speed out of range 0.2–0.6 m/s", "Vitesse hors plage 0,2–0,6 m/s") }
-        require(heightMm in fr.luba.poc.protocol.CutHeightRange.ANY) { fr.luba.poc.protocol.CutHeightRange.ANY.refusal(heightMm)!! }
+        CutHeightRange.ANY.requireHeight(heightMm)
     }
 }
 enum class MowPhase(private val labelEn: String, private val labelFr: String) {
@@ -27,7 +32,7 @@ enum class MowPhase(private val labelEn: String, private val labelFr: String) {
     val label: String get() = tr(labelEn, labelFr)
 }
 data class MowUi(
-    val paths: List<List<fr.luba.poc.map.Point>> = emptyList(), val pathStatus: String = tr("Firmware route not read", "Parcours firmware non lu"),
+    val paths: List<List<Point>> = emptyList(), val pathStatus: String = tr("Firmware route not read", "Parcours firmware non lu"),
     val id: String = "", val phase: MowPhase = MowPhase.IDLE, val config: MowConfig? = null,
     val status: String = MowPhase.IDLE.label, val observations: List<String> = emptyList(),
     val manualChecks: Set<String> = emptySet(), val moved: Boolean = false,
@@ -40,10 +45,10 @@ data class MowUi(
 object MowSafety {
     fun failure(name: String?, ready: Boolean, busy: Boolean, t: Telemetry, now: Long): String? {
         if (!ready) return tr("Connect the robot over BLE", "Connecter le robot en BLE")
-        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Command reserved for the LUBA 2 (Luba-VS, Luba-VP)", "Commande réservée au LUBA 2 (Luba-VS, Luba-VP)")
+        if (!ModelSupport.motionValidated(name)) return tr("Command reserved for the LUBA 2 (Luba-VS, Luba-VP)", "Commande réservée au LUBA 2 (Luba-VS, Luba-VP)")
         if (busy) return tr("Finish the tests / map reading first", "Terminer les essais / la lecture de carte")
         if (t.lastDeviceAt == null || now - t.lastDeviceAt !in 0..2000) return tr("Robot state missing or stale", "État robot absent ou périmé")
-        if (!fr.luba.poc.protocol.SelfCheck.nominal(t.selfCheck)) return fr.luba.poc.protocol.SelfCheck.refusal(t.selfCheck)
+        if (!SelfCheck.nominal(t.selfCheck)) return SelfCheck.refusal(t.selfCheck)
         if (t.sensorStatus == null || t.sensorStatus and 7 != 0) return tr("Bumper health alert or unknown", "Santé bumper en alerte ou inconnue")
         if (t.robotState !in setOf(11, 13, 14, 15, 19, 39)) return tr("Incompatible robot state: ${t.robotState}", "État robot incompatible : ${t.robotState}")
         return null
@@ -90,7 +95,7 @@ object MowObservation {
 
 /** The firmware pads its fixed-size zone list with zeros (observed in 1.30.29.26). */
 object MowPreparation {
-    fun matches(route: fr.luba.poc.proto.MctrlNavProto.NavReqCoverPath, config: MowConfig): Boolean =
+    fun matches(route: MctrlNavProto.NavReqCoverPath, config: MowConfig): Boolean =
         route.subCmd == 0 && route.zoneHashsList.filter { it != 0L }.toSet() == config.zones.toSet() &&
             route.knifeHeight == config.heightMm
 }

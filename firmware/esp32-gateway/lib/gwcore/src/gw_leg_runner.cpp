@@ -10,6 +10,7 @@
 #include "gw_nav_safety.h"
 #include "gw_obstacle_guard.h"
 #include "gw_reckoning.h"
+#include "gw_speed.h"
 
 namespace gw {
 namespace leg {
@@ -480,9 +481,14 @@ int LegRunner::followPath(int from, int to, Opt<double> lastArrivalM) {
                          {"robotState", opt(live.robotState)}};
       const int previousIndex = follower.index();
       const int speedPercent = spec_.speedPercent;
+      // Adaptive speed: set speed lowered on the slowed stretches sent by the pilot and while the RTK is degraded.
+      const Opt<int64_t> rtkAge = live.lastRtkAt ? Opt<int64_t>(env_.wall() - *live.lastRtkAt) : std::nullopt;
+      const int adaptive = std::min(AdaptiveSpeed::percentAt(spec_.speedCaps, follower.index() + std::clamp(PathFollower::progressOf(predicted.position, path_[follower.index()]), 0.0, 1.0)), AdaptiveSpeed::rtkPercent(live.rtkStatus, rtkAge));
+      const int setLinear = spec_.adaptiveSpeed ? AdaptiveSpeed::linear(PathFollower::linearFor(speedPercent), adaptive)
+                                                : PathFollower::linearFor(speedPercent);
       // Heading not confirmed, or pivot not measured yet: slow advance until the next position.
-      const int linearLimit = !headingTrusted ? std::min(PathFollower::linearFor(speedPercent), DeadReckoning::UNCONFIRMED_LINEAR)
-                                              : reckoning_->postPivotLinear(PathFollower::linearFor(speedPercent));
+      const int linearLimit = !headingTrusted ? std::min(setLinear, DeadReckoning::UNCONFIRMED_LINEAR)
+                                              : reckoning_->postPivotLinear(setLinear);
       const auto command = follower.command(predicted.position, predicted.headingDegrees, linearLimit, PathFollower::angularLimit(speedPercent),
                                             reckoning_->degreesPerUnit(), reckoning_->metersPerUnit(), RangeArrival::APPROACH_MIN_LINEAR,
                                             follower.deviation(position), reckoning_->rotationCalibrated());

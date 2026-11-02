@@ -6,7 +6,7 @@ import org.junit.Test
 
 class LocalMowingOrderTest {
     @Test fun aDuplicatedPassNeverHidesAMissingPassWhenComparingCoverageGeometry() {
-        val a=row(0.0);val b=row(1.0)
+        val a=row(0.0); val b=row(1.0)
         assertFalse(AutomaticPlanner.sameCoveragePaths(listOf(a,a),listOf(a,b)))
         assertTrue(AutomaticPlanner.sameCoveragePaths(listOf(a,b),listOf(b.reversed(),a.reversed())))
         assertTrue(AutomaticPlanner.sameCoveragePaths(listOf(a,a,b),listOf(a,b)))
@@ -19,7 +19,7 @@ class LocalMowingOrderTest {
         assertTrue(result.selected.diagnostics.toString(),result.selected.valid)
         assertEquals(1,result.candidates.size)
         val preview=result.selected.preview!!
-        val seen=mutableSetOf<Int>();val counts=mutableMapOf<Int,Int>()
+        val seen=mutableSetOf<Int>(); val counts=mutableMapOf<Int,Int>()
         var active: Int?=null
         for(path in preview.cuttingPaths) {
             val index=preview.runs.indexOfFirst { it==path || it.reversed()==path }
@@ -57,25 +57,25 @@ class LocalMowingOrderTest {
         link: (List<Point>?,List<Point>) -> Double = { a,b -> (a?.last() ?: start).distance(b.first()) }) =
         LocalMowingOrder.schedule(p,start,false,true,link,safe)
     @Test fun completesTheCurrentCellBeforeVisitingAnotherOneAndPreservesEveryWholeRun() {
-        val a=row(0.0);val b=row(1.0);val other=row(0.2,10.0)
+        val a=row(0.0); val b=row(1.0); val other=row(0.2,10.0)
         val p=Preview(listOf(a,other,b),30.0,0,0,runCellIds=listOf(1,2,1))
         val result=schedule(p).cuttingPaths
-        assertEquals(a,result[0]);assertEquals(b.reversed(),result[1]);assertEquals(other,result[2])
+        assertEquals(a,result[0]); assertEquals(b.reversed(),result[1]); assertEquals(other,result[2])
         assertEquals(p.runs.map { it.toSet() }.toSet(),result.map { it.toSet() }.toSet())
         assertEquals(p.runs.size,result.size)
     }
     @Test fun aNearbyNoGoNeverSplitsOrInterruptsTheStartedCell() {
-        val a=row(0.0);val b=row(1.0)
+        val a=row(0.0); val b=row(1.0)
         val loop=listOf(Point(4.0,0.2),Point(5.0,0.2),Point(5.0,0.4),Point(4.0,0.2))
         val p=Preview(listOf(a,b),23.0,0,0,borders=listOf(loop),noGoLoops=1,
             borderKinds=listOf(true),runCellIds=listOf(1,1))
         val result=schedule(p).cuttingPaths
-        assertEquals(a,result[0]);assertEquals(b.reversed(),result[1]);assertEquals(3,result.size)
-        assertTrue(result[2].containsAll(loop));assertEquals(result[2].first(),result[2].last())
+        assertEquals(a,result[0]); assertEquals(b.reversed(),result[1]); assertEquals(3,result.size)
+        assertTrue(result[2].containsAll(loop)); assertEquals(result[2].first(),result[2].last())
     }
     @Test fun checkerboardFinishesOneOrientationBeforeStartingTheOther() {
         // Horizontal passes (cells 0 and 1) and a vertical one (cell 90 × 100,000): the vertical one is the nearest.
-        val h1=row(0.0);val h2=row(10.0)
+        val h1=row(0.0); val h2=row(10.0)
         val v=listOf(Point(10.5,0.0),Point(10.5,10.0))
         val p=Preview(listOf(h1,v,h2),30.0,0,0,mode=CoverageMode.CHECKERBOARD,runCellIds=listOf(0,9000000,1))
         assertEquals(listOf(h1,h2.reversed(),v.reversed()),schedule(p).cuttingPaths)
@@ -84,7 +84,7 @@ class LocalMowingOrderTest {
     }
     @Test fun checkerboardStartsWithTheNearestOrientation() {
         // Vertical pass (2nd orientation) closest to the start: it begins, its direction is finished first.
-        val h1=row(5.0);val h2=row(10.0)
+        val h1=row(5.0); val h2=row(10.0)
         val v=listOf(Point(0.0,0.0),Point(0.0,3.0))
         val p=Preview(listOf(h1,h2,v),23.0,0,0,mode=CoverageMode.CHECKERBOARD,runCellIds=listOf(0,1,9000000))
         val order=schedule(p).cuttingPaths
@@ -93,7 +93,7 @@ class LocalMowingOrderTest {
     }
     @Test fun aSweepBarMowsTheSideLeftBehindBeforeAdvancing() {
         // Cell A (y 0–1) and B (y 0–1, to the right) at the same level, C (y 2–3) just above A.
-        val a=listOf(row(0.0),row(1.0));val c=listOf(row(2.0),row(3.0));val b=listOf(row(0.0,13.0),row(1.0,13.0))
+        val a=listOf(row(0.0),row(1.0)); val c=listOf(row(2.0),row(3.0)); val b=listOf(row(0.0,13.0),row(1.0,13.0))
         val p=Preview(a+c+b,60.0,0,0,runCellIds=listOf(1,1,2,2,3,3))
         fun cells(order: List<List<Point>>)=order.map { path -> p.runCellIds[p.runs.indexOfFirst { it==path || it.reversed()==path }] }
         val start=Point(0.0,0.0)
@@ -105,7 +105,7 @@ class LocalMowingOrderTest {
         assertEquals(p.runs.map { it.toSet() }.toSet(),bar.cuttingPaths.map { it.toSet() }.toSet())
     }
     @Test fun aBarWithoutSafeLinkFallsBackToTheRemainingBlocks() {
-        val a=listOf(row(0.0),row(1.0));val c=listOf(row(2.0),row(3.0));val b=listOf(row(0.0,13.0),row(1.0,13.0))
+        val a=listOf(row(0.0),row(1.0)); val c=listOf(row(2.0),row(3.0)); val b=listOf(row(0.0,13.0),row(1.0,13.0))
         val p=Preview(a+c+b,60.0,0,0,runCellIds=listOf(1,1,2,2,3,3))
         val start=Point(0.0,0.0)
         // Cell B unreachable from A: the bar does not block the mowing, C comes first.
@@ -116,7 +116,7 @@ class LocalMowingOrderTest {
         assertTrue(result.cuttingPaths[2].all { it.y>=2.0 })
     }
     @Test fun backtracksCountCellsStartedWhileAnotherOneWasLeftBehind() {
-        val bottom=row(0.0);val middle=row(5.0);val top=row(10.0)
+        val bottom=row(0.0); val middle=row(5.0); val top=row(10.0)
         fun scheduled(vararg order: List<Point>)=Preview(listOf(bottom,middle,top),30.0,0,0,runCellIds=listOf(1,2,3),
             scheduledPaths=order.toList())
         assertEquals(0,LocalMowingOrder.backtracks(scheduled(bottom,middle,top)))
@@ -132,7 +132,7 @@ class LocalMowingOrderTest {
         fun generate(base: Point?) = CoveragePlanner.plan(zone,emptyList(),0.5,0.6,CoverageMode.LINES,true,
             basePoint=base,continuous=true)
         val original=generate(null)
-        val path=original.runs.first();val a=path[0];val b=path[1]
+        val path=original.runs.first(); val a=path[0]; val b=path[1]
         val middle=Point((a.x+b.x)/2,(a.y+b.y)/2)
         assertEquals(original.runs,generate(middle).runs)
         assertEquals(original.runCellIds,generate(middle).runCellIds)

@@ -7,6 +7,10 @@ import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import java.io.File
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.util.concurrent.CopyOnWriteArrayList
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -18,10 +22,6 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ServiceController
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowPowerManager
-import java.io.File
-import java.net.InetAddress
-import java.net.ServerSocket
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Foreground services of the phone: robot link kept in the background ([RobotLinkService]) and relay to the home server

@@ -21,11 +21,13 @@ import fr.luba.poc.planning.RoutePlanning
 import fr.luba.poc.simulation.BaseStore
 import fr.luba.poc.simulation.MapBase
 import fr.luba.poc.simulation.MowingSimulation
+import fr.luba.poc.simulation.PreparationPool
 import fr.luba.poc.simulation.SimConfig
-import org.junit.Assert.fail
-import org.robolectric.Shadows.shadowOf
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import org.junit.Assert.fail
+import org.robolectric.Shadows.shadowOf
 
 /**
  * End-to-end test bench for [RobotBle]: real ViewModel, [SimRobot] robot plugged in via [RobotBle.linkFactory],
@@ -83,6 +85,15 @@ class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name
 
     private var workers: List<Thread> = emptyList()
     private var workersAt = 0L
+    /** Lazy executor of [PreparationPool] (private): a missing field fails the bench instead of skipping the wait. */
+    private val preparationPool = PreparationPool::class.java.getDeclaredField("executor\$delegate")
+        .apply { isAccessible = true }.get(null) as Lazy<*>
+    /** CoroutineScheduler behind `Dispatchers.Default` (internal kotlinx field). */
+    private val defaultScheduler: Any = Dispatchers.Default.let { dispatcher ->
+        generateSequence<Class<*>>(dispatcher.javaClass) { it.superclass }
+            .firstNotNullOf { type -> type.declaredFields.firstOrNull { it.name == "coroutineScheduler" } }
+            .apply { isAccessible = true }.get(dispatcher)
+    }
 
     /**
      * Work RobotBle hands to `Dispatchers.Default` (route repair, links) runs in real time.
@@ -91,20 +102,58 @@ class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name
      */
     private fun awaitBackground() {
         val wall = System.currentTimeMillis()
-        // The preparation pool threads too: a worker waiting for its pool tasks is not RUNNABLE while they compute.
-        if (wall - workersAt > 500) { workersAt = wall; workers = Thread.getAllStackTraces().keys.filter { it.name.startsWith("DefaultDispatcher-worker") || it.name == "luba-preparation" } }
-        fun computing(t: Thread) = t.stackTrace.let { stack ->
-            stack.any { it.className.startsWith("fr.luba.poc.simulation.PreparationPool") } ||
-                t.state == Thread.State.RUNNABLE && stack.any { f ->
-                    f.className.startsWith("fr.luba.poc.simulation") || f.className.startsWith("fr.luba.poc.planning") || f.className.startsWith("org.locationtech") } }
+        if (wall - workersAt > 500) { workersAt = wall; workers = Thread.getAllStackTraces().keys.filter { it.name.startsWith("DefaultDispatcher-worker") } }
+        // The thread state is read without stopping the JVM, a stack trace is not: each one is a safepoint that also
+        // stops the computation being waited for. Reading the stack of every worker every 2 ms made 30 000 safepoints
+        // a second (JFR, 2026-10-31); only RUNNABLE threads are read now.
+        // Any app code counts (route repair in ble.RobotRoute, corridor in map.TrajectoryEnvelope…): once the bench no
+        // longer slept for tens of milliseconds at each step, waiting only for the simulation and planning packages
+        // let virtual time run ahead of these computations on a loaded machine.
+        fun computing(t: Thread) = t.state == Thread.State.RUNNABLE && t.stackTrace.any { f ->
+            f.className.startsWith("fr.luba.poc.") || f.className.startsWith("org.locationtech") }
         val deadline = wall + 30_000
-        while (workers.any(::computing) && System.currentTimeMillis() < deadline) Thread.sleep(2)
+        val since = System.nanoTime()
+        while ((preparationRunning() || dispatcherPending() || workers.any(::computing)) && System.currentTimeMillis() < deadline) pause(since)
+    }
+
+    /**
+     * Coroutines handed to `Dispatchers.Default` that no worker has finished yet: queued, or held by a worker on a CPU
+     * permit. A task just dispatched has no RUNNABLE worker until the system schedules one, which on a loaded machine
+     * lasted several virtual steps once the steps took a fraction of a millisecond. Read from the scheduler state
+     * (its debug description), without stopping the JVM.
+     */
+    private fun dispatcherPending(): Boolean {
+        val description = defaultScheduler.toString()
+        val match = requireNotNull(SCHEDULER_STATE.find(description)) { "Unexpected coroutine scheduler state: $description" }
+        val (cpuWorkers, localQueues, cpuQueue, blockingQueue) = match.destructured
+        return cpuWorkers != "0" || cpuQueue != "0" || blockingQueue != "0" ||
+            localQueues.split(", ").any { it.isNotEmpty() && it.dropLast(1) != "0" }
+    }
+
+    /**
+     * Tasks of [PreparationPool] queued or running. Read from its executor rather than from the stacks: a worker waiting
+     * for its pool tasks is not RUNNABLE, and a task just queued has no RUNNABLE pool thread yet.
+     */
+    private fun preparationRunning(): Boolean {
+        if (!preparationPool.isInitialized()) return false
+        val pool = preparationPool.value as ThreadPoolExecutor
+        return pool.activeCount > 0 || pool.queue.isNotEmpty()
     }
 
     private fun drainLog() {
         val queue = logQueue ?: return
-        var waited = 0
-        while (queue.size > 512 && waited++ < 2000) Thread.sleep(1)
+        val since = System.nanoTime()
+        while (queue.size > 512 && System.nanoTime() - since < DRAIN_MAX_NS) pause(since)
+    }
+
+    /**
+     * Pause of a polling loop waiting since [sinceNs]. Outside an interactive app, macOS coalesces the timers of short
+     * sleeps: in the agent sessions sleep(2) lasted 11 ms and sleep(5) 30 to 36 ms (measured on 2026-10-31), so a
+     * mowing test spent 7 of its 12 s asleep waiting for disk writes of a few milliseconds. The first [SPIN_NS] of a
+     * wait only yield the processor; longer waits (route repair) sleep.
+     */
+    private fun pause(sinceNs: Long) {
+        if (System.nanoTime() - sinceNs < SPIN_NS) Thread.yield() else Thread.sleep(2)
     }
 
     /** Advances until [condition] (at most [maxMs] virtual), otherwise fails with the current state. */
@@ -120,7 +169,7 @@ class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name
     fun awaitReal(maxRealMs: Long, what: String, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + maxRealMs
         while (!condition()) {
-            if (System.currentTimeMillis() >= deadline) fail("$what: not observed within ${maxRealMs} real ms\n${dump()}")
+            if (System.currentTimeMillis() >= deadline) fail("$what: not observed within $maxRealMs real ms\n${dump()}")
             advance(20); Thread.sleep(5)
         }
     }
@@ -162,6 +211,11 @@ class RobotBench(start: Point = Point(5.0, 4.0), heading: Double = 0.0, val name
     // ───── Synthetic map: one rectangular zone, oriented base ─────
 
     companion object {
+        private const val SPIN_NS = 20_000_000L
+        /** Fields of `CoroutineScheduler.toString()` (kotlinx-coroutines 1.8). */
+        private val SCHEDULER_STATE = Regex("""CPU = (\d+), .*running workers queues = \[([^\]]*)], global CPU queue size = (\d+), global blocking queue size = (\d+)""")
+        /** Longest wait for the log writer to catch up, then the bench goes on. */
+        private const val DRAIN_MAX_NS = 2_000_000_000L
         const val ZONE_ID = 1L
         /** 8 m × 6 m zone; base at (1.5, 3.0), docking towards −x: approach point at (3.0, 3.0). */
         val ZONE = MapShape(ZONE_ID, 0, listOf(Point(0.0, 0.0), Point(8.0, 0.0), Point(8.0, 6.0), Point(0.0, 6.0)), "Pelouse")

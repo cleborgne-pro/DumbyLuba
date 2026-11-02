@@ -5,18 +5,19 @@ import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.MapStation
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import kotlin.math.abs
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Robot activity at a point of the track: trace colour and replay label. */
 enum class TrackPhase(private val labelEn: String, private val labelFr: String) {
@@ -287,7 +288,7 @@ class TaskTrackStore(directory: File) {
         return runCatching { GZIPInputStream(file.inputStream().buffered()).use(::readSamples) }.getOrDefault(emptyList())
     }
 
-    private fun readSamples(stream: java.io.InputStream): List<TrackSample> {
+    private fun readSamples(stream: InputStream): List<TrackSample> {
         val out = ArrayList<TrackSample>()
         runCatching {
             val input = DataInputStream(stream)

@@ -26,7 +26,7 @@ class RobotBleDockResumeTest {
         bench.sim.battery = 45.0
         bench.installMap()
         bench.connect()
-        bench.ble.dockResumeAnyLink = true
+        bench.ble.routes.dockResumeAnyLink = true
         val base = bench.base
         val engine = bench.mowingEngine(config = SimConfig(instantCharging = true, autonomyMinutes = 3.0, returnPercent = 20.0, resumePercent = 60.0,
             baseEntryHeadingDegrees = base.entryHeadingDegrees, baseApproachMeters = base.approachDistanceM))
@@ -56,7 +56,7 @@ class RobotBleDockResumeTest {
         bench.sim.battery = 90.0
         bench.installMap()
         bench.connect()
-        bench.ble.dockResumeAnyLink = true
+        bench.ble.routes.dockResumeAnyLink = true
         val engine = bench.mowingEngine()
         assertTrue(bench.dump(), bench.ble.startRobotRoute(engine, cutting = true, heightMm = 60))
         bench.until(5 * 60_000, "cutting in progress") { bench.sim.bladesOn && bench.state.robotRoute.phase == RoutePhase.FOLLOWING }

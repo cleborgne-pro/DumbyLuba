@@ -1,14 +1,21 @@
 package fr.luba.poc.gateway
 
+import fr.luba.poc.ConcurrentMethods
 import fr.luba.poc.autonomy.LegFrames
 import fr.luba.poc.autonomy.LegOutcome
+import fr.luba.poc.autonomy.LegProgress
 import fr.luba.poc.autonomy.LegSpec
 import fr.luba.poc.autonomy.LegTransport
 import fr.luba.poc.autonomy.RemoteLegs
-import fr.luba.poc.autonomy.LegProgress
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.SignalSample
 import fr.luba.poc.simulation.SimEdge
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.util.Collections
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -17,19 +24,15 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
-import java.net.InetAddress
-import java.net.ServerSocket
-import java.util.Collections
-import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 
 /**
  * End-to-end autonomous tracking, in real time: pilot (TCP, [RemoteLegs]) → [GatewaySession] → [GatewayRobot] and its
  * observer → simulated robot behind the Bluetooth link ([FakeRobotLink]) answering with BluFi frames.
  */
+@RunWith(ConcurrentMethods::class)
 class GatewayAutonomyTest {
     private val code = "042137"
     private val address = "AA:BB:CC:DD:EE:FF"

@@ -1,10 +1,15 @@
 package fr.luba.poc.simulation
 
 import androidx.lifecycle.ViewModel
-import fr.luba.poc.i18n.tr
 import androidx.lifecycle.viewModelScope
+import fr.luba.poc.Clock
+import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.SignalCoverage
+import fr.luba.poc.map.SignalSurvey
+import fr.luba.poc.map.SignalSurveyStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,17 +18,17 @@ import kotlinx.coroutines.withContext
 
 data class SimulationUi(val engine:MowingSimulation?=null,val state:SimState?=null,val playing:Boolean=false,val speed:Int=20,val error:String="")
 class SimulationSession:ViewModel() {
-    @Volatile private var signalStore: fr.luba.poc.map.SignalSurveyStore? = null
-    private val signalWrites = kotlinx.coroutines.channels.Channel<fr.luba.poc.map.SignalSurvey>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    @Volatile private var signalStore: SignalSurveyStore? = null
+    private val signalWrites = Channel<SignalSurvey>(Channel.UNLIMITED)
     private var lastSignalSave = 0L
-    fun storeSurveys(store: fr.luba.poc.map.SignalSurveyStore) { signalStore=store; persistSignals(mutable.value,true) }
+    fun storeSurveys(store: SignalSurveyStore) { signalStore=store; persistSignals(mutable.value,true) }
     private fun persistSignals(ui: SimulationUi, force: Boolean=false) {
         val engine=ui.engine ?: return; val state=ui.state ?: return
         if (!engine.preview.mode.isSurvey || state.signalSamples.isEmpty() || state.surveyId.isBlank() || signalStore==null) return
-        val now=System.currentTimeMillis()
+        val now=Clock.now()
         if (!force && now-lastSignalSave<1000) return
         lastSignalSave=now
-        signalWrites.trySend(fr.luba.poc.map.SignalSurvey("simulation",fr.luba.poc.map.SignalCoverage.mapKey(engine.map),engine.preview.zoneIds,
+        signalWrites.trySend(SignalSurvey("simulation",SignalCoverage.mapKey(engine.map),engine.preview.zoneIds,
             state.signalSamples,state.surveyId,state.surveyStartedAt,true,engine.preview.mode,engine.map))
     }
 

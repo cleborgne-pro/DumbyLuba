@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Content Security Policy: only the app's own page and the vendored Agora SDK may run (no remote script: a compromised
+     CDN cannot reach the LubaCamera bridge). No navigation, connection only to Agora (WSS/HTTPS) and the embedded page.
+     Agora reaches its edge servers on their own ports (wss://<ip>.edge.agora.io:<port>) and falls back to its SD-RTN
+     domains (edge.sd-rtn.com, ap.sd-rtn.com): a source without ":*" only allows port 443. The SDK runs one worker from a
+     blob. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; worker-src blob:; connect-src 'self' https://*.agora.io:* wss://*.agora.io:* https://*.sd-rtn.com:* wss://*.sd-rtn.com:*; media-src 'self' blob: mediastream:; img-src 'self' data: blob:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <!-- LUBA camera stream: Agora audience member (same sequence as the Mammotion-HA card agora-client.js).
      Sends no audio/video: joins the channel, subscribes to the published cameras (uid 1, 2, 3) and shows the chosen one. -->
 <style>
@@ -11,7 +17,8 @@
   #video div, #video video { width: 100% !important; height: 100% !important; object-fit: contain !important; background: #000 !important; }
   #msg { position: absolute; left: 0; right: 0; top: 45%; text-align: center; padding: 0 16px; }
 </style>
-<script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.24.3.js"></script>
+<!-- Vendored (audit of 2026-10-30): SHA-256 9f0d8d799ad278d1f1f40460997c83b7fc3225f96ce16cadf181d1fb846db3d169aa3b9ccfe07e41fe64c64c5f5c2266. -->
+<script src="AgoraRTC_N-4.24.3.js"></script>
 </head>
 <body>
 <div id="video"></div>

@@ -60,8 +60,12 @@ The report starts with a status line ("Mowing finished", or "Mowing interrupted 
   planned), **Settings** (route mode, height, speed) and **Incidents** (obstacles bypassed, resumes).
 - **Duration** (**Duration (part mowed)** if interrupted): estimated and actual, with "of which mowing and travel" and
   "of which recharging". The verdict is "As estimated" within ±10 %, otherwise "X % longer (or shorter) than planned";
-  "Too short to compare" when the estimate is one minute or less.
-- **Recharges**: estimated and actual, with "As estimated" or "N more (fewer) recharges than planned".
+  "Too short to compare" when the estimate is one minute or less. When the recharges differ from the estimate, the
+  verdict adds the deviation of the time off charge alone ("(driving +45 %)"): a recharge sooner or later than planned
+  moves a whole charge in or out of the duration.
+- **Recharges**: estimated and actual, with "As estimated", "Recharged sooner than planned" (an interrupted mowing
+  recharged before the point where the estimate places its recharge, without exceeding the recharges of the whole
+  estimate: usually a slower run) or "N more (fewer) recharges than planned".
 - **Battery and pace**: battery at start and end, **Consumed · recharged** points; **Duration / theoretical run**
   (time off charge divided by the run time at the set speed: pivots, links, returns and slowdowns), **Observed
   runtime** (minutes per 100 % off charge) and **Recharge 0 → 100 %**, each compared with the value used by the
@@ -71,8 +75,9 @@ The report starts with a status line ("Mowing finished", or "Mowing interrupted 
   abnormal mowing; it then no longer corrects the next estimates and the history marks it "excluded". **Close**
   closes the report.
 
-For an interrupted mowing, the estimated duration and recharges are scaled down to the part mowed (a planned recharge
-is only expected if the mowed part reaches it); the full estimate is shown after "of".
+For an interrupted mowing, the estimate is taken up to the part mowed: its run time (time factor included) plus the
+recharges the estimate places before that point, each with its whole charge (a recharge planned at 66 % of the route
+is not due at 57 %, and it no longer counts for 57 % of its charge either); the full estimate is shown after "of".
 
 ## Mowing Score
 
@@ -288,8 +293,8 @@ again), the end-of-mowing report and the task sheet show a **Finishing** group: 
 **Prepare the finishing**. The button is offered for the connected robot of that mowing with its complete map;
 otherwise a note asks to connect it.
 
-**Prepare the finishing** closes the report and opens Service → **Trial mowing** targeting those gaps (orange outlines)
-instead of a painted zone; **Paint a zone instead** goes back to painting. **Compute** plans a short route: each gap is
+**Prepare the finishing** closes the report and opens Service → **Finishing the gaps** targeting those gaps (orange
+outlines) and plans a short route at once, without a button (again after a change of the spacing): each gap is
 widened 20 cm over the mowed grass so that a lap runs on its edge and the passes cover it, even about 1 m wide; along a
 zone boundary the lap is the usual border lap. The **Finishing of the gaps** group then shows:
 
@@ -299,7 +304,7 @@ zone boundary the lap is the usual border lap. The **Finishing of the gaps** gro
 | **Robot envelope** | every cutting pass checked with the LUBA 2 footprint inside the safe surface of the robot map |
 
 The route is refused when a pass leaves the safe surface or when it exceeds half a new mowing ("Finishing refused: …;
-mow the zones again"). It then runs like any trial mowing: supervision box, blades, protections, return to base and
+mow the zones again"). It then runs like any mowing of a painted zone: supervision box, blades, protections, return to base and
 resume from the map. Details in [REAL_COVERAGE.md](../REAL_COVERAGE.md#finishing).
 
 ## Limitations

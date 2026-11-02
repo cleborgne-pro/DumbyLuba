@@ -2,17 +2,17 @@ package fr.luba.poc.auth
 
 import android.content.Context
 import android.util.Base64
-import org.json.JSONObject
+import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
 import java.net.URL
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import org.json.JSONObject
 
 /**
  * Mammotion cloud simulated on a local ephemeral port (no Internet call). The HTTPS URLs checked by [MammotionCloud]

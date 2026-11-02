@@ -4,7 +4,6 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TeachTest {
-
     @Test fun `approach refuses stale or non-finite position and limit distance`() {
         assertNull(TeachSafety.approachFailure(2000, 0.9, 0.0, 0.0, 0.0))
         assertNotNull(TeachSafety.approachFailure(2001, 0.0, 0.0, 0.0, 0.0))

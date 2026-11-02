@@ -70,7 +70,7 @@ page (back arrow, bottom bar hidden).
 | **Connection** | [Bluetooth connection](bluetooth-connection.md) · [Check the setup](getting-started.md#check-the-setup) · [Wi-Fi gateway](gateway.md) · [Home server](home-server.md) |
 | **Robot** | [Manual control](manual-control.md) · [Cutting height](tests-and-diagnostics.md#cutting-height-and-blade-test) · [Camera](camera.md) · [Maintenance](maintenance.md) |
 | **Garden and history** | [Task history](mowing-history.md) · [Obstacles](obstacles.md) (list, difficulties, photos, [simulation](obstacles.md#obstacle-simulation)) · [Signal surveys](signal-surveys-and-terrain.md) · [Rain and weather](rain-and-weather.md) |
-| **Supervised tests** | [Command cutoff](safety.md#command-cutoff-motor-watchdog) · [Navigation test](tests-and-diagnostics.md#navigation-test) · [Border following](tests-and-diagnostics.md#border-following) · [Obstacle tests](obstacles.md) · [Blade test](tests-and-diagnostics.md#cutting-height-and-blade-test) · [Trial mowing (painted zone)](tests-and-diagnostics.md#trial-mowing-painted-zone) |
+| **Supervised tests** | [Command cutoff](safety.md#command-cutoff-motor-watchdog) · [Navigation test](tests-and-diagnostics.md#navigation-test) · [Border following](tests-and-diagnostics.md#border-following) · [Obstacle tests](obstacles.md) · [Blade test](tests-and-diagnostics.md#cutting-height-and-blade-test) |
 | **Diagnostics** | [Bluetooth diagnostics](tests-and-diagnostics.md#bluetooth-diagnostics) · [Detailed telemetry](tests-and-diagnostics.md#detailed-telemetry) · [Sensors and perception](tests-and-diagnostics.md#sensors-and-perception) · [Logs](logs-and-data.md) · [Advanced settings](bluetooth-connection.md#advanced-settings) |
 
 Shared guards on the robot test pages: without a link, "Robot not connected: this page unlocks as soon as it is
@@ -106,7 +106,10 @@ The app detects a new version published on GitHub; it downloads and installs not
   any time by touching **Updates**.
 - **Comparison**: the `versionCode` of the release against the installed one, for the published app only
   (`io.github.cleborgne_pro.dumbyluba`). Builds made from source (debug, `fold`, identifier `fr.luba.poc`) never check
-  by themselves and never offer the update: a manual check only shows "Development build · latest published X.Y.Z".
+  by themselves and never offer the update (no badge). When a manual check finds a published version newer than the
+  installed one, the row reads "Development build X.Y.Z · version X.Y.Z published, open the release (separate app,
+  installs next to this one)" and touching it opens the release page; otherwise it shows "Development build · latest
+  published X.Y.Z". If no app can open the page, a message says so.
 - **Display**: the **Updates** row reads "Version X.Y.Z available · open the release", "Up to date · checked 3 h ago",
   "Checking GitHub…" or "Check failed (reason) · try again"; a green dot marks the **Me** tab while a newer version is
   available. Touching the row then opens the release page (notes, signed APK, checksums) in the browser; install the

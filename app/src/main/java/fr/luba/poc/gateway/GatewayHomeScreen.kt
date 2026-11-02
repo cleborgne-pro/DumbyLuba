@@ -22,6 +22,7 @@ import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
+import kotlinx.coroutines.delay
 
 /** One point checked on the gateway phone, with the action that fixes it ([fix], null when it is fine). */
 data class PhoneCheck(val label: String, val ok: Boolean, val detail: String, val fix: PhoneFix? = null)
@@ -71,20 +72,20 @@ fun GatewayHomeScreen(onOpenSettings: () -> Unit, modifier: Modifier = Modifier)
     val status by GatewayService.status.collectAsStateWithLifecycle()
     var checks by remember { mutableStateOf(GatewayPhoneChecks.read(context)) }
     // Back from an Android settings screen, or Bluetooth / Wi-Fi switched: read again every 2 s.
-    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(2_000); checks = GatewayPhoneChecks.read(context) } }
+    LaunchedEffect(Unit) { while (true) { delay(2_000); checks = GatewayPhoneChecks.read(context) } }
     var showQr by remember { mutableStateOf(false) }
     val pairing = GatewayPairing.ofThisGateway(context, status.address.takeIf { status.running })
     Column(modifier.fillMaxSize().background(colors.Background).verticalScroll(rememberScrollState()).statusBarsPadding().padding(Dimens.Lg),
         verticalArrangement = Arrangement.spacedBy(Dimens.Lg)) {
         ScreenTitle(tr("Gateway on the robot", "Passerelle sur le robot"), subtitle = status.message)
         if (!status.running) {
-            StatusNote(tr("Gateway stopped: the pilot phone cannot reach the robot.", "Passerelle arrêtée : le téléphone de pilotage ne peut pas joindre le robot."), NoteTone.WARNING)
+            StatusNote(tr("Gateway stopped: the pilot phone cannot reach the robot.", "Passerelle arrêtée : le téléphone de pilotage ne peut pas joindre le robot."), tone = NoteTone.WARNING)
             PrimaryPillButton(tr("Start the gateway", "Démarrer la passerelle"), { GatewayService.start(context) }, Modifier.fillMaxWidth(), icon = Icons.Rounded.PlayArrow)
         }
-        SettingsGroup(tr("Pair the pilot phone", "Appairer le téléphone de pilotage")) {
+        SettingsGroup(title = tr("Pair the pilot phone", "Appairer le téléphone de pilotage")) {
             val connected = status.pilot != null
             if (connected && !showQr) {
-                StatusNote(tr("Pilot connected: ${status.pilot}", "Pilote connecté : ${status.pilot}"), NoteTone.SUCCESS)
+                StatusNote(tr("Pilot connected: ${status.pilot}", "Pilote connecté : ${status.pilot}"), tone = NoteTone.SUCCESS)
                 TextAction(tr("Show the QR code", "Afficher le QR code"), { showQr = true }, Modifier.fillMaxWidth())
             } else if (pairing != null) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -97,16 +98,16 @@ fun GatewayHomeScreen(onOpenSettings: () -> Unit, modifier: Modifier = Modifier)
             CodeValue(tr("Gateway code", "Code de la passerelle"), GatewayConfig.read(context).code)
             status.address?.let { KeyValueRow(tr("Wi-Fi address", "Adresse Wi-Fi"), "$it:${GatewayProtocol.PORT}") }
         }
-        SettingsGroup(tr("Status", "État")) {
+        SettingsGroup(title = tr("Status", "État")) {
             KeyValueRow("Robot", status.robot.label)
             KeyValueRow(tr("Pilot", "Pilote"), status.pilot ?: tr("none", "aucun"))
         }
-        SettingsGroup(tr("This phone", "Ce téléphone")) {
+        SettingsGroup(title = tr("This phone", "Ce téléphone")) {
             checks.forEach { check ->
                 KeyValueRow(check.label, check.detail)
                 check.fix?.let { fix -> TextAction(tr("Fix: ", "Corriger : ") + check.label, { GatewayPhoneChecks.open(context, fix) }, Modifier.fillMaxWidth()) }
             }
-            if (checks.all { it.ok }) StatusNote(tr("This phone is ready to stay on the robot.", "Ce téléphone est prêt à rester sur le robot."), NoteTone.SUCCESS)
+            if (checks.all { it.ok }) StatusNote(tr("This phone is ready to stay on the robot.", "Ce téléphone est prêt à rester sur le robot."), tone = NoteTone.SUCCESS)
         }
         GatewayHealthDetails(rememberLocalGatewayHealth(), tr("Health of this phone (reported to the pilot)", "Santé de ce téléphone (remontée au pilote)"))
         InfoNote(tr("Lay this phone flat on top of the robot, screen up, firmly held and plugged into its charger if possible: its Bluetooth signal to the robot is also used to detect a fall.",

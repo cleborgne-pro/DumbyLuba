@@ -1,14 +1,14 @@
 package fr.luba.poc.history
 
 import fr.luba.poc.map.RobotMap
+import java.io.DataOutputStream
+import java.io.File
+import java.security.MessageDigest
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.DataOutputStream
-import java.io.File
-import java.security.MessageDigest
 
 /** Task journal: richer samples (format 2), compression at the end of a run, size bounds, typed events, export. */
 class TaskJournalTest {

@@ -2,6 +2,7 @@ package fr.luba.poc.map
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -9,7 +10,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.io.File
 
 /** Local cache of complete maps: one per identifier, atomic write, bounded read. */
 @RunWith(RobolectricTestRunner::class)

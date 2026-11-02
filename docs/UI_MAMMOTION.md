@@ -23,7 +23,7 @@ used as a model.
 
 ## Showcase home screen (0.23.0)
 
-- Photo of the detected model (`ui/RobotModel.kt`, `drawable/robot_photo_*.webp`, since 0.33.0; vector illustration
+- Photo of the detected model (`ui/RobotModel.kt`, `drawable-mdpi/robot_photo_*.webp`, since 0.33.0; vector illustration
   `drawable/robot_illustration.xml` if the model is unknown): radial halo, elliptical ground shadow, fade-in. A tap opens the map.
 - The home screen extends under the status bar; content limited to 560 dp wide (Fold unfolded).
 - Header: bell, link badge (Bluetooth, account, offline), settings.
@@ -162,7 +162,7 @@ Contents in five groups, from everyday use to diagnostics; the robot card opens 
 - **Robot**: Manual control · Cutting height · Camera.
 - **Garden and history**: Task history · Obstacles (→ Obstacle simulation) · Signal surveys · Rain and weather.
 - **Supervised tests**: Command cutoff · Navigation test · Border following · Obstacle tests · Blade
-  test · Trial mowing (painted zone).
+  test.
 - **Diagnostics**: Bluetooth diagnostics · Detailed telemetry · Sensors and perception · Logs · Advanced settings.
 
 Test page layout: conditions (robot not connected, mowing in progress), safety warning, tracking (map,

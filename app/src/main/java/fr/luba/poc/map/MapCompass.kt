@@ -31,9 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.theme.MammotionColors
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /**
  * Small map compass: the red needle follows the north of the rotated map ([rotation], degrees, clockwise on screen).

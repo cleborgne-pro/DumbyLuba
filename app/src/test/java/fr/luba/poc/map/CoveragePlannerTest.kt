@@ -97,7 +97,7 @@ class CoveragePlannerTest {
     }
     @Test fun bordersIncludeOuterAndNoGoAndEverySegmentRespectsMargin() {
         val result=Geometry.plan(zone,listOf(hole))
-        assertEquals(1,result.outerLoops);assertEquals(1,result.noGoLoops)
+        assertEquals(1,result.outerLoops); assertEquals(1,result.noGoLoops)
         assertTrue(result.borders.all { it.first()==it.last() })
         assertTrue(result.runs.all { run -> run.zipWithNext().all { (a,b)->Geometry.safe(a,b,zone,listOf(hole),0.6) } })
     }
@@ -139,7 +139,7 @@ class CoveragePlannerTest {
         Geometry.plan(listOf(Point(0.0,0.0),Point(10.0,10.0),Point(0.0,10.0),Point(10.0,0.0)),emptyList())
     }
     @Test fun pinchAndRotateKeepCentroidAnchoredAndInverseSelectionCorrect() {
-        val center=Point(200.0,200.0);val touch=Point(280.0,130.0)
+        val center=Point(200.0,200.0); val touch=Point(280.0,130.0)
         val old=MapCamera(1.5,27.0,Point(30.0,-20.0))
         val before=old.inverse(touch,center)
         val next=old.transform(touch,center,Point(0.0,0.0),2.0,83.0)
@@ -150,12 +150,12 @@ class CoveragePlannerTest {
 
     @Test fun borderAndNoGoPassCountsAreConfigurableAndStaySafe() {
         val triple=Geometry.plan(zone,listOf(hole),spacing=0.5,margin=0.6,borderPasses=3,noGoPasses=2)
-        assertEquals(3,triple.outerLoops);assertEquals(2,triple.noGoLoops)
+        assertEquals(3,triple.outerLoops); assertEquals(2,triple.noGoLoops)
         assertTrue(triple.borders.all { it.first()==it.last() && Geometry.safe(it.first(),it.last(),zone,listOf(hole),0.6) })
         // Each extra ring must be further from the boundaries than the previous one.
         val outerRings=triple.borders.take(3)
         fun minGap(ring:List<Point>):Double {
-            val limits=listOf(zone,hole);var m=Double.MAX_VALUE
+            val limits=listOf(zone,hole); var m=Double.MAX_VALUE
             for(p in ring) for(poly in limits) for(i in poly.indices) m=minOf(m,Geometry.distance(p,poly[i],poly[(i+1)%poly.size]))
             return m
         }
@@ -193,7 +193,7 @@ class CoveragePlannerTest {
             -p.x*kotlin.math.sin(angle)+p.y*kotlin.math.cos(angle))
         val center=rotated(Point(10.0,6.0))
         val sides=plan.passes.mapNotNull { pass ->
-            val a=rotated(pass.first());val b=rotated(pass.last())
+            val a=rotated(pass.first()); val b=rotated(pass.last())
             if(kotlin.math.abs(a.y-center.y)>0.8) null else if((a.x+b.x)/2<center.x) -1 else 1
         }
         assertEquals(setOf(-1,1),sides.toSet())
@@ -265,9 +265,11 @@ class CoveragePlannerTest {
                     drives.sumOf { it.pivotDegrees }, fast.sumOf { it.wear }, drives.sumOf { it.wear }, fast.sumOf { it.durationS }, drives.sumOf { it.durationS }))
             assertTrue("$name $angle°: front ${order.frontWidth}", order.frontWidth <= ZamboniOrder.window(0.25, TurnOptimizer.FOLLOW_RADIUS_M))
             // Passes square to the boundary: every U-turn of the regular cells rolls. At 30° the pass ends are staggered by
-            // 0.43 m per row along the slanted boundary: a rolling U needs its passes shortened by more than the cut can
-            // sweep (TurnOptimizer.MAX_TRIM_M), so most U-turns stay pivots there (measured: 5 of 63 without the hole).
-            if (angle == 0) assertTrue("$name $angle°: ${order.rolling} of ${order.turns}", order.rolling >= 0.8 * order.turns)
+            // 0.14 m per row on the short sides and 0.43 m on the long ones: the oblique U-turns (TurnOptimizer.OBLIQUE_UNSWEPT_M)
+            // roll on the first ones and the gentler of the second,
+            // their acute corners within the 0.2 point of surface above (measured: 5 of 63 before them, 33 of 63 with them,
+            // 47 of 80 with the hole).
+            assertTrue("$name $angle°: ${order.rolling} of ${order.turns}", order.rolling >= (if (angle == 0) 0.8 else 0.5) * order.turns)
             assertTrue("$name $angle°: pivots", drives.sumOf { it.pivotDegrees } <= fast.sumOf { it.pivotDegrees })
             assertTrue("$name $angle°: wear", drives.sumOf { it.wear } <= fast.sumOf { it.wear })
         }

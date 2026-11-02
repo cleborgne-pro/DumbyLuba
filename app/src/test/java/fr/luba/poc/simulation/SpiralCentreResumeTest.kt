@@ -114,7 +114,7 @@ class SpiralCentreResumeTest {
         return (inner + cores).distinct()
     }
 
-    @Test(timeout = 1_800_000) fun checkpointAndResumeKeepTheChainsOutwards() {
+    @Test(timeout = 900_000) fun checkpointAndResumeKeepTheChainsOutwards() {
         val report = StringBuilder()
         for (names in tasks) {
             val t = Centre(names)
@@ -182,7 +182,7 @@ class SpiralCentreResumeTest {
      * before the passes of their core, moved to the end, to save about 7 m of transit). Fixed: the order constraints are
      * kept in the checkpoint ([Preview.outwardPaths]) and the smart resume refuses an order that breaks one.
      */
-    @Test(timeout = 1_800_000) fun smartResumeAfterARechargeKeepsTheCoresBeforeTheirChains() {
+    @Test(timeout = 900_000) fun smartResumeAfterARechargeKeepsTheCoresBeforeTheirChains() {
         val failures = mutableListOf<String>()
         for (names in tasks) {
             val t = Centre(names)

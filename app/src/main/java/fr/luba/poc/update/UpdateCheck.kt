@@ -1,9 +1,16 @@
 package fr.luba.poc.update
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
+import androidx.annotation.VisibleForTesting
+import androidx.core.content.edit
 import fr.luba.poc.BuildConfig
 import fr.luba.poc.i18n.tr
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -12,8 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
  * Description of a GitHub release, read from its `release.json` asset (written by tools/publication/release.sh).
@@ -50,9 +55,21 @@ data class UpdateState(
     /** Published build (release identifier): only it can be updated by a GitHub release. */
     val publishedBuild: Boolean = false,
     val installedCode: Int = BuildConfig.VERSION_CODE,
+    val installedName: String = BuildConfig.VERSION_NAME,
 ) {
     /** A newer release of this very app is published. */
     val available: ReleaseInfo? get() = latest?.takeIf { publishedBuild && UpdateCheck.isNewer(it, installedCode) }
+
+    /**
+     * Development build (fr.luba.poc) older than the published release: GitHub cannot update it (other identifier),
+     * but its release page stays reachable, the published app installing next to it. Null otherwise.
+     */
+    val publishedNewer: ReleaseInfo? get() = latest?.takeIf {
+        !publishedBuild && it.applicationId == UpdateCheck.PUBLISHED_ID && UpdateCheck.compareVersions(it.version, installedName) > 0
+    }
+
+    /** Release page opened by the Updates row: an update of this app, or a newer published release for a development build. */
+    val releaseToOpen: ReleaseInfo? get() = available ?: publishedNewer
 }
 
 /**
@@ -70,12 +87,12 @@ object UpdateCheck {
     const val INTERVAL_MS = 24 * 60 * 60_000L
     private const val MAX_BYTES = 64 * 1024
 
-    @androidx.annotation.VisibleForTesting internal var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    @androidx.annotation.VisibleForTesting internal var http: (String) -> String = ::download
-    @androidx.annotation.VisibleForTesting internal var clock: () -> Long = System::currentTimeMillis
+    @VisibleForTesting internal var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @VisibleForTesting internal var http: (String) -> String = ::download
+    @VisibleForTesting internal var clock: () -> Long = System::currentTimeMillis
     private val state = MutableStateFlow(UpdateState())
     val flow: StateFlow<UpdateState> get() = state
-    private var prefs: android.content.SharedPreferences? = null
+    private var prefs: SharedPreferences? = null
 
     fun init(context: Context) {
         if (prefs != null) return
@@ -104,9 +121,12 @@ object UpdateCheck {
             val now = clock()
             val result = runCatching { ReleaseInfo.parse(http(LATEST_RELEASE_JSON)) ?: error(tr("unreadable release.json", "release.json illisible")) }
             result.onSuccess { info ->
-                prefs?.edit()?.putLong("checkedAt", now)?.putString("latest", JSONObject().put("version", info.version)
+                prefs?.edit {
+                    putLong("checkedAt", now)
+                    putString("latest", JSONObject().put("version", info.version)
                     .put("versionCode", info.versionCode).put("applicationId", info.applicationId)
-                    .put("firmware", info.firmware ?: "").toString())?.apply()
+                    .put("firmware", info.firmware ?: "").toString())
+                }
                 state.update { it.copy(checking = false, checkedAtMs = now, latest = info, error = null) }
             }.onFailure { e ->
                 Log.w(TAG, "check failed: $e")
@@ -116,7 +136,7 @@ object UpdateCheck {
     }
 
     fun setAutomatic(on: Boolean) {
-        prefs?.edit()?.putBoolean("automatic", on)?.apply()
+        prefs?.edit { putBoolean("automatic", on) }
         state.update { it.copy(automatic = on) }
         if (on) maybeCheck()
     }
@@ -157,6 +177,10 @@ object UpdateCheck {
     /** Readable status for Me → About. */
     fun summary(s: UpdateState, nowMs: Long = clock()): String {
         s.available?.let { return tr("Version ${it.version} available · open the release", "Version ${it.version} disponible · ouvrir la publication") }
+        s.publishedNewer?.let {
+            return tr("Development build ${s.installedName} · version ${it.version} published, open the release (separate app, installs next to this one)",
+                "Version de développement ${s.installedName} · version ${it.version} publiée, ouvrir la publication (application distincte, s'installe à côté)")
+        }
         if (s.checking) return tr("Checking GitHub…", "Vérification sur GitHub…")
         s.error?.let { return tr("Check failed ($it) · try again", "Vérification impossible ($it) · réessayer") }
         val latest = s.latest ?: return tr("Check for a new version on GitHub", "Rechercher une nouvelle version sur GitHub")
@@ -204,8 +228,8 @@ object UpdateCheck {
         error(tr("too many redirects", "trop de redirections"))
     }
 
-    private fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
-        val out = java.io.ByteArrayOutputStream()
+    private fun InputStream.readNBytesCompat(max: Int): ByteArray {
+        val out = ByteArrayOutputStream()
         val buf = ByteArray(8192)
         while (out.size() < max) {
             val n = read(buf, 0, minOf(buf.size, max - out.size()))
@@ -216,5 +240,5 @@ object UpdateCheck {
     }
 
     /** Test reset: forgets the preferences and the state. */
-    @androidx.annotation.VisibleForTesting internal fun resetForTests() { prefs = null; state.value = UpdateState() }
+    @VisibleForTesting internal fun resetForTests() { prefs = null; state.value = UpdateState() }
 }

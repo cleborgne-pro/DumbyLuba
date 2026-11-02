@@ -7,6 +7,8 @@ import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import java.net.ConnectException
+import java.net.Socket
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -18,8 +20,6 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ServiceController
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowPowerManager
-import java.net.ConnectException
-import java.net.Socket
 
 /**
  * Gateway service on the robot: foreground start, locks, accepting a pilot, stop.

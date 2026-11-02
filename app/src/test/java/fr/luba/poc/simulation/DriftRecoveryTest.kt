@@ -77,12 +77,49 @@ class DriftRecoveryTest {
         assertTrue(plan.rejoinMeters < 1.5)
     }
 
+    /** Heading changes (degrees) from the robot heading along the link, up to the heading of the joined edge. */
+    private fun turning(plan: DriftPlan, heading: Double): Double {
+        val link = plan.edges.indices.takeWhile { plan.origins[it] == -1 }.map { plan.edges[it] }
+        val headings = listOf(heading) + (link + plan.edges[link.size]).filter { it.meters > 1e-6 }
+            .map { Math.toDegrees(kotlin.math.atan2(it.b.y - it.a.y, it.b.x - it.a.x)) }
+        return headings.zipWithNext().sumOf { (a, b) -> kotlin.math.abs(((b - a) % 360 + 540) % 360 - 180) }
+    }
+
+    /**
+     * Robot 32 cm beside its pass, heading along it: rejoining the projection right next to it costs two pivots of
+     * about 90°; a point about 1 m further on is reached with a slight angle and a short link.
+     */
+    @Test fun lateralExitRejoinsFurtherAheadRatherThanSideways() {
+        val position = Point(6.0, 1.32)
+        val plan = DriftRecovery.plan(routes, routes, edges, null, 0, position, 0.0, listOf(Point(4.0, 1.1), position))
+        val entry = plan.edges[plan.origins.indexOfFirst { it >= 0 }].a
+        assertEquals(1.0, entry.y, 1e-9)
+        assertTrue("entry ahead of the robot: $entry", entry.x in 6.4..7.0 + 1e-6)
+        assertTrue("no square pivots: ${turning(plan, 0.0)}°", turning(plan, 0.0) < 90.0)
+        assertTrue(plan.skippedCuttingMeters <= DriftRecovery.REJOIN_WINDOW_M + 1e-9)
+    }
+
+    /**
+     * Robot that went 35 cm past the end of its pass before the U-turn: going back to the corner means a half-turn, the
+     * U-turn then the next pass; it heads straight for the next pass instead.
+     */
+    @Test fun overshotCornerHeadsForTheNextPassInsteadOfTurningBack() {
+        val position = Point(10.85, 1.1)
+        val plan = DriftRecovery.plan(routes, routes, edges, null, 1, position, 0.0, listOf(Point(9.0, 1.0), position))
+        val entry = plan.edges[plan.origins.indexOfFirst { it >= 0 }].a
+        assertTrue("entry on the next pass: $entry", plan.origins.first { it >= 0 } == 2)
+        assertTrue("entry close to the U-turn: $entry", entry.x >= 9.0)
+        assertTrue("one turn-around, not a half-turn plus the U-turn: ${turning(plan, 0.0)}°", turning(plan, 0.0) <= 200.0)
+    }
+
     @Test fun repeatedExitAtTheSameSpotRejoinsFurtherOnTheRoute() {
         val position = Point(6.0, 1.32)
         val first = DriftRecovery.plan(routes, routes, edges, null, 0, position, 0.0, listOf(position))
         val again = DriftRecovery.plan(routes, routes, edges, null, 0, position, 0.0, listOf(position), skipM = DriftRecovery.SAME_SPOT_M)
         val entry = { p: DriftPlan -> p.edges[p.origins.indexOfFirst { it >= 0 }].a }
-        assertTrue(entry(again).x >= entry(first).x + DriftRecovery.SAME_SPOT_M - 0.05)
+        // At least SAME_SPOT_M beyond the projection of the robot (x = 6), and never before the first resume.
+        assertTrue("${entry(again)}", entry(again).x >= position.x + DriftRecovery.SAME_SPOT_M - 1e-6)
+        assertTrue("${entry(first)} then ${entry(again)}", entry(again).x >= entry(first).x)
     }
 
     @Test fun noTrailAndBodyOutsideIsRefused() {

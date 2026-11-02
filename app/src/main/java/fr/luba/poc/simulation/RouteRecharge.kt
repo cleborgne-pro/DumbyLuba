@@ -64,14 +64,15 @@ data class RechargePaths(val returning: List<SimEdge>, val resuming: List<SimEdg
 
 /** Link from the interrupted point, then return to exactly the same point, blades OFF. */
 /** [routes]: navigation of the current mission (discovered obstacles included), by default the prepared one. */
+/** [lanes]: history of the approach lanes of the returns ([ReturnLanes]); null: direct return. */
 fun RobotRoute.rechargePaths(engine: MowingSimulation, position: Point, heading: Double,
-                             routes: TrajectoryPlanner = engine.routes): RechargePaths {
+                             routes: TrajectoryPlanner = engine.routes, lanes: ReturnLaneHistory? = null): RechargePaths {
     val axis = (engine.dockEntryHeading + 180.0) % 360.0
-    val returning = routes.between(position, engine.baseApproach, heading, axis)
-    val resuming = routes.between(engine.baseApproach, position, axis, heading)
-    routes.requirePath(returning, heading, axis)
-    routes.requirePath(resuming, axis, heading)
     fun edges(points: List<Point>) = points.zipWithNext().filter { (a,b) -> a.distance(b) > 1e-8 }
         .map { (a,b) -> SimEdge(a,b,false) }
-    return RechargePaths(edges(returning), edges(resuming))
+    val returning = returning(engine, routes, position, heading, lanes) { s, h, t, th ->
+        routes.between(s, t, h, th).also { routes.requirePath(it, h, th) }.let(::edges) }
+    val resuming = routes.between(engine.baseApproach, position, axis, heading)
+    routes.requirePath(resuming, axis, heading)
+    return RechargePaths(returning, edges(resuming))
 }

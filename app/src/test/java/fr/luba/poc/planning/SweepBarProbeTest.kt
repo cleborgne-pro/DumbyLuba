@@ -13,7 +13,7 @@ class SweepBarProbeTest {
         assumeTrue(System.getProperty("sweepBarProbe")=="true")
         val json=JSONObject(javaClass.getResourceAsStream("/planner-reference-map.json")!!.bufferedReader().use { it.readText() })
         val shapes=json.getJSONArray("shapes").let { a -> (0 until a.length()).map { i ->
-            val s=a.getJSONObject(i);val p=s.getJSONArray("points")
+            val s=a.getJSONObject(i); val p=s.getJSONArray("points")
             MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until p.length()).map { j ->
                 Point(p.getJSONArray(j).getDouble(0),p.getJSONArray(j).getDouble(1)) },s.getString("name"))
         } }
@@ -43,15 +43,15 @@ class SweepBarProbeTest {
 
     private fun render(file: java.io.File,shapes: List<MapShape>,mission: List<MissionLeg>) {
         val zone=shapes.first().points
-        val minX=zone.minOf { it.x }-1;val maxX=zone.maxOf { it.x }+1;val minY=zone.minOf { it.y }-1;val maxY=zone.maxOf { it.y }+1
+        val minX=zone.minOf { it.x }-1; val maxX=zone.maxOf { it.x }+1; val minY=zone.minOf { it.y }-1; val maxY=zone.maxOf { it.y }+1
         val scale=1400/maxOf(maxX-minX,maxY-minY)
-        val w=((maxX-minX)*scale).toInt();val h=((maxY-minY)*scale).toInt()
+        val w=((maxX-minX)*scale).toInt(); val h=((maxY-minY)*scale).toInt()
         fun xy(p: Point)="%.1f,%.1f".format(java.util.Locale.ROOT,(p.x-minX)*scale,(maxY-p.y)*scale)
         val out=StringBuilder("<svg xmlns='http://www.w3.org/2000/svg' width='$w' height='$h'><rect width='$w' height='$h' fill='white'/>")
         out.append("<polygon points='${zone.joinToString(" ") { xy(it) }}' fill='#dcf0dc'/>")
         shapes.drop(1).forEach { out.append("<polygon points='${it.points.joinToString(" ") { p -> xy(p) }}' fill='#f4b0b0'/>") }
         val cutting=mission.count { it.cutting }
-        var k=0;var transit=0
+        var k=0; var transit=0
         mission.forEach { leg ->
             val pts=leg.path.joinToString(" ") { xy(it) }
             if(leg.cutting) {
@@ -66,7 +66,7 @@ class SweepBarProbeTest {
                 }
             }
         }
-        file.parentFile.mkdirs();file.writeText(out.append("</svg>").toString())
+        file.parentFile.mkdirs(); file.writeText(out.append("</svg>").toString())
     }
 }
 /** Order measurements of a prepared route: cells started while a cell of the same orientation remained entirely

@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -62,16 +63,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import fr.luba.poc.Clock
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.PrimaryPillButton
 import fr.luba.poc.ui.components.SecondaryPillButton
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
-import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
+import kotlinx.coroutines.delay
 
 /** Colour of a border type on the map. */
 val BorderType.color: Color get() = Color(argb)
@@ -111,8 +115,8 @@ private class BorderEditorView(val projection: MapProjection, val camera: MapCam
 @Composable
 fun BorderTypeEditorHost(map: RobotMap) {
     if (!BorderTypeRepository.editorOpen) return
-    androidx.compose.ui.window.Dialog(onDismissRequest = { BorderTypeRepository.editorOpen = false },
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
+    Dialog(onDismissRequest = { BorderTypeRepository.editorOpen = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
             dismissOnBackPress = false, dismissOnClickOutside = false)) {
         BorderTypeEditor(map, BorderTypeRepository.annotations, BorderTypeRepository::save, onClose = { BorderTypeRepository.editorOpen = false })
     }
@@ -160,10 +164,12 @@ fun BorderTypeEditor(
     val resolved = remember(map, annotations) { BorderTypes.resolveAll(map, annotations) }
     val portions = remember(map, annotations) { BorderTypes.portions(map, annotations) }
     val shape = contours.firstOrNull { it.id == startShape }
+    val start = startPoint
+    val end = endPoint
     val selection: BorderSelection? = when {
         shape == null -> null
         whole -> BorderTypes.selectWhole(shape)
-        startPoint != null && endPoint != null -> BorderTypes.select(shape, startPoint!!, endPoint!!, otherSide)
+        start != null && end != null -> BorderTypes.select(shape, start, end, otherSide)
         else -> null
     }
     val editing = annotations.firstOrNull { it.id == editingId }
@@ -172,7 +178,7 @@ fun BorderTypeEditor(
         val w = size.width.toFloat().coerceAtLeast(1f)
         val h = size.height.toFloat().coerceAtLeast(1f)
         val top = with(density) { 96.dp.toPx() }
-        BorderEditorView(mapScreenProjection(bounds, androidx.compose.ui.geometry.Size(w, h), top, h * 0.40f), camera, Point(w / 2.0, h / 2.0))
+        BorderEditorView(mapScreenProjection(bounds, Size(w, h), top, h * 0.40f), camera, Point(w / 2.0, h / 2.0))
     }
     val reachPx = with(density) { 28.dp.toPx() }
     // Read by the gesture block and the callbacks (started once): always the framing of the last composition.
@@ -347,7 +353,7 @@ fun BorderTypeEditor(
                             SecondaryPillButton(tr("Cancel", "Annuler"), { resetSelection() }, Modifier.weight(1f))
                             PrimaryPillButton(tr("Validate", "Valider"), {
                                 val t = type ?: return@PrimaryPillButton
-                                val a = BorderTypes.annotate(shape, selection, t, (annotations.maxOfOrNull { it.id } ?: 0L) + 1, System.currentTimeMillis())
+                                val a = BorderTypes.annotate(shape, selection, t, (annotations.maxOfOrNull { it.id } ?: 0L) + 1, Clock.now())
                                 commit(BorderTypes.add(annotations, a, map), tr("Portion saved: ${t.label}", "Portion enregistrée : ${t.label}"))
                             }, Modifier.weight(1f), enabled = type != null)
                         }

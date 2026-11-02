@@ -1,13 +1,13 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.obstacles.RobotEnvelope
+import kotlin.math.*
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.prep.PreparedGeometryFactory
-import kotlin.math.*
 
 /** The fast index must never accept what JTS refuses (beyond the tolerance),
  * and must agree with JTS on almost all real queries.

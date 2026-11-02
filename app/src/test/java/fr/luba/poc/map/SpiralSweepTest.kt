@@ -3,9 +3,9 @@ package fr.luba.poc.map
 import org.junit.Assert.*
 import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.Polygon
-import org.locationtech.jts.geom.Geometry as JtsGeometry
 
 /** [SpiralSweep] on synthetic areas (the area where pass centres may lie), 25 cm, 40 cm cut, 0.35 m radius. */
 class SpiralSweepTest {

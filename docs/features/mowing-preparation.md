@@ -8,7 +8,7 @@ simulation, real mowing and signal surveys.
 |---|---|
 | **Access** | Map → **Mow** (reopens the already computed preview if there is one); Home → **Start mowing** |
 | **Status** | Implemented; validated in JVM tests on a real reference map (7 zones) and on the test phone |
-| **Code** | `planning/` (`RoutePlanning.kt`, `AutomaticPlanner.kt`, `CoverageEngine.kt`), `map/CoveragePlanner.kt`, `MixedSweep.kt`, `MultiZonePlanner.kt`, `TrajectoryEnvelope.kt`, `MowingPreview.kt`, `StartPointGroup.kt`, `MowingTaskSettings.kt`, `OuterOffsetSetting.kt`, `CutPasses.kt`, `planning/ZoneStart.kt`, `map/MapScreen.kt` (task pages) |
+| **Code** | `planning/` (`RoutePlanning.kt`, `AutomaticPlanner.kt`, `CoverageEngine.kt`), `map/CoveragePlanner.kt`, `MixedSweep.kt`, `MultiZonePlanner.kt`, `TrajectoryEnvelope.kt`, `MowingPreview.kt`, `StartPointGroup.kt`, `MowingTaskSettings.kt`, `OuterOffsetSetting.kt`, `CutPasses.kt`, `planning/ZoneStart.kt`, `map/MapScreen.kt` (task pages), `map/ZonePaint.kt` and `map/PaintedZone.kt` (painted zone) |
 | **References** | [Architecture](../path-planning/ARCHITECTURE.md) · [Algorithms](../path-planning/ALGORITHMS.md) · [Parameters](../path-planning/PARAMETERS.md) · [Single engine](../path-planning/ENGINE.md#one-engine-one-prepared-route) · [Continuous mowing](../path-planning/ENGINE.md#continuous-mowing) · [Nearest start](../path-planning/ENGINE.md#nearest-start) |
 
 <p align="center">
@@ -33,6 +33,27 @@ mowed in this order."
   choice.
 - [DumbyLuba zones](map.md#mammotion-zones-and-dumbyluba-zones) (recorded by driving, kept on the phone) are chosen and
   mowed like the Mammotion zones; their chip and their name carry the **DL** mark ("3. Verger · DL").
+
+#### Paint a zone
+
+**Whole zones** / **Paint a zone** at the top of the panel (mowing only): to mow only part of a lawn (the damaged
+corner, the strip in front of the terrace…), paint it on the map: "Paint the part to mow with one finger; two fingers
+move the view."
+
+- **Paint / Erase / Move**, **Brush size** (Ø 0.6 to 4 m, Ø 1.2 m by default), **Undo**, **Clear all**. Only paint
+  inside the zones is kept, outlined in orange, no-go zones excluded: "33.2 m² outside no-go zones · 1 painted zone";
+  pieces under 0.5 m² are ignored ("No painted area inside the zones…").
+- **Next** opens the usual task settings: the painted pieces are the zones of the task ("1. Painted zone 1 →
+  2. Painted zone 2", ordered from the robot), with every mode and setting, the route preview, the simulation and the
+  start. Minimum coverage 80 % instead of 95 %: a small painted area has proportionally more rounded edges.
+- The robot's map is not modified: the route is prepared and checked on it, blades kept running inside the painted
+  pieces. A start chosen in the preview is not saved for a painted zone. The painting is kept for the session; back
+  to **Whole zones**, the selection is emptied.
+- Details: [painted zone](../DEBUG_MOWING.md).
+
+<p align="center">
+  <img src="../images/painted-zone.png" width="170" alt="Paint a zone">
+</p>
 
 ### 2. Task settings
 
@@ -99,6 +120,9 @@ boundary is driven") or **Grid** (merged boundary and crossed grid), **Grid spac
 | *Mowing* · Task speed | 0.2 to 0.6 m/s | 0.3 m/s |
 | *Mowing* · Outer margin | 5 to 100 cm between the robot's side and the boundary, in 5 cm steps ("5 cm from the edge"); disabled with 0 perimeter loops | 5 cm |
 | *Working hours* · Limit mowing hours | off / on, window in 15 min steps ([working hours](real-mowing.md#working-hours)) | off |
+| *Smart features* · Adaptive speed | on / off ([adaptive speed](real-mowing.md#adaptive-speed)) | on |
+| *Smart features* · Return lanes | on / off ([return lanes](real-mowing.md#return-lanes-to-the-base)) | on |
+| *Smart features* · Return to base on confirmed rain | on / off, same switch as in Rain and weather; needs rain monitoring and the garden position ([rain return](rain-and-weather.md#return-to-base-on-confirmed-rain)) | off |
 | *Advanced settings* · Pass spacing | 5 to 35 cm, 1 cm steps | 25 cm |
 | *Advanced settings* · Perimeter loops | 0 to 4 | 1 |
 | *Advanced settings* · Loops around no-go zones | 0 to 4 | 1 |
@@ -117,8 +141,14 @@ cutting passes, a note gives the heights ("Tall grass: 70 → 55 → 40 mm. Ever
 duration multiplied by 3."); a cutting height too high for several passes shows "Cutting height too high for several
 passes (at least 5 mm apart, 70 mm at most)." (100 mm on an H version)
 
-The footer gives the area and a first duration estimate ("412 m² · ≈ 1 h 05 (estimate before computation)"), then
-the **Route preview** button.
+The route is computed by itself as soon as this page opens, and again about 0.4 s after every change of a setting
+that shapes it (zones, mode, direction, spacing, borders, heights, speed…): the computation in progress is abandoned,
+the settings stay editable meanwhile. Closing the task pages abandons a computation in progress; a route already
+computed is kept for their next opening. The footer gives the area and a first duration estimate ("412 m² · ≈ 1 h 05
+(estimate before computation)"), the state of the route ("Computing the route · stage", then "Route ready"), then the
+**Route preview** button, which shows the route (computed or still being computed) and computes it again after a
+failure. A map, obstacle or base change during a computation no longer shows "Map changed: recomputation required":
+the route of the new inputs is computed instead.
 
 **Height passes for tall grass** (since 0.45.0): with 2 or 3 passes, the task is mowed several times, lower and
 lower, down to the cutting height. Heights are spread evenly between the first pass and the cutting height: for
@@ -174,7 +204,8 @@ Jardin d'Eden, Aire de jeux and Piscine; test `ZigzagBehindLoopTest`).
   shows the margin along boundaries and around no-go zones), numbers = zone order, purple **Start** marker = first
   cutting point, with an arrow giving the direction the robot sets off in along its first pass, blue dot = requested start point (chosen or saved). The route is traced progressively in mowing
   order once computed (instant when Android animations are off). "N border fragment(s) too narrow to maneuver: not
-  driven." flags skipped border loops.
+  driven." flags skipped border loops. Once the links are checked, "Slower: 12 m (narrow passages 4 m, near Danger
+  borders 8 m)" gives the metres driven slower ([adaptive speed](real-mowing.md#adaptive-speed)).
 - **Start point** group: *Start* shows "Nearest to the robot", "Saved for <zone>" or "Chosen on the map · <zone>".
   **Change** (then **Cancel**), then tap the preview map inside a chosen zone (outside no-go zones): the route is
   recomputed from that point. **Nearest** returns to the default start for this preview. **Save for <zone>** stores
@@ -226,7 +257,9 @@ Jardin d'Eden, Aire de jeux and Piscine; test `ZigzagBehindLoopTest`).
    A start point chosen in the preview or saved for the first zone replaces the robot's position in this
    computation (below).
 6. **Links**: A* search in the free area (zones, robot passages, manual access), with at least 50 cm from the
-   borders during moves with blades stopped, except in a narrow passage. Areas flagged as difficult (Difficulties
+   borders during moves with blades stopped, except in a narrow passage, which is crossed along its middle rather
+   than at the margin from one side (the shortest path through the passage shrunk by 30, 20, 12 or 6 cm, the widest
+   that still connects within 50 cm or 5 % of extra length). Areas flagged as difficult (Difficulties
    heatmap) are avoided by these blades-stopped moves, and a learned obstacle near the docking corridor gets a
    reduced margin ([obstacles near the base](obstacles.md#obstacles-near-the-base)).
 7. **Validation**: whole mission evaluated (coverage on a 2 cm grid), chassis checked on every translation and every
@@ -247,7 +280,7 @@ the x axis of the map, 90° = along its y axis); it is shown as is in the settin
   the angle is chosen; a finger drawn across the map ("One finger: direction · two fingers: move") gives the
   direction of the line, either way along it. The guide lines are drawn in the same map frame as the route preview,
   so they have the direction of the computed passes (`OrientationGuideTest` compares them with a real preview at 35°
-  and 145°). *Route preview* then computes the route at this angle.
+  and 145°). The route is then computed again at this angle.
   In Checkerboard the families are the angle and the angle + 90° (143° gives 53° and 143°). The angle is **never
   replaced**: if a zone cannot be mowed at this angle (unsafe pass, coverage under the 95 % threshold), the route is not
   validated, *Start* stays disabled and the check reads "Manual angle 37°: route not validated at this angle. Use
@@ -348,11 +381,24 @@ applies (Automatic, Each session, Manual). The runs of a cell are mowed in their
 when that order leaves no safe link to the rest of the zone (Aire de jeux at a manual 0°, 115° or 155°), the zone is
 ordered as in Zigzag instead of refusing the route, and the preview says so.
 
+**Oblique U-turns.** Along a slanted or curved border the pass ends are staggered. A rolling U-turn with both passes
+shortened alike would leave the shortened parts unmowed there, so it used to fall back to the pivots. Zamboni now also
+tries an oblique U: the longer pass is shortened more (2 × 0.35 m × stagger / distance between the passes, 0.20 m more
+for passes 0.75 m apart along a border at 30°), so that the straight part of the U runs along the border, and the
+manoeuvre stays within the pass ends, checked like the passes. Its arc cannot reach into the acute corner by the
+longer end: up to 0.3 m of that pass end is left unswept (about 0.02 m² per U-turn at 20°, 0.06 m² at 30°), counted
+in the cost of the order, which keeps the pivots where they are cheaper; passes shorter than 1.5 m once shortened
+keep the pivots, and a route left without a safe order by them is computed without them. Measured at 25 cm on a lawn with a long
+slanted side (shared by a user): U-turns without pivot 25 of 68 → 52 of 71 on its main zone (pivoted 7,803° → 3,559°,
+coverage 99.99 → 99.85 %, mission −1.0 %), 35 of 55 → 38 of 47 on another (coverage 99.94 → 99.92 %); a 16 × 11 m
+rectangle with passes at 30°: 5 of 63 → 33 of 63; the reference map: 38 → 69 % of the U-turns of the regular cells
+without pivot, pivots ×0.81 → ×0.59 of Zigzag, coverage within 0.15 point of Zigzag.
+
 Measured on the reference map (25 cm, recorded boundaries, `ZamboniReferenceTest`): degrees pivoted in place on the
 passes ×0.81 of Zigzag, wear ×0.94, pass duration ×1.037 (×1.035 of Lawn friendly), mission −10.4 to +2.9 %, same
-coverage within 0.11 point, computation ×1.24; 38 % of the U-turns of the regular cells roll. Most pass ends of this
-map lie along slanted borders, where a rolling U-turn between passes three rows apart would leave unmowed ends; square
-to the border every U-turn rolls (a 16 × 11 m rectangle: pivots 7020° → 0°, wear ×0.41, passes +2.6 %). Tracking
+coverage within 0.11 point, computation ×1.24; 38 % of the U-turns of the regular cells roll (before the oblique
+U-turns; with them: [ENGINE.md](../path-planning/ENGINE.md#oblique-u-turns)). Most pass ends of this map lie along
+slanted borders; square to the border every U-turn rolls (a 16 × 11 m rectangle: pivots 7020° → 0°, wear ×0.41, passes +2.6 %). Tracking
 bench (Potager, Jardin d'Eden): largest deviation 0.20 m, no pivot in the middle of a pass. Details:
 [Zamboni order](../path-planning/ENGINE.md#zamboni-order). Experimental until the 0.35 m radius is validated on the
 robot: if the robot pivots on each arc, the gain disappears.

@@ -1,5 +1,7 @@
 package fr.luba.poc.autonomy
 
+import fr.luba.poc.map.PhoneGravity
+import fr.luba.poc.map.Point
 import fr.luba.poc.map.SignalSample
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -137,12 +139,12 @@ object LegFrames {
     class SampleFrame(val legId: Int, val seq: Int, val sample: SignalSample)
     fun parseSample(payload: ByteArray): SampleFrame = DataInputStream(ByteArrayInputStream(payload)).use { input ->
         val legId = input.readInt(); val seq = input.readInt()
-        val point = fr.luba.poc.map.Point(input.readDouble(), input.readDouble()); val at = input.readLong()
+        val point = Point(input.readDouble(), input.readDouble()); val at = input.readLong()
         fun value() = input.readInt().takeIf { it != ABSENT }
         val wifi = value(); val ble = value(); val mobile = value(); val rtk = value(); val stars = value()
         val hasHeading = input.readBoolean(); val heading = input.readDouble()
         val hasGravity = input.readBoolean(); val gx = input.readDouble(); val gy = input.readDouble(); val gz = input.readDouble()
         SampleFrame(legId, seq, SignalSample(point, at, wifi, ble, mobile, rtk, stars,
-            heading.takeIf { hasHeading }, if (hasGravity) fr.luba.poc.map.PhoneGravity(gx, gy, gz) else null))
+            heading.takeIf { hasHeading }, if (hasGravity) PhoneGravity(gx, gy, gz) else null))
     }
 }

@@ -42,7 +42,7 @@ class SignalSimulationTest {
         assertTrue(engine.advance(moving,1.0).signalSamples.isNotEmpty())
     }
     @Test fun simulatedValuesAreDeterministicAndEstimationIncludesTransitWithoutGeneratingData() {
-        val point=Point(8.0,5.0);val base=Point(4.0,4.0)
+        val point=Point(8.0,5.0); val base=Point(4.0,4.0)
         assertEquals(SignalCoverage.simulated(point,base,100.0),SignalCoverage.simulated(point,base,100.0))
         val engine=engine(CoverageMode.TOUR)
         val start=engine.start()

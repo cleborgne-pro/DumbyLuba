@@ -8,11 +8,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,9 +42,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.Clock
 import fr.luba.poc.alerts.AlertEntry
+import fr.luba.poc.alerts.AlertJournal
 import fr.luba.poc.alerts.AlertKind
 import fr.luba.poc.alerts.NotificationUi
 import fr.luba.poc.alerts.Severity
@@ -75,7 +78,7 @@ import java.util.Locale
 @Composable
 fun NotificationsDialog(alerts: NotificationUi, onDismiss: () -> Unit, onTest: (Severity) -> Unit, onSettings: () -> Unit,
                         onChannelSettings: (Severity) -> Unit = {}, onClear: () -> Unit = {},
-                        now: Long = System.currentTimeMillis(), startInSettings: Boolean = false) {
+                        now: Long = Clock.now(), startInSettings: Boolean = false) {
     var configuring by rememberSaveable { mutableStateOf(startInSettings) }
     // "Seen" time at opening: new items stay marked while browsing, even once acknowledged.
     val seenAtOpening = remember { alerts.seenAt }
@@ -100,24 +103,24 @@ fun NotificationsDialog(alerts: NotificationUi, onDismiss: () -> Unit, onTest: (
 private fun NotificationFeed(alerts: NotificationUi, seenAt: Long, now: Long, onSettings: () -> Unit) {
     if (!alerts.enabled) {
         StatusNote(if (alerts.permission) tr("Some alert levels are turned off in Android", "Certains niveaux d'alerte sont coupés dans Android") else tr("Notifications blocked: alerts stay visible here", "Notifications bloquées : les alertes restent visibles ici"),
-            NoteTone.WARNING)
+            tone = NoteTone.WARNING)
         if (!alerts.permission) SecondaryPillButton(tr("Allow notifications", "Autoriser les notifications"), onSettings, Modifier.fillMaxWidth())
     }
-    alerts.problem?.let { StatusNote(it, NoteTone.DANGER) }
+    alerts.problem?.let { StatusNote(it, tone = NoteTone.DANGER) }
     if (alerts.entries.isEmpty()) {
         Column(Modifier.fillMaxWidth().padding(vertical = Dimens.Lg * 2), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             Icon(Icons.Rounded.NotificationsActive, contentDescription = null, tint = MammotionColors.TextTertiary, modifier = Modifier.size(36.dp))
             Text(tr("No notifications", "Aucune notification"), style = MaterialTheme.typography.titleMedium)
             Text(tr("Robot alerts will appear here, most recent at the top.", "Les alertes du robot apparaîtront ici, la plus récente en haut."), style = MaterialTheme.typography.bodySmall,
-                color = MammotionColors.TextSecondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                color = MammotionColors.TextSecondary, textAlign = TextAlign.Center)
         }
         return
     }
     var expanded by rememberSaveable { mutableStateOf<Long?>(null) }
     // The journal is already sorted; sorting here protects the displayed order from any late entry.
     NotificationDays.group(alerts.entries.sortedByDescending { it.at }, now).forEach { (day, rows) ->
-        SettingsGroup(day) {
+        SettingsGroup(title = day) {
             rows.forEachIndexed { index, entry ->
                 if (index > 0) LubaDivider()
                 val key = entry.at * 31 + entry.kind.ordinal
@@ -126,7 +129,7 @@ private fun NotificationFeed(alerts: NotificationUi, seenAt: Long, now: Long, on
             }
         }
     }
-    InfoNote(tr("The last ${fr.luba.poc.alerts.AlertJournal.MAX_ENTRIES} notifications are kept on this phone. Tap a notification for its details.", "Les ${fr.luba.poc.alerts.AlertJournal.MAX_ENTRIES} dernières notifications sont conservées sur ce téléphone. Touchez une notification pour son détail."))
+    InfoNote(tr("The last ${AlertJournal.MAX_ENTRIES} notifications are kept on this phone. Tap a notification for its details.", "Les ${AlertJournal.MAX_ENTRIES} dernières notifications sont conservées sur ce téléphone. Touchez une notification pour son détail."))
 }
 
 /** Notification row: level badge, title, time, robot and reason; expanded: state, battery, position and action. */
@@ -176,23 +179,23 @@ private fun Detail(label: String, value: String) {
 @Composable
 private fun NotificationSettings(alerts: NotificationUi, onTest: (Severity) -> Unit, onSettings: () -> Unit,
                                  onChannelSettings: (Severity) -> Unit, onClear: () -> Unit) {
-    SettingsGroup(tr("Permission", "Autorisation")) {
+    SettingsGroup(title = tr("Permission", "Autorisation")) {
         StatusNote(when {
             alerts.enabled -> tr("Local alerts enabled", "Alertes locales activées")
             alerts.permission -> tr("Notifications allowed, some levels turned off", "Notifications autorisées, certains niveaux coupés")
             else -> tr("Notifications blocked", "Notifications bloquées")
-        }, if (alerts.enabled) NoteTone.SUCCESS else NoteTone.WARNING)
-        alerts.problem?.let { StatusNote(it, NoteTone.DANGER) }
+        }, tone = if (alerts.enabled) NoteTone.SUCCESS else NoteTone.WARNING)
+        alerts.problem?.let { StatusNote(it, tone = NoteTone.DANGER) }
         SecondaryPillButton(if (alerts.permission) tr("Android settings", "Réglages Android") else tr("Allow notifications", "Autoriser les notifications"), onSettings, Modifier.fillMaxWidth())
     }
-    SettingsGroup(tr("Alert levels", "Niveaux d'alerte")) {
+    SettingsGroup(title = tr("Alert levels", "Niveaux d'alerte")) {
         Severity.entries.reversed().forEach { level ->
             NavRow(level.label, icon = severityStyle(level).first, subtitle = channelHint(level), enabled = alerts.permission,
                 value = when (alerts.channels[level]) { true -> tr("On", "Activé"); false -> tr("Off", "Coupé"); null -> null },
                 onClick = { onChannelSettings(level) })
         }
     }
-    SettingsGroup(tr("Test reception (no movement)", "Tester la réception (sans mouvement)")) {
+    SettingsGroup(title = tr("Test reception (no movement)", "Tester la réception (sans mouvement)")) {
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             Severity.entries.forEach { level -> TestPill(level.label, { onTest(level) }, Modifier.weight(1f)) }
         }
@@ -236,7 +239,7 @@ private fun TestPill(label: String, onClick: () -> Unit, modifier: Modifier = Mo
 
 /** Day grouping and time labels of the panel, without Compose for the tests. */
 object NotificationDays {
-    fun time(at: Long): String = SimpleDateFormat("HH:mm", fr.luba.poc.i18n.I18n.locale).format(Date(at))
+    fun time(at: Long): String = SimpleDateFormat("HH:mm", I18n.locale).format(Date(at))
     /** "Today", "Yesterday", otherwise "Monday 13 October" (year added outside the current year), in the UI language. */
     fun label(at: Long, now: Long): String {
         val day = Calendar.getInstance(Locale.FRANCE).apply { timeInMillis = at }

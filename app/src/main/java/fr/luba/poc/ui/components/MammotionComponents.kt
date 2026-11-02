@@ -7,21 +7,15 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.runtime.getValue
-import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
@@ -32,21 +26,28 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.BatteryFull
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothDisabled
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.SatelliteAlt
 import androidx.compose.material.icons.rounded.Smartphone
-import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.produceState
+import androidx.compose.material.icons.rounded.StopCircle
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -54,10 +55,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.gateway.GatewayHealthStore
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.EyebrowStyle
 import fr.luba.poc.ui.theme.MammotionColors
+import kotlinx.coroutines.delay
 
 /** Positioning quality shown as in the Mammotion app (Fix / Float / Single / None). */
 enum class PositionQuality(private val labelEn: String, private val labelFr: String) {
@@ -161,10 +164,10 @@ fun DeviceStatusPill(
 /** Gateway phone battery (percentage, charging) while its last HEALTH frame is recent; null otherwise. */
 @Composable
 fun rememberGatewayBattery(): Pair<Int, Boolean>? {
-    val latest by fr.luba.poc.gateway.GatewayHealthStore.latest.collectAsState()
+    val latest by GatewayHealthStore.latest.collectAsState()
     // Stale frame with no new reception: re-evaluated every 10 s (compared with the current time, never with the last tick's,
     // older than the frame that just arrived).
-    val tick by produceState(0) { while (true) { kotlinx.coroutines.delay(10_000); value = value + 1 } }
+    val tick by produceState(0) { while (true) { delay(10_000); value = value + 1 } }
     return latest?.takeIf { tick >= 0 && it.fresh() && it.health.batteryPercent in 0..100 }?.let { it.health.batteryPercent to it.health.charging }
 }
 
@@ -322,7 +325,7 @@ fun PushedPage(
 
 /** Settings group: overline in spaced capitals, white card with a thin hairline. */
 @Composable
-fun SettingsGroup(title: String? = null, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun SettingsGroup(modifier: Modifier = Modifier, title: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (title != null) Text(title.uppercase(), style = EyebrowStyle, color = MammotionColors.TextSecondary,
             modifier = Modifier.padding(start = 6.dp))
@@ -352,14 +355,13 @@ fun NavRow(title: String, modifier: Modifier = Modifier, value: String? = null, 
     }
 }
 
-
 /** Safety warning at the top of pages that move the robot or the blades. */
 @Composable
 fun SafetyNotice(text: String, modifier: Modifier = Modifier) {
     val colors = MammotionColors
     Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = colors.WarningSoft, contentColor = colors.TextPrimary) {
         Row(Modifier.padding(Dimens.Md), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalAlignment = Alignment.Top) {
-            Icon(androidx.compose.material.icons.Icons.Rounded.WarningAmber, contentDescription = null, tint = colors.Warning, modifier = Modifier.size(20.dp))
+            Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = colors.Warning, modifier = Modifier.size(20.dp))
             Text(text, style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -370,7 +372,7 @@ fun SafetyNotice(text: String, modifier: Modifier = Modifier) {
 fun InfoNote(text: String, modifier: Modifier = Modifier) {
     val colors = MammotionColors
     Row(modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalAlignment = Alignment.Top) {
-        Icon(androidx.compose.material.icons.Icons.Rounded.Info, contentDescription = null, tint = colors.TextTertiary, modifier = Modifier.size(16.dp))
+        Icon(Icons.Rounded.Info, contentDescription = null, tint = colors.TextTertiary, modifier = Modifier.size(16.dp))
         Text(text, style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
     }
 }
@@ -380,10 +382,10 @@ fun InfoNote(text: String, modifier: Modifier = Modifier) {
 fun HoldToRunButton(label: String, activeLabel: String, active: Boolean, enabled: Boolean,
                     onStart: () -> Unit, onStop: () -> Unit, modifier: Modifier = Modifier, onCancel: (() -> Unit)? = null) {
     val colors = MammotionColors
-    val start by androidx.compose.runtime.rememberUpdatedState(onStart)
-    val stop by androidx.compose.runtime.rememberUpdatedState(onStop)
-    val cancel by androidx.compose.runtime.rememberUpdatedState(onCancel)
-    val allowed by androidx.compose.runtime.rememberUpdatedState(enabled)
+    val start by rememberUpdatedState(onStart)
+    val stop by rememberUpdatedState(onStop)
+    val cancel by rememberUpdatedState(onCancel)
+    val allowed by rememberUpdatedState(enabled)
     Surface(
         // Fixed key: a state change during the press must not restart the detector and stop the action.
         modifier = modifier.fillMaxWidth().heightIn(min = 64.dp).pointerInput(Unit) {
@@ -420,7 +422,7 @@ fun <T> ChipChoice(options: List<Pair<T, String>>, selected: T, onSelect: (T) ->
 fun DangerPillButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     Button(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = Dimens.Button), shape = CircleShape,
         colors = ButtonDefaults.buttonColors(containerColor = MammotionColors.Danger, contentColor = Color.White)) {
-        Icon(androidx.compose.material.icons.Icons.Rounded.StopCircle, contentDescription = null, modifier = Modifier.size(20.dp))
+        Icon(Icons.Rounded.StopCircle, contentDescription = null, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(Dimens.Sm))
         Text(text, style = MaterialTheme.typography.labelLarge)
     }

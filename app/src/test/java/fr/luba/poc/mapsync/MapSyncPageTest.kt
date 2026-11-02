@@ -3,11 +3,11 @@ package fr.luba.poc.mapsync
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
 import fr.luba.poc.map.AddedNoGo
 import fr.luba.poc.map.AddedZone
@@ -18,15 +18,13 @@ import fr.luba.poc.map.NoGoOrigin
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
 import org.junit.Assert.assertEquals
-import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -37,10 +35,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], qualifiers = "w412dp-h900dp-xxhdpi")
 class MapSyncPageTest {
     val compose = createComposeRule()
-    // The test activity (ui-test-manifest) only exists in debug.
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private fun rect(x: Double, y: Double, w: Double, h: Double) = listOf(Point(x, y), Point(x + w, y), Point(x + w, y + h), Point(x, y + h))
     private val raw = RobotMap(listOf(MapShape(101L, 0, rect(0.0, 0.0, 20.0, 12.0), "Lawn")), true, "BLE")

@@ -60,16 +60,23 @@ DUMBYLUBA_CODE=123456 /tmp/espvenv/bin/pio run -e ota -t upload   # T-Call over 
 | Console | Effect |
 |---|---|
 | `status` | full status as JSON (like `/status`) |
+| `log` | journal (like `/log`) |
 | `code` / `code NNNNNN` | read / change the code |
 | `release` | release the robot and forget it |
 | `wifi NAME\|PASSWORD` / `forget-wifi` | Wi-Fi network |
 | `ap-pass` | show the access point password again |
 | `reboot` | restart |
+| `crash` | deliberate crash, to check the journal |
 | `ota` / `ota-mowing on\|off` | update status / "Updates during mowing" setting (normally sent by the pilot) |
 | `wifi-ps` / `wifi-ps none\|min` | Wi-Fi power save of the station: show / set (stored, default `none`) |
 
 - Status page: `http://dumbyluba-esp32.local/`, refreshed every 5 s (robot, pilot, last safety stop, **Release the
   robot** button); `/status` as JSON; `/wifi` network setup.
+- Journal `http://dumbyluba-esp32.local/log`: why the board stopped or restarted by itself, read afterwards. The last
+  8 starts with their reason (power on, crash, watchdog, brownout…) and how the run before each one ended (duration,
+  last seen, battery, external power, Wi-Fi, robot), kept through a power cut; the last console lines of the previous
+  run, kept through a crash, a watchdog or a restart, lost on a power cut. Never the code nor the passwords
+  ([firmware README](../../firmware/esp32-gateway/README.md#journal)).
 - LED (T-Call GPIO 13, Olimex board GPIO 38): slow blinking = robot connected, medium = Wi-Fi only, fast = no Wi-Fi.
 - Update over Wi-Fi: single-use challenge, HMAC proof of the code, image checked by MD5; the new version is kept after
   60 s with Wi-Fi, otherwise the board rolls back by itself. During mowing it is refused unless the pilot's **Updates
@@ -111,6 +118,10 @@ DUMBYLUBA_CODE=123456 /tmp/espvenv/bin/pio run -e ota -t upload   # T-Call over 
   `/status` adds `heap_internal_free` and `heap_internal_min` (byte-addressable internal RAM, what the task stacks
   use). Options, rejected leads and figures:
   [firmware README](../../firmware/esp32-gateway/README.md#esp-idf-configuration-of-the-gateway-internal-ram).
+- T-Call battery level: the IP5306 only gives 4 LEDs (100/75/50/25/0 %), so the reported level is estimated inside the
+  current step from the time spent in it, with the duration of each step learned across discharges
+  ([firmware README](../../firmware/esp32-gateway/README.md#battery-level-on-the-t-call)); `/status` `power.level_step`
+  keeps the raw step.
 - Two boards (firmware 0.5.0): `src/board.h` holds what differs (2G modem off and IP5306 on the T-Call; LED; power
   reading). On the Olimex board the cell voltage is read on BAT_SENS (GPIO 6) and 5 V presence on PWR_SENS (GPIO 5);
   the level comes from a conservative curve (`gw_battery`, native tests: 0 % at 3.40 V, 4 % or less below 3.50 V) so

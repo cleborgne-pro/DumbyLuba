@@ -1,6 +1,7 @@
 package fr.luba.poc.i18n
 
 import android.content.Context
+import androidx.core.content.edit
 
 /** Interface language chosen in the app, remembered between launches; [AppLanguage.SYSTEM] is the default. */
 object LanguageStore {
@@ -14,7 +15,7 @@ object LanguageStore {
 
     /** Stores and applies the choice; texts already displayed change when the screen is recreated. */
     fun set(context: Context, language: AppLanguage) {
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(KEY, language.name).apply()
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit { putString(KEY, language.name) }
         I18n.chosen = language
     }
 }

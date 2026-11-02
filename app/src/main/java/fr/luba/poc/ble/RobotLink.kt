@@ -4,6 +4,7 @@ package fr.luba.poc.ble
 import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.content.Context
+import android.os.Build
 import fr.luba.poc.i18n.tr
 import java.util.UUID
 
@@ -104,7 +105,7 @@ class GattLink private constructor(private val listener: RobotLink.Listener) : R
             if (characteristic.uuid == RobotLink.NOTIFY) listener.onNotification(this@GattLink, value.copyOf())
         }
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) = guarded {
-            if (android.os.Build.VERSION.SDK_INT < 33 && characteristic.uuid == RobotLink.NOTIFY) listener.onNotification(this@GattLink, characteristic.value.copyOf())
+            if (Build.VERSION.SDK_INT < 33 && characteristic.uuid == RobotLink.NOTIFY) listener.onNotification(this@GattLink, characteristic.value.copyOf())
         }
     }
 
@@ -130,7 +131,7 @@ class GattLink private constructor(private val listener: RobotLink.Listener) : R
     override fun close() {
         closed = true
         val old = gatt; gatt = null; write = null
-        try { old?.disconnect(); old?.close() } catch (_: Exception) { }
+        try { old?.disconnect(); old?.close() } catch (_: Exception) { /* previous GATT already released */ }
     }
 
     companion object {

@@ -29,7 +29,7 @@ import fr.luba.poc.ui.theme.MammotionColors
  * runs the real computation with this angle.
  */
 @Composable
-internal fun OrientationPicker(map: RobotMap, zoneIds: Set<Long>, mode: CoverageMode, angle: Int, enabled: Boolean, onAngle: (Int) -> Unit) {
+internal fun OrientationPicker(map: RobotMap, zoneIds: Set<Long>, mode: CoverageMode, angle: Int, onAngle: (Int) -> Unit) {
     val colors = MammotionColors
     // Chosen zones and the no-go zones touching them only: the view frames what will be mowed.
     val view = remember(map, zoneIds) { guideMap(map, zoneIds) }
@@ -52,7 +52,7 @@ internal fun OrientationPicker(map: RobotMap, zoneIds: Set<Long>, mode: Coverage
             finish = { start.value = null })
     }
     Box(Modifier.fillMaxWidth().height(240.dp).clip(MaterialTheme.shapes.large).background(colors.MapBackground).testTag("orientation-map")) {
-        MapLive(map = view, cuttingZoneIds = zoneIds, overlays = overlays, onPaint = input.takeIf { enabled && area != null },
+        MapLive(map = view, cuttingZoneIds = zoneIds, overlays = overlays, onPaint = input.takeIf { area != null },
             modifier = Modifier.fillMaxSize())
         Surface(Modifier.align(Alignment.TopEnd).padding(8.dp), shape = MaterialTheme.shapes.small, color = colors.Surface.copy(alpha = 0.95f)) {
             Text(if (mode == CoverageMode.CHECKERBOARD) "$angle° / ${angle + 90}°" else "$angle°", Modifier.padding(horizontal = 10.dp, vertical = 6.dp),

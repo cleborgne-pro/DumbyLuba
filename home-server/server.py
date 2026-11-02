@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import secrets
 import sqlite3
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,13 +30,15 @@ class Store:
             raise ValueError("The code must have six digits")
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.db() as db:
-            db.executescript("""
-              CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-              CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,expires REAL NOT NULL);
-              CREATE TABLE IF NOT EXISTS sequences(relay TEXT PRIMARY KEY,seq INTEGER NOT NULL);
-              CREATE TABLE IF NOT EXISTS latest(robot TEXT PRIMARY KEY,payload TEXT NOT NULL,received REAL NOT NULL);
-              CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY,robot TEXT,payload TEXT,received REAL);
-            """)
+            # One statement at a time: executescript() would commit the transaction opened by db() first.
+            for statement in (
+                "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,expires REAL NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS sequences(relay TEXT PRIMARY KEY,seq INTEGER NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS latest(robot TEXT PRIMARY KEY,payload TEXT NOT NULL,received REAL NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY,robot TEXT,payload TEXT,received REAL)",
+            ):
+                db.execute(statement)
             old = db.execute("SELECT value FROM settings WHERE key='code'").fetchone()
             if old and code and old[0] != code:
                 raise ValueError("The code differs from the one stored in the database")
@@ -44,13 +47,23 @@ class Store:
         os.chmod(self.path, 0o600)
 
     @contextmanager
-    def db(self):
-        db = sqlite3.connect(self.path, timeout=10)
+    def db(self, immediate=False):
+        """One explicit transaction per connection: committed on success, rolled back on any exception.
+
+        Autocommit mode (``isolation_level=None``) stops the sqlite3 module from opening transactions implicitly, so
+        the BEGIN below is the only one; ``immediate`` takes the write lock before the first read (read-modify-write).
+        """
+        db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         try:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA synchronous=FULL")
-            with db:
+            db.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+            try:
                 yield db
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+            db.execute("COMMIT")
         finally:
             db.close()
 
@@ -113,8 +126,8 @@ class Store:
             payload["state"]["ageMs"] += transport_age
         if pos:
             payload["state"]["position"]["ageMs"] += transport_age
-        with self.db() as db:
-            db.execute("BEGIN IMMEDIATE")
+        # Write lock taken before reading the previous snapshot: two relays cannot interleave their read-modify-write.
+        with self.db(immediate=True) as db:
             old_seq = db.execute("SELECT seq FROM sequences WHERE relay=?", (relay,)).fetchone()
             if old_seq and seq <= old_seq[0]:
                 return False  # Idempotent acknowledgment: never overwrite newer observations.
@@ -209,6 +222,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'")
         self.send_header("Connection", "close")
         if cookie is not None:
@@ -265,7 +279,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/login":
             if self.auth():
                 token = self.server.store.create_session()
-                self.respond(200, {"connected": True}, cookie=f"luba_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=7776000")
+                # Secure behind an HTTPS reverse proxy (X-Forwarded-Proto), plain HTTP on the LAN otherwise.
+                secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""
+                self.respond(200, {"connected": True}, cookie=f"luba_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=7776000{secure}")
             return
         if self.path == "/api/logout":
             self.server.store.revoke_session(self.session_token())
@@ -306,15 +322,21 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="DumbyLuba home server")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", help="Bind address (default 127.0.0.1, this machine only)")
+    parser.add_argument("--lan", action="store_true", help="Listen on every interface of the local network (plain HTTP)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--data", default="./data/relay.sqlite3")
     parser.add_argument("--code", help="Six-digit code from the Android app (first launch)")
     args = parser.parse_args()
+    host = args.host or ("0.0.0.0" if args.lan else "127.0.0.1")
     os.umask(0o077)
     store = Store(args.data, args.code)
-    server = Server((args.host, args.port), store)
-    print(f"DumbyLuba: http://{args.host}:{server.server_port}/ — code {store.code}", flush=True)
+    server = Server((host, args.port), store)
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        # The protocol is plain HTTP and the six-digit code crosses the network in clear: trusted LAN only.
+        print("Warning: listening on every interface in plain HTTP; keep this server on a trusted local network.",
+              file=sys.stderr, flush=True)
+    print(f"DumbyLuba: http://{host}:{server.server_port}/ — code {store.code}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

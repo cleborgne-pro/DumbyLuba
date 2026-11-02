@@ -1,20 +1,26 @@
 package fr.luba.poc.auth
-import org.json.JSONObject
+import android.util.Base64
+import fr.luba.poc.Clock
+import fr.luba.poc.camera.CameraCredentials
+import fr.luba.poc.i18n.tr
+import fr.luba.poc.proto.LubaMsgProto
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import javax.net.ssl.HttpsURLConnection
-import android.util.Base64
 import java.util.UUID
-import fr.luba.poc.i18n.tr
+import javax.net.ssl.HttpsURLConnection
+import org.json.JSONObject
 /** Exact PyMammotion HTTP endpoints; writes limited to the native return to base and the firmware update, on explicit request. */
 /** [open]: opens the connection of an already checked URL; replaced only by JVM tests (local server). */
 class MammotionCloud internal constructor(private val store:SessionStore, private val open:(URL)->HttpURLConnection) {
     constructor(store:SessionStore):this(store,{ it.openConnection() as HttpsURLConnection })
     private var token=store.read()?.let{JSONObject(it).optString("access_token")}.orEmpty()
-    private val clientId="${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(7)}_1"
+    private val clientId="${Clock.now()}_${UUID.randomUUID().toString().take(7)}_1"
     private fun trusted(url:String):URL {
-        val u=URL(url);require(u.protocol=="https" && (u.host=="mammotion.com" || u.host.endsWith(".mammotion.com")) && u.userInfo==null) { tr("HTTPS Mammotion domain required", "Domaine Mammotion HTTPS requis") };return u
+        val u=URL(url); require(u.protocol=="https" && (u.host=="mammotion.com" || u.host.endsWith(".mammotion.com")) && u.userInfo==null) { tr("HTTPS Mammotion domain required", "Domaine Mammotion HTTPS requis") }; return u
     }
     fun request(url:String,method:String="GET",body:JSONObject?=null,headers:Map<String,String> = emptyMap()):JSONObject {
         return AuthorizedRequest.run(
@@ -24,25 +30,26 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
         )
     }
     private fun requestOnce(url:String,method:String,body:JSONObject?,headers:Map<String,String>):JSONObject {
-        val u=trusted(url);val c=open(u)
+        val u=trusted(url); val c=open(u)
         try {
-            c.instanceFollowRedirects=false;c.connectTimeout=15000;c.readTimeout=20000;c.requestMethod=method
-            c.setRequestProperty("User-Agent","okhttp/4.9.3");c.setRequestProperty("App-Version","NOT HA,2.3.20.30")
-            c.setRequestProperty("Client-Id",clientId);c.setRequestProperty("Client-Type","1")
-            if(token.isNotEmpty() && u.host != "id.mammotion.com") c.setRequestProperty("Authorization","Bearer $token")
+            c.instanceFollowRedirects=false; c.connectTimeout=15000; c.readTimeout=20000; c.requestMethod=method
+            c.setRequestProperty("User-Agent","okhttp/4.9.3"); c.setRequestProperty("App-Version","NOT HA,2.3.20.30")
+            c.setRequestProperty("Client-Id",clientId); c.setRequestProperty("Client-Type","1")
+            // The token grant carries its own signature; every other request, authorization code included, the Bearer.
+            if(token.isNotEmpty() && !(u.host=="id.mammotion.com" && u.path=="/oauth2/token")) c.setRequestProperty("Authorization","Bearer $token")
             headers.forEach { (k,v)->c.setRequestProperty(k,v) }
-            if(body!=null) { c.doOutput=true;c.setRequestProperty("Content-Type","application/json");c.outputStream.use{it.write(body.toString().toByteArray())} }
+            if(body!=null) { c.doOutput=true; c.setRequestProperty("Content-Type","application/json"); c.outputStream.use{it.write(body.toString().toByteArray())} }
             // Path and domain only in the error: the query of the sign-in carries the credentials.
-            val code=c.responseCode;if(code!=200) throw CloudResponseException(code,u.path,u.host)
+            val code=c.responseCode; if(code!=200) throw CloudResponseException(code,u.path,u.host)
             val bytes=c.inputStream.use{it.readBytesLimited(4*1024*1024)}
-            val json=JSONObject(String(bytes));val result=json.optInt("code",-1);if(result !in listOf(0,200)) throw CloudResponseException(result,u.path,u.host,http=false)
+            val json=JSONObject(String(bytes)); val result=json.optInt("code",-1); if(result !in listOf(0,200)) throw CloudResponseException(result,u.path,u.host,http=false)
             return json
         } finally {c.disconnect()}
     }
     fun login(email:String,password:String) {
         require(email.isNotBlank() && password.isNotEmpty())
         val params=linkedMapOf("username" to email,"password" to Base64.encodeToString(password.toByteArray(),Base64.NO_WRAP),"client_id" to OAUTH_CLIENT,"grant_type" to "password","authType" to "0")
-        val timestamp=System.currentTimeMillis()
+        val timestamp=Clock.now()
         val compact=params.entries.joinToString(",", "{", "}") { JSONObject.quote(it.key)+":"+JSONObject.quote(it.value) }
         val signature=OAuthSignature.sign(OAUTH_CLIENT,OAUTH_SECRET,timestamp,compact)
         val query=params.entries.joinToString("&") { it.key+"="+URLEncoder.encode(it.value,"UTF-8") }
@@ -52,8 +59,8 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
             if(e.code in listOf(400,401,403,40101,40102)) throw IllegalStateException(tr("Mammotion: email or password rejected (code ${e.code})", "Mammotion : e-mail ou mot de passe refusé (code ${e.code})"),e)
             throw e
         }
-        val data=json.getJSONObject("data");check(data.optString("access_token").isNotBlank()) { tr("No session", "Session absente") }
-        store.save(data.toString());token=data.getString("access_token")
+        val data=json.getJSONObject("data"); check(data.optString("access_token").isNotBlank()) { tr("No session", "Session absente") }
+        store.save(data.toString()); token=data.getString("access_token")
     }
     /**
      * Saved account (Me tab, encrypted) used to sign in again when the session can no longer be renewed: signing in
@@ -63,7 +70,7 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
     @Synchronized private fun refreshSession() {
         val old=store.read()?.let(::JSONObject)
         // Explicit sign-out: no silent sign-in.
-        if(old==null) { logout();error(tr("Mammotion: session expired, sign in to your account again", "Mammotion : session expirée, reconnectez votre compte")) }
+        if(old==null) { logout(); error(tr("Mammotion: session expired, sign in to your account again", "Mammotion : session expirée, reconnectez votre compte")) }
         val refresh=old.optString("refresh_token")
         if(refresh.isNotBlank() && renew(old,refresh)) return
         signInAgain()
@@ -71,7 +78,7 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
     /** Refresh-token grant; false if the cloud refuses the refresh token. */
     private fun renew(old:JSONObject,refresh:String):Boolean {
         val params=linkedMapOf("client_id" to OAUTH_CLIENT,"grant_type" to "refresh_token","refresh_token" to refresh)
-        val timestamp=System.currentTimeMillis()
+        val timestamp=Clock.now()
         val compact=params.entries.joinToString(",", "{", "}") { JSONObject.quote(it.key)+":"+JSONObject.quote(it.value) }
         val query=params.entries.joinToString("&") { it.key+"="+URLEncoder.encode(it.value,"UTF-8") }
         val response=try {
@@ -87,26 +94,43 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
         data.keys().forEach { key ->
             if(!data.isNull(key) && !(key=="refresh_token" && data.optString(key).isBlank())) old.put(key,data.get(key))
         }
-        store.save(old.toString());token=old.getString("access_token")
+        store.save(old.toString()); token=old.getString("access_token")
         return true
     }
     /** Session revoked: new sign-in with the saved account, otherwise sign-out. A network failure keeps the session for a later attempt. */
     private fun signInAgain() {
         val account=savedAccount()
-        if(account==null) { logout();error(tr("Mammotion: session expired, sign in to your account again", "Mammotion : session expirée, reconnectez votre compte")) }
+        if(account==null) { logout(); error(tr("Mammotion: session expired, sign in to your account again", "Mammotion : session expirée, reconnectez votre compte")) }
         try { login(account.email,account.password) }
-        catch(e:java.io.IOException) { throw e }
+        catch(e:IOException) { throw e }
         catch(e:Exception) {
-            logout();throw IllegalStateException(tr("Mammotion: session expired and saved account refused, sign in again", "Mammotion : session expirée et compte enregistré refusé, reconnectez-vous"),e)
+            logout(); throw IllegalStateException(tr("Mammotion: session expired and saved account refused, sign in again", "Mammotion : session expirée et compte enregistré refusé, reconnectez-vous"),e)
         }
     }
+    /**
+     * Authorization code of the Aliyun sign-in ([AliyunCloud.signIn]): a fresh one (PyMammotion `fetch_authorization_token`,
+     * POST `id.mammotion.com/authorization/code`), otherwise the one of the last sign-in (`authorization_code`).
+     */
+    internal fun authorizationCode():AuthorizationCode {
+        val fresh=try { Result.success(request("https://id.mammotion.com/authorization/code","POST",JSONObject().put("clientId",AUTH_CODE_CLIENT)).optJSONObject("data")?.optString("code").orEmpty()) }
+            catch(e:CloudResponseException) { if(e.code in listOf(401,403,40101,40102)) throw e; Result.failure(e) }
+        fresh.getOrNull()?.takeIf { it.isNotBlank() }?.let { return AuthorizationCode(it,true,null) }
+        val saved=store.read()?.let { JSONObject(it).optString("authorization_code") }.orEmpty()
+        check(saved.isNotBlank()) { tr("Mammotion: no authorization code for the Aliyun cloud", "Mammotion : pas de code d'autorisation pour le cloud Aliyun") }
+        return AuthorizationCode(saved,false,fresh.exceptionOrNull() as? CloudResponseException)
+    }
+    /** [fresh]: obtained just now, otherwise the one of the last sign-in; [freshFailure]: refusal of the fresh request. */
+    internal data class AuthorizationCode(val code:String,val fresh:Boolean,val freshFailure:CloudResponseException?)
+    /** Country of the account (`userInformation.domainAbbreviation`), which selects the Aliyun region. */
+    fun countryCode():String = store.read()?.let { JSONObject(it).optJSONObject("userInformation")?.optString("domainAbbreviation") }.orEmpty()
+        .ifBlank { error(tr("Mammotion: account country unknown, sign in again", "Mammotion : pays du compte inconnu, reconnectez-vous")) }
     fun userAccount():Int = store.read()?.let { JSONObject(it).optJSONObject("userInformation")?.optString("userAccount")?.toIntOrNull() } ?: 0
     fun connected()=token.isNotBlank()
-    fun logout(){token="";store.clear()}
+    fun logout(){token=""; store.clear()}
     fun iot():String {
         check(token.isNotBlank()) { tr("Sign in to your account", "Connectez votre compte") }
         val claims=JSONObject(String(Base64.decode(token.split('.')[1],Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)))
-        val url=claims.optString("iot");trusted(url);return url.trimEnd('/')
+        val url=claims.optString("iot"); trusted(url); return url.trimEnd('/')
     }
     /**
      * Account devices of the Mammotion IoT cloud (`/v1/user/device/page`, PyMammotion `get_user_device_page`), with what
@@ -139,7 +163,7 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
      * publishing on recent firmware (`fpv_info`). No movement command.
      */
     fun streamToken(iotId:String,bothFront:Boolean=false)=request("$API_DOMAIN/device-server/v1/stream/token","POST",
-        fr.luba.poc.camera.CameraCredentials.requestBody(iotId,bothFront))
+        CameraCredentials.requestBody(iotId,bothFront))
     /**
      * Starts the firmware update offered by `devices/version/check` (PyMammotion `start_ota_upgrade`): on
      * explicit user request only, exact target version.
@@ -156,7 +180,7 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
      * receiver of the robot model, the one of the [fr.luba.poc.protocol.Commands] that built [payload].
      */
     fun invoke(payload:ByteArray,name:String,id:String,nativeReturn:Boolean=false,
-               navReceiver:fr.luba.poc.proto.LubaMsgProto.MsgDevice=fr.luba.poc.proto.LubaMsgProto.MsgDevice.DEV_NAVIGATION):JSONObject {
+               navReceiver:LubaMsgProto.MsgDevice=LubaMsgProto.MsgDevice.DEV_NAVIGATION):JSONObject {
         CloudReadOnly.requireAllowed(payload,nativeReturn,navReceiver)
         return request(iot()+"/v1/mqtt/rpc/thing/service/invoke","POST",JSONObject().put("args",JSONObject().put("content",Base64.encodeToString(payload,Base64.NO_WRAP))).put("deviceName",name).put("identifier","device_protobuf_sync_service").put("iotId",id).put("productKey",""))
     }
@@ -169,9 +193,11 @@ class MammotionCloud internal constructor(private val store:SessionStore, privat
         const val DEVICE_LIST="/device-server/v1/device/list"
         /** Mammotion application API (PyMammotion const.MAMMOTION_API_DOMAIN), same Bearer token. */
         private const val API_DOMAIN="https://domestic.mammotion.com"
+        /** Client of the authorization code (PyMammotion const.MAMMOTION_CLIENT_ID). */
+        private const val AUTH_CODE_CLIENT="MADKALUBAS"
         // Upstream client distributed with PyMammotion 0.10.8; no user account secret.
         private const val OAUTH_CLIENT="GxebgSt8si6pKqR"
         private const val OAUTH_SECRET="JP0508SRJFa0A90ADpzLINDBxMa4Vj"
     }
 }
-private fun java.io.InputStream.readBytesLimited(limit:Int):ByteArray {val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192);while(true){val n=read(buffer);if(n<0)break;check(out.size()+n<=limit){tr("Response too large", "Réponse trop grande")};out.write(buffer,0,n)};return out.toByteArray()}
+private fun InputStream.readBytesLimited(limit:Int):ByteArray {val out=ByteArrayOutputStream(); val buffer=ByteArray(8192); while(true){val n=read(buffer); if(n<0)break; check(out.size()+n<=limit){tr("Response too large", "Réponse trop grande")}; out.write(buffer,0,n)}; return out.toByteArray()}

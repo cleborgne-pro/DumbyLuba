@@ -1,5 +1,6 @@
 package fr.luba.poc.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -7,12 +8,11 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -22,18 +22,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Bluetooth
-import androidx.compose.material.icons.rounded.Router
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
-import androidx.compose.material.icons.rounded.SatelliteAlt
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Gamepad
-import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Router
+import androidx.compose.material.icons.rounded.SatelliteAlt
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -46,36 +44,52 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.luba.poc.auth.AccountMode
 import fr.luba.poc.auth.CloudUi
 import fr.luba.poc.ble.ConnectionState
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.gateway.GatewayConfig
+import fr.luba.poc.gateway.GatewayRole
+import fr.luba.poc.gateway.GatewayService
+import fr.luba.poc.gateway.rememberPilotGatewayHealth
+import fr.luba.poc.gateway.rememberPilotGatewayReach
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.CoveragePlanner
+import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.MapThumbnail
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
 import fr.luba.poc.map.kind
+import fr.luba.poc.map.mapFetchAllowed
+import fr.luba.poc.map.mapReadFailureShown
+import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.ui.components.ChargingCard
 import fr.luba.poc.ui.components.LubaProgress
-import fr.luba.poc.ui.components.PrimaryPillButton
-import fr.luba.poc.ui.components.TextAction
-import fr.luba.poc.ui.components.rememberChargeStatus
-import fr.luba.poc.ui.components.drawChargingRings
+import fr.luba.poc.ui.components.NoteTone
 import fr.luba.poc.ui.components.PositionQuality
+import fr.luba.poc.ui.components.PrimaryPillButton
+import fr.luba.poc.ui.components.StatusNote
+import fr.luba.poc.ui.components.TextAction
 import fr.luba.poc.ui.components.batteryIcon
+import fr.luba.poc.ui.components.batteryThreshold
+import fr.luba.poc.ui.components.drawChargingRings
 import fr.luba.poc.ui.components.positionQuality
+import fr.luba.poc.ui.components.rememberChargeStatus
+import fr.luba.poc.ui.components.rememberTaskChargeThresholds
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.EyebrowStyle
 import fr.luba.poc.ui.theme.MammotionColors
@@ -100,7 +114,7 @@ fun HomeScreen(
     onAlerts: () -> Unit = {},
     alertsBadge: Boolean = false,
     /** Mammotion account telemetry for this robot (null if the account follows another robot). */
-    apiTelemetry: fr.luba.poc.protocol.Telemetry? = cloudState.telemetry,
+    apiTelemetry: Telemetry? = cloudState.telemetry,
     /** "Before the first mowing" card, below the map (empty once done or hidden). */
     checklist: @Composable () -> Unit = {},
 ) {
@@ -111,27 +125,27 @@ fun HomeScreen(
     val area = if (map.complete) CoveragePlanner.selectedArea(map, zones.map { it.id }.toSet()) else 0.0
     val working = state.mowing.active || state.robotRoute.running
     // Robot link: "via the gateway" on the pilot side, "over Bluetooth" on the gateway placed on the robot.
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val role = remember { fr.luba.poc.gateway.GatewayConfig.read(context).role }
-    val gateway by fr.luba.poc.gateway.GatewayService.status.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val role = remember { GatewayConfig.read(context).role }
+    val gateway by GatewayService.status.collectAsStateWithLifecycle()
     // Control via the gateway: its reachability is tracked separately, a robot that is off does not make it look cut off.
-    val pilot = role == fr.luba.poc.gateway.GatewayRole.CLIENT
-    val link = linkStatus(state, role, gateway, fr.luba.poc.gateway.rememberPilotGatewayReach(pilot))
+    val pilot = role == GatewayRole.CLIENT
+    val link = linkStatus(state, role, gateway, rememberPilotGatewayReach(pilot))
     // Charge and battery: Mammotion account (API), or active BLE if more recent.
     val charge = rememberChargeStatus(apiTelemetry, t.takeIf { state.ready })
     val battery = charge?.percent ?: t.battery ?: apiTelemetry?.battery ?: state.lastKnown?.battery
     val position = positionQuality(t.rtkStatus)
     // Gateway health: shown on the home screen only when there is a problem (details in Service → Wi-Fi gateway).
-    val gatewayWarnings = fr.luba.poc.gateway.rememberPilotGatewayHealth(pilot)?.warnings().orEmpty()
+    val gatewayWarnings = rememberPilotGatewayHealth(pilot)?.warnings().orEmpty()
     val charging = charge != null
     // Threshold shown next to the battery: return to base when not charging, mowing resume when charging.
-    val (taskLow, taskHigh) = fr.luba.poc.ui.components.rememberTaskChargeThresholds()
-    val threshold = fr.luba.poc.ui.components.batteryThreshold(charging, state.robotRoute, taskLow, taskHigh)
+    val (taskLow, taskHigh) = rememberTaskChargeThresholds()
+    val threshold = batteryThreshold(charging, state.robotRoute, taskLow, taskHigh)
     // Displayed model (photo and label): Bluetooth or account name, account product key if it is the same robot.
     val robotName = state.selected?.name?.takeIf { it.isNotBlank() } ?: link.robotName?.takeIf { it.isNotBlank() }
         ?: state.lastKnown?.robotName?.takeIf { it.isNotBlank() } ?: cloudState.selected?.name
     // Local mode: no account entry ([fr.luba.poc.auth.AccountMode]).
-    val localOnly = fr.luba.poc.auth.AccountMode.observe()
+    val localOnly = AccountMode.observe()
     val model = RobotModel.detect(robotName, cloudState.selected?.takeIf { robotName == null || it.name.equals(robotName, ignoreCase = true) }?.productKey)
 
     Box(modifier.fillMaxSize().background(colors.Background), contentAlignment = Alignment.TopCenter) {
@@ -183,18 +197,7 @@ fun HomeScreen(
             }
 
             // Gateway attention point: one line, only when needed.
-            if (gatewayWarnings.isNotEmpty()) {
-                Surface(onClick = onOpenRobot, modifier = Modifier.fillMaxWidth().padding(bottom = Dimens.Md), shape = MaterialTheme.shapes.medium,
-                    color = colors.WarningSoft) {
-                    Row(Modifier.padding(horizontal = Dimens.Md, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
-                        Icon(Icons.Rounded.Router, contentDescription = null, tint = colors.Warning, modifier = Modifier.size(18.dp))
-                        Text(gatewayWarnings.first().replaceFirstChar { it.uppercase() } + if (gatewayWarnings.size > 1) " (+${gatewayWarnings.size - 1})" else "",
-                            style = MaterialTheme.typography.bodySmall, color = colors.TextPrimary, maxLines = 2, modifier = Modifier.weight(1f))
-                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = colors.TextTertiary)
-                    }
-                }
-            }
+            if (gatewayWarnings.isNotEmpty()) GatewayWarningRow(gatewayWarnings, onOpenRobot)
 
             // Charging: animated gauge and percentage, under the robot identity.
             AnimatedVisibility(charge != null, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
@@ -204,55 +207,19 @@ fun HomeScreen(
             Spacer(Modifier.height(Dimens.Md))
 
             // Map and quick mowing.
-            Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = colors.Surface,
-                border = BorderStroke(1.dp, colors.Hairline)) {
-                Column(Modifier.padding(Dimens.Lg), verticalArrangement = Arrangement.spacedBy(Dimens.Lg)) {
-                    Row(Modifier.clip(MaterialTheme.shapes.medium).clickable(role = Role.Button, onClickLabel = tr("Open the map", "Ouvrir la carte"), onClick = onOpenMap),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.Md)) {
-                        Surface(Modifier.size(76.dp), shape = MaterialTheme.shapes.medium, color = colors.MapBackground) {
-                            MapThumbnail(map, Modifier.fillMaxSize().padding(8.dp), empty = colors.MapBackground)
-                        }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(tr("MY MAP", "MA CARTE"), style = EyebrowStyle, color = colors.TextTertiary)
-                            Text(if (map.complete) Format.plural(zones.size, "zone", "zones") else tr("No map", "Aucune carte"),
-                                style = MaterialTheme.typography.titleLarge)
-                            Text(when {
-                                working && state.robotRoute.count > 0 -> tr("${state.robotRoute.index * 100 / state.robotRoute.count} % mowed · tap to open", "${state.robotRoute.index * 100 / state.robotRoute.count} % tondu · touchez pour ouvrir")
-                                map.complete -> tr("${Format.num(area, 0)} m² · tap to open", "${Format.num(area, 0)} m² · touchez pour ouvrir")
-                                localOnly -> tr("Read the map from the robot", "Lisez la carte du robot")
-                                else -> tr("Read the map from the robot or the account", "Lisez la carte du robot ou du compte")
-                            },
-                                style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
-                        }
-                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = colors.TextTertiary)
-                    }
-                    if (working && state.robotRoute.count > 0)
-                        LubaProgress(state.robotRoute.index.toFloat() / state.robotRoute.count, Modifier.fillMaxWidth().clip(CircleShape))
-                    // Quick mowing: zones are chosen directly on the map.
-                    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalAlignment = Alignment.CenterVertically) {
-                        PrimaryPillButton(if (working) tr("Follow mowing", "Suivre la tonte") else tr("Start mowing", "Démarrer une tonte"), onStartMowing,
-                            Modifier.weight(1f).heightIn(min = 56.dp), icon = Icons.Rounded.PlayArrow)
-                        // Manual control: enabled only with the robot connected (gateway or direct Bluetooth).
-                        FilledTonalIconButton(onClick = onOpenManual, enabled = state.ready, modifier = Modifier.size(56.dp),
-                            colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = colors.SurfaceMuted, contentColor = colors.TextPrimary,
-                                disabledContainerColor = colors.SurfaceMuted, disabledContentColor = colors.TextTertiary)) {
-                            Icon(Icons.Rounded.Gamepad, contentDescription = tr("Manual control", "Pilotage manuel"), modifier = Modifier.size(24.dp))
-                        }
-                    }
-                }
-            }
+            MapQuickCard(state, map, zones, area, working, localOnly, onOpenMap, onStartMowing, onOpenManual)
 
             // Robot linked (directly or through the gateway) without a map on this phone: Bluetooth reading from here.
             if (state.ready && !map.complete && !state.mowing.active) {
                 // Failed reading: its reason stays shown until the next reading (DumbyLuba#3).
-                val failure = fr.luba.poc.map.mapReadFailureShown(state)
-                if (failure != null) fr.luba.poc.ui.components.StatusNote(failure, fr.luba.poc.ui.components.NoteTone.WARNING, Modifier.padding(top = Dimens.Sm))
+                val failure = mapReadFailureShown(state)
+                if (failure != null) StatusNote(failure, tone = NoteTone.WARNING, modifier = Modifier.padding(top = Dimens.Sm))
                 TextAction(when {
                     state.mapLoading -> tr("Reading the robot map…", "Lecture de la carte du robot…")
                     failure != null -> tr("Retry the robot map reading", "Relancer la lecture de la carte du robot")
                     state.viaGateway -> tr("Read the robot map via the gateway", "Lire la carte du robot par la passerelle")
                     else -> tr("Read the robot map over Bluetooth", "Lire la carte du robot en Bluetooth")
-                }, onFetch, Modifier.fillMaxWidth().padding(top = Dimens.Sm), enabled = fr.luba.poc.map.mapFetchAllowed(state, false))
+                }, onFetch, Modifier.fillMaxWidth().padding(top = Dimens.Sm), enabled = mapFetchAllowed(state, false))
             }
             if (!localOnly && !cloudState.connected && cloudState.map.shapes.isEmpty() && !map.complete) {
                 TextAction(tr("Read the map via the Mammotion account", "Lire la carte via le compte Mammotion"), onAccount, Modifier.fillMaxWidth().padding(top = Dimens.Sm))
@@ -262,6 +229,75 @@ fun HomeScreen(
             Spacer(Modifier.height(Dimens.Lg))
         }
       }
+    }
+}
+
+/** "My map" card: thumbnail, zones and area or mowing progress, quick mowing and manual control. */
+@Composable
+private fun MapQuickCard(
+    state: RobotUi,
+    map: RobotMap,
+    zones: List<MapShape>,
+    area: Double,
+    working: Boolean,
+    localOnly: Boolean,
+    onOpenMap: () -> Unit,
+    onStartMowing: () -> Unit,
+    onOpenManual: () -> Unit,
+) {
+    val colors = MammotionColors
+    Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = colors.Surface,
+        border = BorderStroke(1.dp, colors.Hairline)) {
+        Column(Modifier.padding(Dimens.Lg), verticalArrangement = Arrangement.spacedBy(Dimens.Lg)) {
+            Row(Modifier.clip(MaterialTheme.shapes.medium).clickable(role = Role.Button, onClickLabel = tr("Open the map", "Ouvrir la carte"), onClick = onOpenMap),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.Md)) {
+                Surface(Modifier.size(76.dp), shape = MaterialTheme.shapes.medium, color = colors.MapBackground) {
+                    MapThumbnail(map, Modifier.fillMaxSize().padding(8.dp), empty = colors.MapBackground)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(tr("MY MAP", "MA CARTE"), style = EyebrowStyle, color = colors.TextTertiary)
+                    Text(if (map.complete) Format.plural(zones.size, "zone", "zones") else tr("No map", "Aucune carte"),
+                        style = MaterialTheme.typography.titleLarge)
+                    Text(when {
+                        working && state.robotRoute.count > 0 -> tr("${state.robotRoute.index * 100 / state.robotRoute.count} % mowed · tap to open", "${state.robotRoute.index * 100 / state.robotRoute.count} % tondu · touchez pour ouvrir")
+                        map.complete -> tr("${Format.num(area, 0)} m² · tap to open", "${Format.num(area, 0)} m² · touchez pour ouvrir")
+                        localOnly -> tr("Read the map from the robot", "Lisez la carte du robot")
+                        else -> tr("Read the map from the robot or the account", "Lisez la carte du robot ou du compte")
+                    },
+                        style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
+                }
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = colors.TextTertiary)
+            }
+            if (working && state.robotRoute.count > 0)
+                LubaProgress(state.robotRoute.index.toFloat() / state.robotRoute.count, Modifier.fillMaxWidth().clip(CircleShape))
+            // Quick mowing: zones are chosen directly on the map.
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalAlignment = Alignment.CenterVertically) {
+                PrimaryPillButton(if (working) tr("Follow mowing", "Suivre la tonte") else tr("Start mowing", "Démarrer une tonte"), onStartMowing,
+                    Modifier.weight(1f).heightIn(min = 56.dp), icon = Icons.Rounded.PlayArrow)
+                // Manual control: enabled only with the robot connected (gateway or direct Bluetooth).
+                FilledTonalIconButton(onClick = onOpenManual, enabled = state.ready, modifier = Modifier.size(56.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = colors.SurfaceMuted, contentColor = colors.TextPrimary,
+                        disabledContainerColor = colors.SurfaceMuted, disabledContentColor = colors.TextTertiary)) {
+                    Icon(Icons.Rounded.Gamepad, contentDescription = tr("Manual control", "Pilotage manuel"), modifier = Modifier.size(24.dp))
+                }
+            }
+        }
+    }
+}
+
+/** Gateway attention point on the home screen: the first warning in one line, the others counted. */
+@Composable
+private fun GatewayWarningRow(gatewayWarnings: List<String>, onOpenRobot: () -> Unit) {
+    val colors = MammotionColors
+    Surface(onClick = onOpenRobot, modifier = Modifier.fillMaxWidth().padding(bottom = Dimens.Md), shape = MaterialTheme.shapes.medium,
+        color = colors.WarningSoft) {
+        Row(Modifier.padding(horizontal = Dimens.Md, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+            Icon(Icons.Rounded.Router, contentDescription = null, tint = colors.Warning, modifier = Modifier.size(18.dp))
+            Text(gatewayWarnings.first().replaceFirstChar { it.uppercase() } + if (gatewayWarnings.size > 1) " (+${gatewayWarnings.size - 1})" else "",
+                style = MaterialTheme.typography.bodySmall, color = colors.TextPrimary, maxLines = 2, modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = colors.TextTertiary)
+        }
     }
 }
 

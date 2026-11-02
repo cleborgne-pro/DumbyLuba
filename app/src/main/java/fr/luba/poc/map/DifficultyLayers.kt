@@ -1,6 +1,7 @@
 package fr.luba.poc.map
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -23,24 +24,32 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import androidx.core.content.edit
+import fr.luba.poc.Clock
 import fr.luba.poc.camera.ObstaclePhoto
 import fr.luba.poc.difficulty.DifficultyEvent
 import fr.luba.poc.difficulty.DifficultyKind
 import fr.luba.poc.difficulty.DifficultyUi
 import fr.luba.poc.difficulty.PresumedObstacles
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleKind
+import fr.luba.poc.simulation.ObstacleBypass
 import fr.luba.poc.ui.Format
+import fr.luba.poc.ui.PhotoImage
 import fr.luba.poc.ui.components.KeyValueRow
 import fr.luba.poc.ui.components.LubaDialog
 import fr.luba.poc.ui.components.PrimaryPillButton
 import fr.luba.poc.ui.components.SecondaryPillButton
 import fr.luba.poc.ui.theme.LubaColors
 import fr.luba.poc.ui.theme.MammotionColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.UUID
+import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.math.abs
 
 /** Map layers independent of the signal surveys. Labels are evaluated at display time (interface language). */
 enum class MapExtraLayer(private val labelEn: String, private val labelFr: String, private val descriptionEn: String,
@@ -70,7 +79,7 @@ sealed interface DifficultyAction {
  * encountered obstacle is tapped. State kept outside the map screen (MapScreen register limit).
  */
 object MapExtraLayers {
-    private var prefs: android.content.SharedPreferences? = null
+    private var prefs: SharedPreferences? = null
     private val visible = MutableStateFlow(MapExtraLayer.entries.filter { it.defaultOn }.toSet())
     val flow: StateFlow<Set<MapExtraLayer>> get() = visible
     private val opened = MutableStateFlow<DifficultyEvent?>(null)
@@ -78,6 +87,9 @@ object MapExtraLayers {
     private val openedObstacleId = MutableStateFlow<String?>(null)
     /** Saved obstacle whose sheet (exclusion size) is open. */
     val openedObstacle: StateFlow<String?> get() = openedObstacleId
+    private val openedPresumedId = MutableStateFlow<String?>(null)
+    /** Presumed obstacle whose sheet (save with a size, dismiss) is open. */
+    val openedPresumed: StateFlow<String?> get() = openedPresumedId
     /** Displayed saved obstacles: the map tap reads them without recomposing. */
     @Volatile var latestObstacles: List<LocalObstacle> = emptyList()
     /** Last displayed state: the map gesture reads it without recomposing. */
@@ -95,25 +107,37 @@ object MapExtraLayers {
     fun toggle(layer: MapExtraLayer) {
         val next = if (layer in visible.value) visible.value - layer else visible.value + layer
         visible.value = next
-        prefs?.edit()?.putBoolean(layer.name, layer in next)?.apply()
+        prefs?.edit { putBoolean(layer.name, layer in next) }
     }
 
     /**
-     * Map tap at [p] (meters): opens the sheet of the nearest item close enough — bumper contact or presumed obstacle
-     * (Obstacles layer), or saved obstacle (always drawn).
+     * Presumed obstacles are drawn (and tappable) whenever route preparation avoids them, like saved obstacles: the
+     * mowing preview showed them while the map hid them with the Obstacles layer off (reported on 2026-10-31).
+     * Otherwise only with the Obstacles or Difficulties layer.
+     */
+    fun presumedShown(ui: DifficultyUi, visible: Set<MapExtraLayer>): Boolean =
+        ui.avoidPresumed || MapExtraLayer.ENCOUNTERS in visible || MapExtraLayer.DIFFICULTIES in visible
+
+    /**
+     * Map tap at [p] (meters): opens the sheet of the nearest item close enough — bumper contact (Obstacles layer),
+     * presumed obstacle ([presumedShown]) or saved obstacle (always drawn).
      */
     fun tap(p: Point, scale: Double): Boolean {
         val ui = latest
-        return when (val hit = ObstacleSelection.pick(p, scale, ui.encounters, ui.presumed, latestObstacles, MapExtraLayer.ENCOUNTERS in visible.value)) {
-            is MapPick.Encounter -> { openedObstacleId.value = null; opened.value = hit.event; true }
-            is MapPick.Obstacle -> { opened.value = null; openedObstacleId.value = hit.obstacle.id; true }
+        val shown = visible.value
+        return when (val hit = ObstacleSelection.pick(p, scale, ui.encounters, ui.presumed, latestObstacles,
+            MapExtraLayer.ENCOUNTERS in shown, presumedShown(ui, shown))) {
+            is MapPick.Encounter -> { open(hit.event); true }
+            is MapPick.Obstacle -> { openObstacle(hit.obstacle.id); true }
+            is MapPick.Presumed -> { openPresumed(hit.obstacle.id); true }
             null -> false
         }
     }
 
-    fun open(event: DifficultyEvent) { openedObstacleId.value = null; opened.value = event }
-    fun openObstacle(id: String) { opened.value = null; openedObstacleId.value = id }
-    fun close() { opened.value = null; openedObstacleId.value = null }
+    fun open(event: DifficultyEvent) { close(); opened.value = event }
+    fun openObstacle(id: String) { close(); openedObstacleId.value = id }
+    fun openPresumed(id: String) { close(); openedPresumedId.value = id }
+    fun close() { opened.value = null; openedObstacleId.value = null; openedPresumedId.value = null }
 
     /** Photo of a contact: same contact time, otherwise the nearest within 90 s. */
     fun photoFor(event: DifficultyEvent, photos: List<ObstaclePhoto>): ObstaclePhoto? {
@@ -151,8 +175,8 @@ fun difficultyHeatColor(score: Double): Color {
 }
 
 /**
- * Drawing of the visible layers: difficulties heatmap (1 m cells) and presumed obstacles (dashed circle) for
- * Difficulties; bumper contacts (red dot, circled in white when there is a photo) and presumed obstacles for Obstacles.
+ * Drawing of the visible layers: difficulties heatmap (1 m cells) for Difficulties, bumper contacts (red dot, circled
+ * in white when there is a photo) for Obstacles, and presumed obstacles (dashed circle) when [MapExtraLayers.presumedShown].
  */
 fun DrawScope.drawDifficultyLayers(ui: DifficultyUi, visible: Set<MapExtraLayer>, photos: List<ObstaclePhoto>,
                                    screen: (Point) -> Offset, scale: Double, colors: LubaColors, unit: Float = 1f) {
@@ -167,8 +191,8 @@ fun DrawScope.drawDifficultyLayers(ui: DifficultyUi, visible: Set<MapExtraLayer>
             drawCircle(MapExtraLayers.kindColor(e.kind), 3.25f * unit, c)
         }
     }
-    // Presumed obstacle (repeated contacts): light red area, dashed outline.
-    if (MapExtraLayer.ENCOUNTERS in visible || MapExtraLayer.DIFFICULTIES in visible) ui.presumed.forEach { o ->
+    // Presumed obstacle (repeated or recent contacts): light red area, dashed outline.
+    if (MapExtraLayers.presumedShown(ui, visible)) ui.presumed.forEach { o ->
         val r = ((o.exclusionRadiusM) * scale).toFloat().coerceAtLeast(6f * unit)
         val c = screen(Point(o.x, o.y))
         drawCircle(colors.Danger.copy(alpha = 0.10f), r, c)
@@ -193,6 +217,7 @@ fun DrawScope.drawDifficultyLayers(ui: DifficultyUi, visible: Set<MapExtraLayer>
 fun EncounterSheet(ui: DifficultyUi, photos: List<ObstaclePhoto>, obstacles: List<LocalObstacle> = emptyList()) {
     SideEffect { MapExtraLayers.latest = ui; MapExtraLayers.latestObstacles = obstacles }
     ObstacleEditSheet(obstacles)
+    PresumedObstacleSheet(ui)
     val opened by MapExtraLayers.openedEncounter.collectAsState()
     val event = opened ?: return
     EncounterDialog(event, ui, photos, obstacles, onClose = { MapExtraLayers.close() })
@@ -219,11 +244,11 @@ private fun EncounterDialog(event: DifficultyEvent, ui: DifficultyUi, photos: Li
                             title: String = tr("Obstacle encountered", "Obstacle rencontré")) {
     var kind by remember(event.id) { mutableStateOf(ObstacleKind.OTHER) }
     var radius by remember(event.id) { mutableFloatStateOf(ObstacleSelection.defaultRadius(event, ui.presumed).toFloat()) }
-    var margin by remember(event.id) { mutableFloatStateOf(fr.luba.poc.simulation.ObstacleBypass.CONTACT_MARGIN_M.toFloat()) }
+    var margin by remember(event.id) { mutableFloatStateOf(ObstacleBypass.CONTACT_MARGIN_M.toFloat()) }
     val photo = MapExtraLayers.photoFor(event, photos)
-    val date = java.text.SimpleDateFormat(tr("yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm"), fr.luba.poc.i18n.I18n.locale).format(java.util.Date(event.atMs))
+    val date = SimpleDateFormat(tr("yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm"), I18n.locale).format(Date(event.atMs))
     LubaDialog(onDismissRequest = onClose, title = title, content = {
-        if (photo != null) fr.luba.poc.ui.PhotoImage(photo, Modifier.fillMaxWidth().aspectRatio(4f / 3f), 1280)
+        if (photo != null) PhotoImage(photo, Modifier.fillMaxWidth().aspectRatio(4f / 3f), 1280)
         else if (event.source != "pilotage") Text(tr("No photo for this contact (option off, account not signed in or stream unavailable).", "Pas de photo pour ce contact (option désactivée, compte non connecté ou flux indisponible)."),
             style = MaterialTheme.typography.bodyMedium, color = MammotionColors.TextSecondary)
         KeyValueRow("Contact", date)
@@ -233,7 +258,7 @@ private fun EncounterDialog(event: DifficultyEvent, ui: DifficultyUi, photos: Li
         event.side?.takeIf { it != 0 }?.let { side ->
             KeyValueRow(tr("Bypassed", "Contourné"), (if (side > 0) tr("on the left", "par la gauche") else tr("on the right", "par la droite")) + if (event.inner == true) tr(", inner side", ", côté intérieur") else "")
         }
-        val around = ui.encounters.count { it.point.distance(event.point) <= fr.luba.poc.difficulty.PresumedObstacles.CLUSTER_M }
+        val around = ui.encounters.count { it.point.distance(event.point) <= PresumedObstacles.CLUSTER_M }
         if (around > 1) KeyValueRow(tr("Contacts at this place", "Contacts à cet endroit"), "$around")
         if (event.note.isNotBlank()) Text(event.note, style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
         // Contact under a saved obstacle: its sheet (size, deletion) is one tap away.
@@ -245,7 +270,7 @@ private fun EncounterDialog(event: DifficultyEvent, ui: DifficultyUi, photos: Li
         }
         // Presumed obstacle (several contacts): dismissed as a whole, otherwise it stays as long as two contacts remain.
         ObstacleSelection.presumedFor(event, ui.presumed)?.let { presumed ->
-            val count = PresumedObstacles.contactsOf(ui.events, presumed.id, System.currentTimeMillis()).size
+            val count = PresumedObstacles.contactsOf(ui.events, presumed.id, Clock.now()).size
             if (count > 1) SecondaryPillButton(tr("Dismiss this presumed obstacle ($count contacts)", "Écarter cet obstacle présumé ($count contacts)"), {
                 actions(DifficultyAction.DismissPresumed(presumed.id)); onClose()
             }, Modifier.fillMaxWidth())
@@ -259,9 +284,9 @@ private fun EncounterDialog(event: DifficultyEvent, ui: DifficultyUi, photos: Li
                 actions(DifficultyAction.Dismiss(event.id)); onClose()
             }, Modifier.weight(1f))
             PrimaryPillButton(tr("Save the obstacle", "Enregistrer l'obstacle"), {
-                val now = System.currentTimeMillis()
+                val now = Clock.now()
                 actions(DifficultyAction.Register(ObstacleSelection.fromEncounter(event, ui.presumed, kind,
-                    radius.toDouble(), margin.toDouble(), java.util.UUID.randomUUID().toString(), now, date)))
+                    radius.toDouble(), margin.toDouble(), UUID.randomUUID().toString(), now, date)))
                 onClose()
             }, Modifier.weight(1f))
         }

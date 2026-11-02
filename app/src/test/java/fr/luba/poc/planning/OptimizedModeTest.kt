@@ -1,10 +1,10 @@
 package fr.luba.poc.planning
 
 import fr.luba.poc.map.*
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import org.junit.Assert.*
+import org.junit.Test
 
 class OptimizedModeTest {
     /** L: horizontal arm 30 × 6 m, vertical arm 6 × 20 m standing on its left. */

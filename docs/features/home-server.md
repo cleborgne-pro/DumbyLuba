@@ -28,10 +28,15 @@ python3 home-server/server.py --data home-server/data/relay.sqlite3
 
 | Option | Default |
 |---|---|
-| `--host` | `0.0.0.0` (all interfaces; `127.0.0.1` for a local test) |
+| `--host` | `127.0.0.1` (this machine only) |
+| `--lan` | off; listens on every interface (`0.0.0.0`) for the phones and the browser |
 | `--port` | `8765` |
 | `--data` | `./data/relay.sqlite3` (relative to the current folder) |
 | `--code` | generated at first launch and stored in the database |
+
+The bind defaults to loopback because the protocol is plain HTTP and the six-digit code crosses the network in
+clear: `--lan` is explicit, refuses nothing on the LAN and prints a warning. The macOS installer starts the service
+with `--lan`.
 
 At startup the server prints `DumbyLuba: http://HOST:PORT/ — code NNNNNN`. The **six-digit code** is kept across
 restarts. The app also generates its own code the first time the Home server page is opened; to reuse it, pass

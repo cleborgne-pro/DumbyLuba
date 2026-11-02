@@ -7,7 +7,7 @@ Gradle project name and Android display name: **DumbyLuba**. The Android applica
 A smiling robot with a tuft of grass, built from native vectors. Forest background `#10291F`, mint shell `#A7F3B9`, green sprout `#68D991` and cream details. No external bitmap and no extra dependency.
 
 - `app/src/main/res/drawable/dumby_mark.xml`: symbol shared by the icon and the home screen.
-- `mipmap-anydpi-v26/ic_launcher.xml`: adaptive icon; Android 13 variant with a monochrome mask in `mipmap-anydpi-v33`.
+- `mipmap-anydpi/ic_launcher.xml`: adaptive icon, with the monochrome mask of the Android 13 themed icons (ignored before).
 - `drawable/dumby_splash_animated.xml`: animated grass and blinking eyes on the Android 12+ system splash screen.
 - `ui/brand/DumbyBrand.kt`: Compose intro on the forest background, progressive drawing of a mowing route, slight robot movement, the name "DumbyLuba", the tagline "Your garden, simply." and "Tap to continue" at the bottom. About 1.4 s (1,050 ms drawing, 150 ms pause, 180 ms fade-out), then a 220 ms crossfade to the home screen; a tap skips it. When animations are disabled in Android (animator duration scale 0), the app goes straight to the home screen. A recreation with saved state does not replay the intro. The tagline and the hint follow the [interface language](features/interface.md#language).
 - Brand colors in code: `DumbyBrand.Forest` `#10291F`, `DumbyBrand.Mint` `#A7F3B9`, `DumbyBrand.Cream` `#F0FFF3`.

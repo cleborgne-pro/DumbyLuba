@@ -1,5 +1,6 @@
 package fr.luba.poc.map
 
+import fr.luba.poc.Clock
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.protocol.TelemetryReducer
@@ -17,16 +18,20 @@ class StationReader(initial: MapStation? = null) {
         private set
     /** Start of the current charge: a position received before it (approaching the base) does not describe the station. */
     private var chargingSince: Long? = null
-    fun accept(message: LubaMsg, now: Long = System.currentTimeMillis()): MapStation? {
+    fun accept(message: LubaMsg, now: Long = Clock.now()): MapStation? {
         reducer.accept(message, now, now)
         val t = reducer.value
         if (message.hasSys() && message.sys.hasToappReportData() && message.sys.toappReportData.hasDev())
             chargingSince = if (t.chargeState in setOf(1, 2)) chargingSince ?: now else null
         if (message.hasNav() && message.nav.hasToappChgpileto()) {
-            val p = Point(t.baseX!!, t.baseY!!)
-            // A new position invalidates the old axis if the station was moved.
-            station = MapStation(p, station?.takeIf { it.point.distance(p) < 0.1 }?.entryHeadingDegrees,
-                "Transmise par le robot")
+            val baseX = t.baseX
+            val baseY = t.baseY
+            if (baseX != null && baseY != null) {
+                val p = Point(baseX, baseY)
+                // A new position invalidates the old axis if the station was moved.
+                station = MapStation(p, station?.takeIf { it.point.distance(p) < 0.1 }?.entryHeadingDegrees,
+                    "Transmise par le robot")
+            }
         }
         if (message.hasSys() && message.sys.hasToappReportData() &&
             (message.sys.toappReportData.hasDev() || message.sys.toappReportData.locationsCount > 0) &&
@@ -44,7 +49,8 @@ class StationReader(initial: MapStation? = null) {
 
     private fun sameStation(current: MapStation?, observed: MapStation): Boolean {
         val heading = current?.entryHeadingDegrees ?: return false
-        val turn = abs(MapHeading.normalize(observed.entryHeadingDegrees!! - heading + 180.0) - 180.0)
+        val observedHeading = observed.entryHeadingDegrees ?: return false
+        val turn = abs(MapHeading.normalize(observedHeading - heading + 180.0) - 180.0)
         return current.point.distance(observed.point) <= MOVE_M && turn <= TURN_DEG
     }
 

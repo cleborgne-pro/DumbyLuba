@@ -1,8 +1,9 @@
 package fr.luba.poc.camera
 
+import fr.luba.poc.i18n.tr
 import java.io.File
 import java.io.FileOutputStream
-import fr.luba.poc.i18n.tr
+import kotlin.math.hypot
 
 /** Saved obstacle photo: JPEG file and bumper contact context. */
 data class ObstaclePhoto(val file: File, val takenAt: Long, val contactAt: Long, val code: Int?, val x: Double?, val y: Double?) {
@@ -29,7 +30,7 @@ class ObstaclePhotoStore(filesDir: File, private val mirrorDir: File? = null) {
         check(temp.renameTo(file)) { tr("Photo not saved", "Photo non enregistrée") }
         runCatching { mirrorDir?.let { dir -> dir.mkdirs(); file.copyTo(File(dir, name), overwrite = true) } }
         prune(directory); mirrorDir?.let { runCatching { prune(it) } }
-        return parse(file)!!
+        return checkNotNull(parse(file)) { tr("Photo saved under an unreadable name", "Photo enregistrée sous un nom illisible") }
     }
 
     /** Most recent photos first. */
@@ -129,4 +130,4 @@ data class ObstaclePhotoUi(
 
 /** Photos taken within radius + margin + 0.5 m of the obstacle. */
 fun List<ObstaclePhoto>.near(x: Double, y: Double, reachM: Double): List<ObstaclePhoto> =
-    filter { p -> p.x != null && p.y != null && kotlin.math.hypot(p.x - x, p.y - y) <= reachM + 0.5 }
+    filter { p -> p.x != null && p.y != null && hypot(p.x - x, p.y - y) <= reachM + 0.5 }

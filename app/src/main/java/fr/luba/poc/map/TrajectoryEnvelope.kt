@@ -2,11 +2,10 @@ package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.obstacles.RobotEnvelope
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
-import org.locationtech.jts.geom.prep.PreparedGeometryFactory
-import org.locationtech.jts.geom.Geometry as JtsGeometry
 import kotlin.math.*
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
+import org.locationtech.jts.geom.GeometryFactory
 
 data class RobotPose(val position: Point, val headingDegrees: Double) {
     init { require(position.x.isFinite() && position.y.isFinite() && headingDegrees.isFinite()) { tr("Invalid robot pose", "Pose robot invalide") } }
@@ -199,7 +198,6 @@ class TrajectoryEnvelope(private val area: JtsGeometry, val robot: RobotEnvelope
         return null
     }
     fun requirePath(path: List<Point>, initialHeading: Double? = null, finalHeading: Double? = null) {
-        val collision = pathCollision(path,initialHeading,finalHeading)
-        require(collision == null) { collision!!.description }
+        pathCollision(path,initialHeading,finalHeading)?.let { throw IllegalArgumentException(it.description) }
     }
 }

@@ -1,10 +1,10 @@
 package fr.luba.poc.i18n
 
+import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
-import java.util.Locale
 
 class AppLanguageTest {
     private var property: String? = null

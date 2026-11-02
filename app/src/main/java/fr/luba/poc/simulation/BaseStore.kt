@@ -1,7 +1,9 @@
 package fr.luba.poc.simulation
 
 import android.content.Context
+import androidx.core.content.edit
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.MapHeading
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import java.security.MessageDigest
@@ -35,7 +37,7 @@ class BaseStore(context:Context,map:RobotMap) {
         val value=prefs.getString(key,null)?.split('|') ?: return null
         return try { MapBase(Point(value[0].toDouble(),value[1].toDouble()),value[2],value.getOrNull(3)?.toDoubleOrNull() ?: MapBase.DEFAULT_INFLUENCE_RADIUS_M,value.getOrNull(4)?.toDoubleOrNull()?.let { heading ->
             if(value.getOrNull(6)=="2" || value[2]=="Placée manuellement" || value[2]=="Démonstration") heading
-            else if(value[2].contains("recharge")) fr.luba.poc.map.MapHeading.migrateDockEntry(heading)
+            else if(value[2].contains("recharge")) MapHeading.migrateDockEntry(heading)
             else null
         },value.getOrNull(5)?.toDoubleOrNull() ?: 1.5) } catch(_:Exception) { null }
     }
@@ -55,7 +57,7 @@ class BaseStore(context:Context,map:RobotMap) {
     fun saveAccesses(paths:List<List<Point>>) {
         val array=org.json.JSONArray()
         paths.forEach { path -> val points=org.json.JSONArray(); path.forEach { points.put(org.json.JSONArray().put(it.x).put(it.y)) }; array.put(points) }
-        prefs.edit().putString("$key-accesses",array.toString()).apply()
+        prefs.edit { putString("$key-accesses",array.toString()) }
     }
-    fun save(base:MapBase) { prefs.edit().putString(key,"${base.point.x}|${base.point.y}|${base.origin}|${base.influenceRadiusM ?: ""}|${base.entryHeadingDegrees ?: ""}|${base.approachDistanceM}|2").apply() }
+    fun save(base:MapBase) { prefs.edit { putString(key,"${base.point.x}|${base.point.y}|${base.origin}|${base.influenceRadiusM ?: ""}|${base.entryHeadingDegrees ?: ""}|${base.approachDistanceM}|2") } }
 }

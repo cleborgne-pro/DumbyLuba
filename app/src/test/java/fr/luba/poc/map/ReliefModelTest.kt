@@ -4,15 +4,15 @@ import fr.luba.poc.simulation.MowingSimulation
 import fr.luba.poc.simulation.SimConfig
 import fr.luba.poc.simulation.SimPhase
 import fr.luba.poc.simulation.TrajectoryPlanner
-import org.junit.Assert.*
-import org.junit.Rule
-import org.junit.Test
-import org.junit.rules.TemporaryFolder
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.math.tan
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class ReliefModelTest {
     @get:Rule val temp = TemporaryFolder()

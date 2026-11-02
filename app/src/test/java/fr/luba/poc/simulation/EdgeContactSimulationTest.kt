@@ -3,12 +3,12 @@ package fr.luba.poc.simulation
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.planning.RoutePlanning
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import org.junit.Assert.*
+import org.junit.Test
 
 /**
  * Border contacts played by the obstacle simulation ([ObstacleEncounterSimulation], same classification and resume as
@@ -112,7 +112,7 @@ class EdgeContactSimulationTest {
      * (2.7): 1 contact classified LIMIT, no obstacle, no repair, back-off of 0.3 to 1.0 m, link <= 2 m, skipped cutting
      * <= 1.0 m, route finished.
      */
-    @Test(timeout = 900000) fun referenceZonePassEndingAtTheBorderBacksOffAndResumes() {
+    @Test(timeout = 600000) fun referenceZonePassEndingAtTheBorderBacksOffAndResumes() {
         val replay = enferReplay(beyondM = 0.06, slideMps = 0.3, slideM = 0.3, holdAfterBackOff = true)
         val sim = replay.sim
         assertEquals(sim.message, EncounterPhase.DONE, sim.phase)
@@ -140,7 +140,7 @@ class EdgeContactSimulationTest {
      * 52 m blades-OFF link computed around that obstacle. Now a contact within 1.5 m of an obstacle discovered during
      * the mission is an object at the edge (`near_obstacle`), and any limit contact left keeps a link <= 2 m (plan 2.7).
      */
-    @Test(timeout = 900000) fun limitContactNextToAnObjectAtTheEdgeKeepsAShortLink() {
+    @Test(timeout = 600000) fun limitContactNextToAnObjectAtTheEdgeKeepsAShortLink() {
         val sim = enferReplay(beyondM = 0.0, slideMps = 0.12, slideM = 0.22, holdAfterBackOff = false).sim
         assertEquals(sim.message, EncounterPhase.DONE, sim.phase)
         assertTrue(sim.contacts.size >= 2)
@@ -160,7 +160,7 @@ class EdgeContactSimulationTest {
      * about 0.26 m) played with a cap lowered to 0.1 m. The limit path is dropped (note logged, not counted as a border
      * contact, no resume) and the contact goes down the obstacle path: estimated obstacle, repair, route finished.
      */
-    @Test(timeout = 900000) fun limitContactWithATooLongResumeLinkTakesTheObstaclePath() {
+    @Test(timeout = 600000) fun limitContactWithATooLongResumeLinkTakesTheObstaclePath() {
         val sim = enferReplay(beyondM = 0.06, slideMps = 0.3, slideM = 0.3, holdAfterBackOff = true, limitLinkMaxM = 0.1).sim
         assertTrue(sim.contacts.isNotEmpty())
         val first = sim.contacts.first()

@@ -1,8 +1,9 @@
 package fr.luba.poc.planning
 
 import fr.luba.poc.i18n.tr
-import org.locationtech.jts.geom.Polygon
+import fr.luba.poc.map.Point
 import org.locationtech.jts.geom.Geometry as JtsGeometry
+import org.locationtech.jts.geom.Polygon
 
 /** Interchangeable decomposers; coordinates already rotated into the sweep frame. */
 internal class PlanningBudgetExceeded(message: String) : IllegalArgumentException(message)
@@ -36,8 +37,8 @@ internal class BoustrophedonDecomposer(private val maximumEvents: Int = 512) : T
         var previous=emptyList<Pair<JtsGeometry,Int>>()
         for ((low,high) in events.zipWithNext()) {
             if (high-low<=1e-12) continue
-            val slab=polygon(listOf(fr.luba.poc.map.Point(box.minX-1,low),fr.luba.poc.map.Point(box.maxX+1,low),
-                fr.luba.poc.map.Point(box.maxX+1,high),fr.luba.poc.map.Point(box.minX-1,high)))
+            val slab=polygon(listOf(Point(box.minX-1,low),Point(box.maxX+1,low),
+                Point(box.maxX+1,high),Point(box.minX-1,high)))
             val pieces=parts(domain.intersection(slab)).filterIsInstance<Polygon>().filter { it.area>1e-12 }
                 .sortedBy { it.envelopeInternal.minX }
             val parents=pieces.map { piece -> previous.indices.filter { p -> piece.intersection(previous[p].first).length>1e-9 } }

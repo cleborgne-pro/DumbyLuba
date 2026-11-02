@@ -1,14 +1,14 @@
 package fr.luba.poc.map
 
-import fr.luba.poc.protocol.Commands
 import fr.luba.poc.proto.CommonProto.CommDataCouple
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlNavProto.*
-import org.junit.Assert.*
-import org.junit.Test
+import fr.luba.poc.protocol.Commands
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.hypot
+import org.junit.Assert.*
+import org.junit.Test
 
 private const val SQUARE = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><path d=\"M10 10H90V90H10Z\" fill=\"#111\"/></svg>"
 

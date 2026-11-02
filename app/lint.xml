@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Robot photos (res/drawable-mdpi): a single copy, scaled by Android for the screen density as it always was (the
+         home screen layout follows their intrinsic size). No other density on purpose: smaller APK, and the photos
+         can be removed on request of their owner (RULES.md). -->
+    <issue id="IconMissingDensityFolder" severity="ignore" />
+    <!-- Dependency versions are updated by Renovate (renovate.json), not reported at every lint run. -->
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+</lint>

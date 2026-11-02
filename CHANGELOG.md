@@ -1394,3 +1394,236 @@ New tests: `RouteManoeuvresTest`, cases in `PathFollowerTest` and `TurnOptimizer
 **Shorter planner sweeps and selective deployment tests**: `tools/deploy.sh` runs the planner sweeps on the reference map only when the branch touches the planner (`map/`, `planning/`, `simulation/`, `obstacles/`, test resources, build files; `DEPLOY_FULL_TESTS=1` forces them). The reference map check is split by mode (`ReferenceMapPlannerZamboniSpiralTest` for Zamboni and Spiral) and the Zamboni spacing sweeps get their own class (`ZamboniQaSpacingTest`), so that the two test processes share them. Fewer redundant cases, every zone and every dimension kept: the mixed border/no-go passes (2/4, 4/2) at 25 cm only, the Zamboni determinism checked at 25 cm and on the first session, the Zamboni manual angles of the QA reduced to 0° and 151° (every 15° stays in `ZamboniManualAngleReproTest`). The robot bench watchers read every event logged since their previous tick (`RobotBench.newEvents`) instead of the last 20 or 40: on a loaded machine more lines came between two ticks and `RobotBleBlockageTest` missed the "route repaired" event of a bypass that had taken place.
 
 **Faster quick checks and builds**: the event log keeps its current part open between lines and reads the free disk space every 256 KB instead of opening the file, its external copy and the file system statistics for each line; the robot bench waited for this writer during more than half of its tests (`RobotBle*` classes 129 s → 73 s, also less work on the phone). Without the planner sweeps (`-PlubaQuickTests`: `tools/check.sh quick`, deployments that leave the planner alone) the tests run in four processes instead of two, their longest classes waiting in real time: 5:04 → 2:58 for the quick tests. The Dalvik register check of the Fold APK is up to date while the APK is unchanged (an up-to-date build: 14 s → 0.8 s) and, when it runs, skips the library dex files and the disassembly (11 s → 1.7 s, same methods and counts).
+
+Version 1.18.0 (188): **adaptive speed, return lanes to the base and return on confirmed rain**. Routes computed
+without a button, a zone painted from Mow, shorter resumes after a trajectory exit, live camera and robot error labels
+working again in the published app, robots on Mammotion's older Aliyun cloud, a full log that no longer stops the
+robot, and ESP32 gateway firmware gateway-0.6.0 (battery level, start reason and journal, Gateway restarted alert).
+
+**Faster builds and deployments**: the Fold variant no longer runs the "lint vital" analysis that Android runs on every assembly of a non-debuggable variant; it took 30 s for a one-line change and slowed the dexing running next to it (assembly 55 s → 11 to 14 s, `tools/check.sh quick` included), while `tools/deploy.sh` and `tools/check.sh full` keep the complete `lintFold`, which reports every fatal issue; the release variant keeps it. Lint no longer analyses the unit test sources (1 min 14 s of CPU at each deployment, competing with the tests): deployment without the planner sweeps 4:51 → 4:02 on a loaded machine. `tools/deploy.sh` starts the new ADB session before the build, so the wireless devices reconnect while Gradle works (no extra 3 s wait when they are already back), and installs every device at the same time, each output line prefixed with its serial number (the Redmi gateway spends about 65 s in dex2oat).
+
+**Zamboni along slanted borders**: most Zamboni U-turns stayed pivots along slanted or curved borders, since a rolling U-turn was only tried with both passes shortened alike, which leaves the shortened parts unmowed where the pass ends are staggered. Zamboni now also computes an oblique U-turn: the longer pass is shortened more (2 × 0.35 m × stagger / distance between the passes), so that the straight part of the U runs along the border within the pass ends, checked like the passes. The acute corner by the longer end, which a 0.35 m arc cannot reach, is left unswept up to 0.3 m of pass (about 0.06 m² per U-turn at 30°) and counted in the cost of the order; passes shorter than 1.5 m once shortened keep the pivots, and a route left without a safe order by them is computed without them. Reference map at 25 cm: U-turns without pivot in the regular cells 38 → 69 %, pivots ×0.81 → ×0.59 of Zigzag, wear ×0.94 → ×0.86, coverage within 0.15 point of Zigzag, missions −3.9 to +0.7 %, mowed part after a stop more in one piece (0.89 → 0.92); a user's lawn with a long slanted side: 25 of 68 → 52 of 71 on its main zone (coverage 99.99 → 99.85 %, mission −1.0 %). Other modes unchanged. It replaces the turn band setting added earlier in this version (perimeter loops along the boundary), which cost up to 1.2 point of surface and up to 15 % of mission time. See [Zamboni](docs/features/mowing-preparation.md#zamboni-experimental) and [ENGINE.md](docs/path-planning/ENGINE.md#oblique-u-turns). New tests: `TurnOptimizerTest` (oblique U), `CoveragePlannerTest` (rectangle at 30°), tighter bounds in `ZamboniReferenceTest`.
+
+**Repository audit (2026-10-30)**: the tooling, build, security and diagnostics recommendations are applied. Tooling: a version catalog (`gradle/libs.versions.toml`) with Renovate, ktlint with a reduced rule set and `.editorconfig`, and a GitLab CI pipeline (lint, quick tests, home server, relay web page). Build: the published release is minified and resource-shrunk (R8 keep rules in `app/proguard-rules.pro`), and both `tools/publication/export-public.sh --verifier` and `tools/publication/release.sh` build, test and lint the release variant; test slots are shared by worktrees and derived from the cores; Gradle runs projects in parallel with the configuration cache. Performance: the Compose compiler knows the UI lists and maps are stable, and a property test checks that every published route stays inside the free area on random maps. Time is injected: `Clock.now()`/`Clock.elapsed()` replace the scattered `System.currentTimeMillis()`/`SystemClock.elapsedRealtime()` calls of the business logic, so a test drives time instead of sleeping. Security: the Agora Web SDK is vendored under a Content Security Policy that refuses remote scripts, the obstacle-photo bridge bounds its base64 payload, plain HTTP is limited to the local network (runtime `LocalNetwork` guard for the gateway and the home server, external domains refuse cleartext), and the home server binds to loopback unless `--lan` is given. Diagnostics: the Service screen aggregates the launch's STOP requests, failures, link losses and average route preparation from the event log; `WRITE_SECURE_SETTINGS` and the local-network threat model are documented in `SECURITY.md`. The dated reports are indexed in `docs/README.md`, and the instrumentation runner (`PlannerDeviceBenchmark`) is documented in `CONTRIBUTING.md`. The remaining structural work (splitting the 7 800-line `RobotBle` into its six collaborators, per-domain UI flows, a Baseline Profile, replacing the unmaintained Paho MQTT client) is tracked in the audit.
+
+**Readability and test guard rails**: the 663 inline fully-qualified names of the main sources (`fr.luba.poc.planning.RoutePlanning.coverage(…)`) are plain imports again, in 110 files; ktlint cannot rewrite them on its own, so the rule is stated in `CONTRIBUTING.md`. `BilingualTextGuardTest` fails the build when a French literal is assigned directly to a shown text, or when the English argument of `tr()` carries an accent: the bilingual rule of `CONTRIBUTING.md` now has a test instead of relying on review. JVM tests bound their timeout to 15 minutes (the reference sweeps went from 30 and 60 minutes), so a hung test fails the run instead of holding the machine for an hour. The home-server macOS installer starts the service with `--lan` (the new loopback default would otherwise make the phones unable to reach it) and its test checks the flag.
+
+**Audit follow-up, targeted fixes**: the Mammotion account MQTT connection no longer uses Eclipse Paho (unmaintained since 2019): `MqttSubscriber` is a minimal MQTT 3.1.1 subscriber written for the only use the app has (TLS with SNI and host-name check, user name and password, clean session, QoS 0 subscriptions, reception at any QoS with the required acknowledgements, keep-alive pings, broker silent for 1.5 periods = connection lost); it never publishes, the cloud stays read-only for the robot. It is tested byte by byte against a scripted broker (`MqttSubscriberTest`); the connection to the real Mammotion broker is still to be checked from the Account screen. The non-null assertions (`!!`) of the command and link paths are gone: the Follow/Mow buttons of the simulation read the route once and do nothing if it was cleared meanwhile, the gateway STOP and confirmed writes keep their confirmation queues instead of re-reading a nullable field, the cloud return and update trackers no longer assert their state. A background link service that Android refuses to start or stop is now written to the event log instead of being ignored. Home server: each database connection runs one explicit transaction (autocommit driver mode, `BEGIN`/`COMMIT`, rollback on any error), the snapshot ingestion takes the write lock with `BEGIN IMMEDIATE` before reading, and the schema is created statement by statement.
+
+**Robot model split and code guidelines**: `RobotBle`, the view model of the connected robot, went from 7 756 to 2 190 lines. It keeps the link, the command queue and its `send()` barrier, the stop and the shared state; each activity moved, unchanged, into a collaborator of its own (route missions, moves and navigation tests, recovery after a stop, safety tests, blades, manual driving, frontal border test, firmware mowing observation, diagnostic campaign, alerts, task history, difficulties, obstacle photo, sensor probe, signal surveys, calibration). Screens keep calling `RobotBle`, whose public functions delegate in one line. The app shell (navigation bar, STOP bar, keep-screen-on, background search) now follows `RobotShellUi`, a projection of the robot state without the telemetry, and only the page content follows the full state: the shell no longer recomposes at every position (5 Hz while a route is tracked). New [code guidelines](docs/CODE_GUIDELINES.md) describe this structure and the Kotlin, size and test rules; `CodeGuardrailsTest` enforces the mechanical ones (no empty `catch`, no `System.currentTimeMillis()` outside `Clock`, no `GlobalScope`, no inline `fr.luba.poc.x.Y`, `!!` and `Thread.sleep` counts and large file sizes that may only go down, new files under 800 lines). No behaviour change intended: the full quick suite passes, the split itself was not tried on the robot.
+
+**Presumed obstacles on the map**: presumed obstacles (repeated or recent bumper contacts) avoided by route preparation
+appeared in the mowing preview but not on the map when the Obstacles layer was off, and tapping one only opened its
+nearest contact. They are now drawn and tappable whenever routes avoid them, and open their own card: contacts, last
+contact, latest contact (photo), exclusion size prefilled with the estimate, **Dismiss** or **Save the obstacle** at
+its center, then edited like any saved obstacle. New tests in `ObstacleSelectionTest`.
+
+**Live camera playing again**: since the repository audit of 2026-10-30, the camera stayed on "Video SDK missing" and
+no stream ever showed (live view, Camera page, obstacle photo). The vendored Agora SDK is referenced relative to the
+player page, whose HTTPS origin (`appassets.androidplatform.net`) is not a real host: nothing served it, so the SDK
+never loaded. The WebView now serves the files of `assets/camera` under that origin (and only them). The page's
+Content Security Policy also blocked the stream once the SDK loaded: Agora edge servers listen on their own ports
+(`wss://<ip>.edge.agora.io:<port>`, refused without `:*`), its fallback domains (`*.sd-rtn.com`) and its blob worker
+were missing. See [CAMERA.md](docs/CAMERA.md). Tests: `CameraControllerTest`.
+
+**Shorter quick checks**: the quick tests (`tools/check.sh quick`, deployments that do not touch the planner) take about 2 minutes instead of 3 min 20 s (121 to 125 s of test run instead of 195 to 202 s, measured one after the other on 2026-10-31). The reference-map tests of 3.5 s or more that only use the map, planning and simulation packages (`FastPipelineTest`, `OptimizedModeTest`, `ObstacleBypassTest`…, 170 of the 600 s of test classes) join the planner sweeps: they run in `tools/check.sh planner` and `full`, and in every deployment that touches the planner. That only pays off because the real-time classes stopped holding a test process: the gateway autonomy tests run their methods at the same time (`ConcurrentMethods`; `GatewayAutonomyTest` 114 s → 34 s), and the robot bench no longer reads the stack of every worker every 2 ms (30 000 JVM safepoints a second, which also stopped the route computations it was waiting for) nor sleeps 2 to 5 ms between two checks, which macOS stretches to 11 to 36 ms outside an interactive app (`RobotBleIncidentsTest` 40 s → 15 s, `RobotBleTonteTest` 36 s → 11 s run alone). The bench now also waits for coroutines dispatched but not started yet and for any app code computing in the background, so faster virtual steps do not run ahead of a route repair on a loaded machine.
+
+**Build outputs out of the Spotlight index**: Gradle writes to `build.noindex/` (`app/build.noindex/` for the APK, test results and reports) and the Kotlin compiler state to `.kotlin.noindex/`, instead of `build/` and `.kotlin/`. Spotlight skips any folder whose name ends in `.noindex`; it was indexing the thousands of class, dex and test result files of every build (`mds` at 40 to 55 % of a core during the test runs of 2026-10-31), in every session worktree. No exclusion to set by hand on each machine. Scripts, CI artifacts and documented commands use the new paths; the publication scripts also clean the old ones. `~/.gradle` and the project `.gradle/` stay indexed: add them to Spotlight's privacy list if needed.
+
+**Maintainability pass (2026-10-31)**: the code rules of [CODE_GUIDELINES.md](docs/CODE_GUIDELINES.md) are applied
+beyond the planner. Non-null assertions (`!!`) go from 70 to 31: the remaining ones are all in planner files
+(`planning/`, `CoveragePlanner`, sweeps, `simulation/`), to be removed with the next planner change and its
+reference map sweeps. They give way to local values that the compiler can check (rain decision, map editors,
+gateway panel, replay, alert deduplication), `?:` fallbacks and `checkNotNull` with a reason; the cut height check
+written three times becomes `CutHeightRange.requireHeight`. The map correction editor (926 lines) leaves its panels
+to `MapCorrectionPanels.kt` and falls under the 800-line limit. `RobotBle.receive` (248 lines) now lists one named
+handler per domain, in the same order; the BLE map reading moves to its own collaborator `RobotMapReader`, and the
+telemetry quality counters of the diagnostic campaign to `TelemetryStats`, which owns them (nine fields of `RobotBle`
+written by `DiagnosticCampaign` before); `RobotBle` goes from 2 190 to 2 128 lines. `CodeGuardrailsTest` now also
+checks the function size rule (150 lines for a new function, ceilings for the eleven longer ones). One change seen
+in the log only: a failure to cache the base read from the robot is logged (`map_cache_error`) instead of ignored.
+The mowing history, zone directions and task track files, and their writer coroutines, move from `RobotBle` to
+`TaskHistoryRecorder`, their only user (`RobotBle`: 2 069 lines); a history or zone directions file that cannot be
+written is now logged (`local_save_failed`) instead of ignored (test: `TaskHistoryFilesTest`). The two empty
+`catch` blocks still tolerated in the planner say why the failure is ignored (comments only, reference map sweeps
+run), so the empty catch rule has no exception left.
+
+**Shorter end-of-session checks and publications**: the planner sweeps on the reference map are a Gradle task of
+their own (`testFoldPlannerSweeps`, `testReleasePlannerSweeps`) instead of a filter of the unit test task, so a full
+suite after a quick check only adds the sweeps instead of running the 2 200 other tests again. `tools/check.sh auto`
+is the check of deployments and of `.agentdeck/session-check.sh` (new, run by `session.sh finish` after the rebase):
+a branch rebased on `main` then deployed passes the finish check with every task up to date. A version bump in
+`app/build.gradle.kts` no longer counts as a planner change. Publication: `release.sh` no longer runs the unit
+tests again on the tree that `export-public.sh --verifier` already tested, builds the ESP32 firmware while Gradle
+builds the APK, keeps PlatformIO (about 7 GB of pioarduino packages) in a persistent cache instead of a temporary
+folder, pins `pioarduino` 6.2.0 in the platform's own Python environment (it installed 6.2.0.post1, which the
+platform then refused after a 7-minute build) and runs esptool from that environment; both scripts keep the Gradle
+daemon. On a dry run with a warm cache, `release.sh` takes 40 s instead of about 10 minutes. `.agentdeck/session-bootstrap.sh` copies `local.properties` into new
+session worktrees.
+
+**Imports instead of inline library names**: 340 inline fully-qualified library class names (`kotlinx.coroutines.Dispatchers.IO`,
+`android.os.Build.VERSION.SDK_INT`, `java.util.Base64`…) in 91 files, and 179 function calls (`kotlin.math.abs(…)`,
+`kotlinx.coroutines.withContext(…)`) in 63 files, become imports. The 56 left are in `MainActivity.kt` (changed by
+another session at the time) or clash with a project or local name (`Color`, `delay`); `CodeGuardrailsTest` keeps them
+as a ceiling that may only go down. File size ceilings no longer count import lines, so that importing a name never
+counts as growth. No behaviour change.
+
+**Gateway panel split by role**: `GatewayPanel` (216 lines) keeps the role choice and the gateway option of the pilot,
+and hands the rest to `GatewaySideGroups` (this phone is the gateway) and `PilotSideGroups` (pairing, gateways on the
+Wi-Fi, connection, routes, updates), which share the settings and the last message through `GatewayPanelState`. The
+moved code is unchanged; `GatewayPanelTest` checks the groups of each role and the shared settings, before and after
+the split. No visible change.
+
+**Camera host split by concern**: `CameraHost` (279 lines) keeps the player creation and the thumbnail, and calls
+`StreamStartEffects` (player loading, channel join, first frame timeouts, 4G refresh), `ObstaclePhotoEffects`,
+`LiveCameraEffects` (live view supervision, background cut) and `FrozenFrameWatchdog`, in the same order. The effects
+are moved unchanged; every state they read during composition is Compose state, so each part still recomposes when
+it should. `CameraHostTest` (obstacle photo without an account, live view blocked reason) passes before and after.
+
+**ESP32 gateway battery level on the T-Call**: the level no longer reads 100 % for hours then falls to 0 in a few steps. The four LEDs of the IP5306 are spread inside the current step from the time spent in it (`gw_battery_steps`): never outside the raw step, 90 % of the step at most so the gauge still announces the next one, 5 % at least while a LED is lit so the cutting rule (4 % or less) triggers where it did. The duration of each step is learned across discharges and kept in non-volatile memory; with external power the raw step is reported. `/status` adds `power.level_step` (raw step). 12 native tests (`test_battery_steps`); firmware not built nor tried on the board in this session.
+
+**ESP32 gateway**: `/status` and the boot line on the console give the reason of the last start (`reset_reason`: power on, software restart, crash, watchdog, brownout, reset button), to tell a crash from a supply that sags when the board restarts by itself.
+
+**ESP32 gateway journal**: `http://dumbyluba-esp32.local/log` (or `log` on the console) tells afterwards why the board stopped or restarted by itself on the robot, without a console. The last 8 starts with their reason and how the run before each one ended (duration, last seen, battery level, battery or external power, Wi-Fi, robot, lowest internal heap), kept in non-volatile memory so a battery that ran out still shows; the last console lines of the previous run (gateway lines, NimBLE and ESP-IDF log, ROM output), 4 KB kept in RTC memory through a crash, a watchdog or a restart. The code, the pairing link and the access point password stay on the console only. Serial `crash` command to check it. Tried on the T-Call: software restart, deliberate crash, reset through EN; 10 native tests (`test_journal`).
+
+**Compose tests run again in every check**: the 63 Compose tests of 16 classes (map, preview settings, history, camera,
+gateway panel, map sync, manual recording…) were skipped by `tools/check.sh`, the deployments and the CI since these
+moved to the fold variant on 2026-10-29: they only ran in debug, the only variant with the test activity. They now
+declare that activity to Robolectric (`withComposeTestActivity`) and run on any variant; `CodeGuardrailsTest` refuses a
+test skipped by build type. Run again, they all pass after the splits of 2026-10-31, except `DrivenRecordPageLayoutTest`
+when a camera test ran before it in the same process (blocking reason left in `LiveCamera`): it now sets it. No app change.
+
+**Updates row on a development build**: on a development build (fr.luba.poc, Fold), Me → About → Updates showed the
+newer published version but a tap only checked GitHub again, so nothing seemed to happen. When the published release is
+newer than the installed version, the row now opens its release page, and says that the published app is a separate app
+installing next to the development build (its own data). An app missing to open the page is now reported instead of
+ignored. Fix of 2026-10-24 left on its branch, brought onto the current code.
+
+**Android lint without warnings**: the 101 warnings and 39 hints of `lintFold` are fixed. Compose number states without
+boxing (39), preferences written with core-ktx `edit { }` and `toUri()` (57; the four writes whose result is checked go
+through `commitNow { }`), `Modifier` first among the optional parameters of the shared components (304 calls name the
+moved argument), a single adaptive icon file with its monochrome mask (`mipmap-anydpi`), robot photos in
+`drawable-mdpi` (same density as before, so the same size on screen), explicit backup rules for Android 12 and later
+(no cloud backup, as before). The deliberate cases say why where they are: cleartext on the local network, the splash
+icon and the illustration at their size, objects that hold only the application context, a cheap free space check.
+Dependency versions are left to Renovate (`app/lint.xml`). A new lint warning now fails the check
+(`warningsAsErrors`). No behaviour change.
+
+**Imports in MainActivity**: the 38 inline library names left in `MainActivity.kt` (`android.content.Intent`,
+`androidx.compose.ui.window.Dialog`, `kotlinx.coroutines.delay(…)`…) become imports. 17 remain in the app, all clashing
+with another name in their file (`Color` of Android and of Compose, a local `delay`) or inside a string (permission
+and broadcast names); `CodeGuardrailsTest` lowers its ceiling from 56 to 17. No behaviour change.
+
+**Robots on Mammotion's older Aliyun cloud** ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3)): the robots sold before 2025, LUBA 1 among them, stay bound to Mammotion's former cloud run by Aliyun, which the device page of the Mammotion cloud does not list; such an account showed "No device in the account", then "Your LUBA is on Mammotion's older cloud (Aliyun), which this app does not support yet". When that page is empty, the app now signs in to the Aliyun cloud from the Mammotion session, as PyMammotion does (authorization code, region of the account's country, open account sign-in, app identity of the phone, IoT session; every request carries the Aliyun API gateway signature, region endpoints accepted only under `aliyuncs.com`), lists its robots ("1 LUBA in the account (older Aliyun cloud)") and reads them like the others: map, position, battery, details and native return go through Aliyun's `thing/service/invoke` behind the same `CloudReadOnly` barrier, the answers arrive on the Aliyun MQTT broker (TLS trusting only the Aliyun IoT and GlobalSign roots, account bind with the IoT token, the only message the app publishes, to the broker and not to the robot). Shares are never accepted, nothing is bound or unbound; "account in use by another session" (bind 2152) asks to close the Mammotion app. When the Aliyun cloud cannot be reached, the status gives the reason and asks for the diagnostics export; the log keeps each request of the chain (path, domain, HTTP and API codes), the robots found and the bind code, never a token, a code or an identifier. Checked against a simulated cloud and vectors of the reference signatures (`AliyunSignatureTest`, `AliyunCloudTest`, `AliyunBrokerTest`, new cases in `CloudViewModelTest` and `MqttSubscriberTest`); not tried on a real LUBA 1 yet. See [Older Aliyun cloud](docs/features/mammotion-account.md#older-aliyun-cloud).
+
+**Robot error labels in the published app**: since the published APK is minified (2026-10-30), R8 moved `RobotErrorCatalog` to another package, where the table of the 664 Mammotion codes, looked up next to the class, was no longer found: every robot error showed "code not in the Mammotion table", without advice, in the unknown category (only lift and bumper codes kept theirs). The table is now loaded by absolute path, checked in the minified APK. The development (Fold) build, not minified, was not affected. Same fix for the Aliyun root certificates added in this version. New test in `RobotErrorCatalogTest`.
+
+**Shorter resume after a trajectory exit**: once the robot had strayed from its route (deviation beyond 30 cm, chassis
+outside the safe corridor, border contact), the blades-off link always went back to the route level with the
+interrupted spot whenever that link was safe. A robot 30 cm beside its pass made two pivots of about 90° to come back
+sideways next to itself, and a robot that went past the end of its pass turned round to drive back to the corner, then
+made the U-turn. Entries up to 1 m further on now compete on their cost (`DriftRecovery.rejoinSeconds`: driving and
+pivot time of the link at the robot's measured pivot rate and stop time, minus the stretch of the route it skips, plus
+2 s per skipped cutting metre): the robot meets its pass about 1 m further on with a slight angle, or heads straight
+for the next pass. Entries further on (up to 4 m) are still only used when none of these is safe; repeated exits at
+the same spot still rejoin at least 1 m further each time. Same rule on the Fold, for the gateway's resumes and in the
+obstacle simulation.
+
+**Disturbance bench**: `DisturbanceBenchTest` plays a garden-sized route with the actual mowing tracking on disturbed ground (cross-slope, slope towards the border, pivot slide, wheel held by a branch, wet patch, wheels spinning on a branch or a root, RTK degraded under a tree, branch lying across a pass) and measures how the mission ends and how far the chassis goes beyond the drawn border; `SimulatedRobot` gains a ground model (traction, drift, yaw) and the obstacle simulation a free outline and a position noise that depends on the place. The obstacle simulation now handles a presumed blockage (wheels turning without moving for 3 s) like real mowing, with an estimated obstacle in front of the robot, a back-off and a bypass, instead of ending the mission. The seven points the bench found (degraded RTK stops the mission, no recovery from a drift out of the border loop, symmetric tolerance next to the border, pivots of the border loop sweeping 11-13 cm beyond it on flat ground, steady cross-slope, creeping uphill read as a blockage, a branch that lets go still costing a bypass) are listed in [DISTURBANCE_BENCH.md](docs/DISTURBANCE_BENCH.md).
+
+**Paint a zone from Mow**: painting the part of a lawn to mow is now chosen in Map → **Mow**, at the zone choice: **Whole zones** / **Paint a zone** at the top of the panel, then **Paint / Erase / Move**, brush size, undo and clear right on the map (one finger paints, two fingers move the view), the retained area outlined in orange ("33.2 m² outside no-go zones · 1 painted zone"). **Next** opens the usual task: the painted pieces are its zones ("1. Painted zone 1"), with every mode and setting, the route preview, the simulation, the start and the resume ("Partial mowing interrupted"); the route is still prepared and checked on the unchanged robot map, blades kept running inside the painted pieces, 80 % minimum coverage. A start chosen in the preview is not saved for a painted zone. The Service → **Trial mowing (painted zone)** page leaves the Service summary: renamed **Finishing the gaps**, it only hosts the finishing opened from a mowing report. Before, the map gestures and the path of the move to a point leave `MapScreenContent` (`MapGestures.kt`, `PointPlanEffect`), without behaviour change. New tests in `PaintedZoneTest` and `MapPaintedZoneTest`. See [Paint a zone](docs/features/mowing-preparation.md#paint-a-zone).
+
+**Adaptive speed and narrow passages**: the travel speed becomes a ceiling, lowered where precision matters more than
+pace. Narrow passages (the robot centre cannot keep 50 cm from both sides) and the transit band of a **Danger** border
+portion are driven at 60 % of it, the difficult areas of the difficulty heatmap (repeated contacts, slides, blockages)
+at 70 % (precision mode), and the RTK solution counts live: 60 % in float, 50 % in single, without RTK or without an RTK
+report for 10 s. The slowed stretches are computed with the route on its geometry, so a long transit edge is only
+slowed where it crosses the area, from 50 cm before it; never below about 0.1 m/s (the LUBA 2 creeps below and a slope
+reads as a blockage). Same rule for the tracking from the phone, the Redmi gateway and the ESP32 gateway: the stretches
+travel with the route (optional trailing field of the leg, ignored by an older gateway); the simulation drives them at
+the same speed and the route preview lists them ("Slower: 12 m (narrow passages 4 m, near Danger borders 8 m)").
+Through a narrow passage, the transit now keeps to the middle instead of grazing one side at the safety margin: the
+shortest path is searched in the passage shrunk by 30, 20, 12 or 6 cm, the widest that still connects within 50 cm or
+5 % of extra length. Around the bend of a 95 cm passage, the robot centre passes 0.43 m from the inner corner instead
+of 0.31 m. See [adaptive speed](docs/features/real-mowing.md#adaptive-speed). Tests: `AdaptiveSpeedTest`,
+`NarrowPassageCentringTest`, `LegRunnerTest`, ESP32 `test_autonomy`. Not tried on the robot.
+
+**Return lanes to the base**: the returns no longer all drive the same last metres in front of the base, where the
+wheels wore a rut. They alternate between the direct return and four lanes through a point 3 m in front of the
+approach point, shifted 0.8 or 1.6 m sideways; each lane costs its extra length, 4 m per use among the last 6 returns
+to this base and 2 m per metre through a difficult area, and a lane more than 3 m (or 15 %) longer than the direct
+return is not used. The lanes of the last 12 returns are kept per base between launches. Final return, recharge and
+end-of-hours returns, **Recharge** and the return after a mowing finished during a recharge; same route checks as
+before; the simulation keeps the direct return for its estimate. On a 20 × 14 m lawn, five returns from the same corner
+used the five lanes, at most 1.2 m longer. See [return lanes](docs/features/real-mowing.md#return-lanes-to-the-base).
+Tests: `ReturnLanesTest`. Not tried on the robot.
+
+**Return to base on confirmed rain**: the rain decision can now act. With **Return to base on confirmed rain**
+switched on (Service → Rain and weather → Settings; off by default, the radar thresholds are not calibrated on real
+showers yet), confirmed rain stops a mowing like the end of the working hours: blades OFF, return along the recharge
+route, official docking, progress kept. On the base the robot waits; stale weather is never taken for dry weather. The
+mowing resumes by itself once the decision is back to dry (30 min without rain) and the robot has waited 30 min on the
+base, at most twice per mowing, given up after 6 h or 3 refused resumes (then resume by hand). Monitoring, imminent
+rain, an isolated echo or a forecast only raise the usual alert. See [rain return](docs/features/rain-and-weather.md#return-to-base-on-confirmed-rain).
+Tests: `RainReturnTest`, `RobotBleRainReturnTest` (simulated robot: rain, return, wait, resume). Not tried on the robot.
+
+**Switches for the smart features**: Map → **Mow** → **Task settings** → **Smart features** groups one switch per
+optional feature, shared by all tasks and kept between launches: **Adaptive speed** (on by default; off, the travel
+speed applies everywhere, RTK included, also on the Redmi and ESP32 gateways, which receive the switch with each route),
+**Return lanes** (on by default; off, every return to the base is the direct one) and **Return to base on confirmed
+rain** (off by default; the same switch as in Rain and weather, available once rain monitoring and the garden position
+are set). The centring through narrow passages stays on (route computation). Tests: `AdaptiveSpeedTest`,
+`ReturnLanesTest`, `LegRunnerTest`, `SmartFeaturesGroupTest`, ESP32 `test_autonomy`.
+
+**Routes computed without a button**: the route is computed as soon as its page opens and again after every change,
+the computation in progress being abandoned. Map → **Mow** → **Task settings**: computed on opening and about 0.4 s
+after every change of a setting that shapes the route (zones, mode, direction, spacing, borders, heights, speed…); the
+settings stay editable during a computation, the footer shows "Computing the route · stage" then "Route ready", and
+**Route preview** shows the route (computed again after a failure); closing the task pages abandons a computation in
+progress. A map, obstacle or base change during a computation no longer refuses the route with "Map changed:
+recomputation required": the route of the new inputs is computed. Service → **Finishing the gaps** and **Border
+following** lose their **Compute** button: the route is prepared on arrival, without waiting for the robot to be
+connected (the Compute button required it, idle, and stayed greyed otherwise), and again after a change of the spacing
+or offset, the obstacles or the start (robot charging or not); its stage or refusal shows just above **Mow**. The
+finishing route was also dropped whenever the page map differed from the robot's ("Gaps or settings changed during
+computation: compute again"). Tests: `MowDebugFinishingTest`, `MapPreviewSettingsTest`, `MapPreviewChainedSettingsTest`.
+
+**A full log no longer stops the robot**: the Fold test of 2026-11-02 wrote 37 to 70 MB/h while connected, 84 % of it
+raw received frames and the full text of the reports the robot sends every second; the 256 MB per launch would have
+been reached after 4 to 6 h, and a full log sent a STOP, closed the link and refused every start until the app was
+relaunched. Raw frames are now written only when their message fails to decode, and the four periodic messages (status
+report, `systemUpdateBuf`, `bidire_comm_cmd`, Wi-Fi status) in full every 10 s (every minute when unchanged; each
+report still gives its `telemetry` line), everything during a sensor capture: replayed on that log, 14 MB instead of
+101 MB. Beyond 256 MB the oldest parts of the launch are deleted (the first one is kept), the logs of the earlier
+launches are kept up to 256 MB together (they were never deleted), and on low disk space they are deleted before the
+log gives up. The ADB copy keeps its latest parts instead of stopping at 96 MB, and the Mammotion account screen logs
+in its own `cloud-` folders, so it no longer pushes robot launches out of the copy. See
+[logs](docs/features/logs-and-data.md). Tests: `FrameLogFilterTest`, `LogRetentionTest`, `EventLogExportTest`.
+
+**Mowing report of an interrupted mowing**: on the Fold on 2026-11-02 the report said "40 % longer than planned · 1
+more recharge than planned" for a task whose estimate did include its recharge. The recharges due were counted as if
+the recharge came at the end of the route, and the duration took a share of the planned charge while the actual
+duration counted the whole one. The estimate up to the part mowed is now its run time plus the recharges it places
+before that point, each with its whole charge; a mowing that recharged before that point without exceeding the
+recharges of the whole estimate says "Recharged sooner than planned", and when the recharges differ the duration
+verdict adds the deviation of the time off charge alone ("(driving +45 %)"). See
+[mowing report](docs/features/mowing-history.md). Tests: `MowingHistoryTest`, `TaskHistoryTextTest`.
+
+**Gateway restarted alert**: on 2026-11-02 the ESP32 gateway restarted on power cuts every few seconds (`power on`,
+up 4 to 6 s at each answer), which only its `/log` page showed. It now sends each pilot that connects a `start` event
+with its boot number, reset reason, uptime and the last state of the previous run (logged as `gateway_start`), and the
+app raises a **Gateway restarted** warning when the boot number changed since its previous connection for a reason not
+asked for (power cut, brownout, crash, watchdog). See [notifications](docs/features/notifications.md). Tests:
+`GatewayStartReportTest`, ESP32 `pio run -e tcall` and `pio test -e native` (243 of 243). Gateway firmware to flash.
+
+**Shorter wait before the gateway takes over**: on 2026-11-02 the robot stood still 2.1 s before the base exit and
+2.6 s before the first tracking handed to the ESP32 gateway, the time to upload the guard surfaces and the route. A
+route started on the base now sends them as soon as it starts, robot still docked; an upload in progress is awaited
+rather than sent twice and a route equal to one already sent (a sub-list of the same edges, as for each cutting
+height) is no longer sent again. Not tried on the robot. See [autonomous gateway](docs/AUTONOMOUS_GATEWAY.md). Tests:
+`RemoteLegsUploadTest`.
+
+**Weak gateway Wi-Fi advice**: when the robot itself receives the Wi-Fi at least 10 dB better at the same place, the
+disconnection and reconnection messages point to the gateway's antenna and its place on the robot rather than to the
+distance to the access point (2026-11-02: −70 dBm on the ESP32 against −56 dBm on the robot). See
+[gateway](docs/features/gateway.md). Tests: `GatewayHealthStoreTest`.

@@ -60,12 +60,13 @@ void readPower(Power &power) {
   power.vin = r70 & 0x08;
   power.full = r71 & 0x08;
   switch (r78 & 0xF0) {
-    case 0x00: power.level = 100; break;
-    case 0x80: power.level = 75; break;
-    case 0xC0: power.level = 50; break;
-    case 0xE0: power.level = 25; break;
-    default: power.level = 0;
+    case 0x00: power.step = 100; break;
+    case 0x80: power.step = 75; break;
+    case 0xC0: power.step = 50; break;
+    case 0xE0: power.step = 25; break;
+    default: power.step = 0;
   }
+  power.level = power.step;  // refined by the caller (gw_battery_steps.h)
 }
 
 String describe(const Power &p) {

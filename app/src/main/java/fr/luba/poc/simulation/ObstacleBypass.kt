@@ -3,11 +3,14 @@ package fr.luba.poc.simulation
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.LocalObstacle
+import fr.luba.poc.obstacles.ObstacleKind
 import fr.luba.poc.obstacles.RobotEnvelope
+import fr.luba.poc.obstacles.TeachContact
+import fr.luba.poc.obstacles.TeachObstacle
+import kotlin.math.*
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.prep.PreparedGeometryFactory
-import kotlin.math.*
 
 /**
  * Remaining route repaired around obstacles discovered during a mission.
@@ -115,9 +118,9 @@ object ObstacleBypass {
     /** Unknown obstacle estimated from the pose stopped at the contact (front bumper, fused heading). */
     fun contactObstacle(id: String, position: Point, headingDegrees: Double, atMs: Long,
                         robot: RobotEnvelope = RobotEnvelope.LUBA2, marginM: Double = CONTACT_MARGIN_M): LocalObstacle {
-        val center = fr.luba.poc.obstacles.TeachObstacle.estimateCenter(
-            fr.luba.poc.obstacles.TeachContact(position.x, position.y, headingDegrees, atMs), CONTACT_RADIUS_M, robot)
-        return LocalObstacle(id, fr.luba.poc.obstacles.ObstacleKind.OTHER, center.x, center.y, CONTACT_RADIUS_M,
+        val center = TeachObstacle.estimateCenter(
+            TeachContact(position.x, position.y, headingDegrees, atMs), CONTACT_RADIUS_M, robot)
+        return LocalObstacle(id, ObstacleKind.OTHER, center.x, center.y, CONTACT_RADIUS_M,
             marginM, createdAtMs = atMs, updatedAtMs = atMs, label = tr("Contact during the mission", "Contact pendant la mission"))
     }
 
@@ -527,7 +530,7 @@ object ObstacleBypass {
             // Remainder too short between two reserves: ignored rather than joined.
             if (!last && length(run) < 0.10) continue
             var linked = false
-            val tails = if (pending == null) listOf<List<Piece>?>(null) else exitTrims.mapNotNull { trim -> dropEnd(pending!!, trim) }
+            val tails = pending?.let { held -> exitTrims.mapNotNull { trim -> dropEnd(held, trim) } } ?: listOf<List<Piece>?>(null)
             // First a link keeping the tracking tolerance up to and including the entry pivot ([followTolerant]): on
             // 2026-10-14, the robot pivoted right at the edge at the resume point and the tracking stopped. Failing that,
             // the first safe one.

@@ -4,7 +4,9 @@ import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleKind
+import fr.luba.poc.simulation.ObstacleBypass
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -65,7 +67,7 @@ data class DifficultyEvent(
         require(id.isNotBlank()) { tr("Empty difficulty id", "Identifiant de difficulté vide") }
         require(x.isFinite() && y.isFinite()) { tr("Invalid difficulty position", "Position de difficulté invalide") }
         require((obstacleX == null) == (obstacleY == null)) { tr("Incomplete obstacle center", "Centre d'obstacle incomplet") }
-        require(obstacleX == null || (obstacleX.isFinite() && obstacleY!!.isFinite())) { tr("Invalid obstacle center", "Centre d'obstacle invalide") }
+        require(obstacleX == null || (obstacleX.isFinite() && obstacleY?.isFinite() == true)) { tr("Invalid obstacle center", "Centre d'obstacle invalide") }
         require(note.length <= 300) { tr("Difficulty note too long", "Note de difficulté trop longue") }
     }
     /** Heatmap point: the object hit for a contact, otherwise the robot position. */
@@ -146,7 +148,7 @@ class DifficultyField(events: List<DifficultyEvent>, private val now: Long) {
 
     private fun near(p: Point): Sequence<Weighted> {
         val bx = floor(p.x / BUCKET_M).toInt(); val by = floor(p.y / BUCKET_M).toInt()
-        val reach = kotlin.math.ceil(REACH_M / BUCKET_M).toInt()
+        val reach = ceil(REACH_M / BUCKET_M).toInt()
         return sequence {
             for (i in bx - reach..bx + reach) for (j in by - reach..by + reach) buckets[i to j]?.let { yieldAll(it) }
         }
@@ -165,7 +167,7 @@ class DifficultyField(events: List<DifficultyEvent>, private val now: Long) {
     fun cells(minScore: Double = 0.05): List<DifficultyCell> {
         if (weighted.isEmpty()) return emptyList()
         val keys = HashSet<Pair<Int, Int>>()
-        val spread = kotlin.math.ceil(REACH_M / CELL_M).toInt()
+        val spread = ceil(REACH_M / CELL_M).toInt()
         weighted.forEach { w ->
             val cx = floor(w.point.x / CELL_M).toInt(); val cy = floor(w.point.y / CELL_M).toInt()
             for (i in cx - spread..cx + spread) for (j in cy - spread..cy + spread) keys += i to j
@@ -178,7 +180,7 @@ class DifficultyField(events: List<DifficultyEvent>, private val now: Long) {
             if (score < minScore) return@mapNotNull null
             val close = near(center).filter { hypot(it.point.x - center.x, it.point.y - center.y) <= CELL_M }.toList()
             val dominant = close.groupBy { it.kind }.maxByOrNull { (_, list) -> list.sumOf { it.weight } }?.key
-                ?: near(center).minByOrNull { hypot(it.point.x - center.x, it.point.y - center.y) }!!.kind
+                ?: near(center).minByOrNull { hypot(it.point.x - center.x, it.point.y - center.y) }?.kind ?: return@mapNotNull null
             DifficultyCell(center, score, close.size, dominant)
         }.sortedWith(compareBy({ it.point.y }, { it.point.x }))
     }
@@ -237,7 +239,7 @@ object PresumedObstacles {
             if (distinct < MIN_CONTACTS && now - g.maxOf { it.atMs } > RECENT_MS) return@mapNotNull null
             val center = centroid(g)
             val spread = g.maxOf { it.point.distance(center) }
-            Cluster(center, g, min(1.0, max(fr.luba.poc.simulation.ObstacleBypass.CONTACT_RADIUS_M, spread + 0.1)))
+            Cluster(center, g, min(1.0, max(ObstacleBypass.CONTACT_RADIUS_M, spread + 0.1)))
         }
     }
 
@@ -266,7 +268,7 @@ object PresumedObstacles {
         clusters(events, now).filter { cluster -> known.none { o -> covers(o, cluster) } }.map { cluster ->
             val first = cluster.contacts.minOf { it.atMs }; val last = cluster.contacts.maxOf { it.atMs }
             LocalObstacle(id(cluster), ObstacleKind.OTHER,
-                cluster.center.x, cluster.center.y, cluster.radiusM, fr.luba.poc.simulation.ObstacleBypass.CONTACT_MARGIN_M,
+                cluster.center.x, cluster.center.y, cluster.radiusM, ObstacleBypass.CONTACT_MARGIN_M,
                 createdAtMs = first, updatedAtMs = last, label = if (cluster.contacts.size == 1) tr("Recently hit obstacle", "Obstacle touché récemment")
                     else tr("Presumed obstacle (${cluster.contacts.size} contacts)", "Obstacle présumé (${cluster.contacts.size} contacts)"))
         }

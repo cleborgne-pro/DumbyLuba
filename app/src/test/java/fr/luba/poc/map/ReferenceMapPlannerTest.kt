@@ -1,6 +1,7 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.obstacles.RobotEnvelope
+import kotlin.math.atan2
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -8,7 +9,6 @@ import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
-import kotlin.math.atan2
 
 /** Real map kept: each configuration runs on each of the seven zones (Zigzag, Checkerboard, Optimized, full loop, signal grid). */
 @RunWith(Parameterized::class)

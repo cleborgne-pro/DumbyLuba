@@ -5,15 +5,17 @@ import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
-import fr.luba.poc.map.kind
 import fr.luba.poc.map.excludes
+import fr.luba.poc.map.kind
 import fr.luba.poc.planning.RasterCoverage
+import kotlin.math.ceil
+import kotlin.math.floor
 import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.Polygon
 import org.locationtech.jts.operation.union.UnaryUnionOp
 import org.locationtech.jts.simplify.TopologyPreservingSimplifier
-import org.locationtech.jts.geom.Geometry as JtsGeometry
 
 /** Real coverage of one zone of the task: measured area (cell centres inside the zone, no-go excluded) and mowed part. */
 data class ZoneCoverage(val id: Long, val name: String, val areaM2: Double, val coveredM2: Double, val repeatedM2: Double) {
@@ -71,7 +73,7 @@ class CoverageMap internal constructor(
     fun isCovered(index: Int): Boolean = state[index].toInt() and RasterCoverage.COVERED != 0
     fun isRepeated(index: Int): Boolean = state[index].toInt() and RasterCoverage.REPEATED != 0
     fun index(p: Point): Int? {
-        val c = kotlin.math.floor((p.x - minX) / cellM).toInt(); val r = kotlin.math.floor((p.y - minY) / cellM).toInt()
+        val c = floor((p.x - minX) / cellM).toInt(); val r = floor((p.y - minY) / cellM).toInt()
         return if (c in 0 until cols && r in 0 until rows) r * cols + c else null
     }
     /** Mowed according to the track at [p] (false outside the measured surface). */
@@ -84,12 +86,12 @@ class CoverageMap internal constructor(
     private fun components(openingM: Double, minAreaM2: Double): List<IntArray> {
         val n = cols * rows
         val open = BooleanArray(n) { isTarget(it) && !isCovered(it) }
-        val k = kotlin.math.floor(openingM / cellM + 1e-9).toInt()
+        val k = floor(openingM / cellM + 1e-9).toInt()
         val mask = if (k > 0) dilate(erode(open, k), k).also { for (i in 0 until n) it[i] = it[i] && open[i] } else open
         val seen = BooleanArray(n)
         val out = mutableListOf<IntArray>()
         val stack = IntArray(n)
-        val minCells = kotlin.math.ceil(minAreaM2 / (cellM * cellM) - 1e-9).toInt().coerceAtLeast(1)
+        val minCells = ceil(minAreaM2 / (cellM * cellM) - 1e-9).toInt().coerceAtLeast(1)
         for (start in 0 until n) {
             if (!mask[start] || seen[start]) continue
             var top = 0; stack[top++] = start; seen[start] = true

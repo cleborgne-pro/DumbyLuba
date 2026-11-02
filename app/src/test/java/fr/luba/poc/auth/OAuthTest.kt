@@ -1,11 +1,11 @@
 package fr.luba.poc.auth
-import org.junit.Test
 import org.junit.Assert.*
+import org.junit.Test
 class OAuthTest {
  @Test fun `cloud refuses all motor commands and accepts map reading`() {
   val c=fr.luba.poc.protocol.Commands()
   for(bytes in listOf(c.stop(),c.bladeHeight(60),c.manualBlades(true,60),c.manualBlades(false,60),c.sync())) {
-   try {CloudReadOnly.requireAllowed(bytes);fail("Motor command or BLE sync accepted")} catch(_:IllegalArgumentException){}
+   try {CloudReadOnly.requireAllowed(bytes); fail("Motor command or BLE sync accepted")} catch(_:IllegalArgumentException){}
   }
   CloudReadOnly.requireAllowed(c.sync(syncType=3))
   CloudReadOnly.requireAllowed(c.reports(false))

@@ -1,21 +1,20 @@
 package fr.luba.poc.gateway
 
 import fr.luba.poc.ble.RobotLink
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 /**
  * ESP32 gateway updated over Wi-Fi: the pilot sends it its setting (CONFIG frame) only if it announces the `ota`

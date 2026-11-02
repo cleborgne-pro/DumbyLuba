@@ -31,7 +31,7 @@ class ZamboniManualAngleReproTest {
         navigation = PlanningNavigation(emptyList(), base))
 
     /** Every manual angle (5° steps) on Aire de jeux, every 15° on the other zones: Zamboni valid wherever Zigzag is. */
-    @Test(timeout = 3_600_000) fun zamboniAcceptsEveryManualAngleThatZigzagMows() {
+    @Test(timeout = 900_000) fun zamboniAcceptsEveryManualAngleThatZigzagMows() {
         val failures = mutableListOf<String>()
         for (zone in zones) {
             val step = if (zone.name.trim() == "Aire de jeux") 5 else 15

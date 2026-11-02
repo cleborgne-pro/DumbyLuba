@@ -1,9 +1,9 @@
 package fr.luba.poc.mowing
 
-import fr.luba.poc.protocol.*
+import fr.luba.poc.map.*
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlSysProto.*
-import fr.luba.poc.map.*
+import fr.luba.poc.protocol.*
 import org.junit.Assert.*
 import org.junit.Test
 

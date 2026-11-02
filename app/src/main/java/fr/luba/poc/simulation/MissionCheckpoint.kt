@@ -1,17 +1,21 @@
 package fr.luba.poc.simulation
 
+import fr.luba.poc.difficulty.DifficultyEvent
+import fr.luba.poc.difficulty.DifficultyUi
+import fr.luba.poc.difficulty.PresumedObstacles
+import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.BorderFollow
 import fr.luba.poc.map.CoverageMode
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.Preview
 import fr.luba.poc.map.RobotMap
-import fr.luba.poc.difficulty.DifficultyUi
-import fr.luba.poc.i18n.tr
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleJson
-import org.json.JSONArray
-import org.json.JSONObject
+import fr.luba.poc.protocol.CutHeightRange
 import java.io.File
 import java.security.MessageDigest
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Progress of a local mowing, saved on disk during BLE tracking to resume after a STOP, a link loss, the app being
@@ -59,7 +63,7 @@ data class MissionCheckpoint(
     val activeBlocked: Point? = null,
 ) {
     init {
-        require(edge in 0..edgeCount && heightMm in fr.luba.poc.protocol.CutHeightRange.ANY && totalMeters >= 0 && doneMeters >= 0 && skippedMeters >= 0)
+        require(edge in 0..edgeCount && heightMm in CutHeightRange.ANY && totalMeters >= 0 && doneMeters >= 0 && skippedMeters >= 0)
         require(point == null || (point.x.isFinite() && point.y.isFinite()))
         require(bladeZones == null || bladeZones.all { zone -> zone.all { it.x.isFinite() && it.y.isFinite() } })
         require(activeEnd == null || activeEnd.edge <= edgeCount)
@@ -88,7 +92,8 @@ enum class MissionTask(private val titleEn: String, private val titleFr: String,
     FOLLOW("Route with blades stopped interrupted", "Parcours lames arrêtées interrompu", "travelled", "parcourus"),
     SURVEY("Signal survey interrupted", "Relevé des signaux interrompu", "surveyed", "relevés"),
     BORDER("Border following interrupted", "Suivi de bordure interrompu", "travelled", "parcourus"),
-    TRIAL("Trial mowing interrupted", "Tonte d'essai interrompue", "travelled", "parcourus");
+    /** Painted zone or finishing of the gaps: mowing of temporary zones ([MowingSimulation.bladeZones]). */
+    TRIAL("Partial mowing interrupted", "Tonte partielle interrompue", "travelled", "parcourus");
 
     /** Display title in the current language. */
     val title: String get() = tr(titleEn, titleFr)
@@ -98,7 +103,7 @@ enum class MissionTask(private val titleEn: String, private val titleFr: String,
     companion object {
         fun of(preview: Preview, cutting: Boolean, bladeZones: List<List<Point>>?): MissionTask = when {
             preview.mode.isSurvey -> SURVEY
-            preview.plannerLabel == fr.luba.poc.map.BorderFollow.PLANNER_LABEL -> BORDER
+            preview.plannerLabel == BorderFollow.PLANNER_LABEL -> BORDER
             bladeZones != null -> TRIAL
             cutting -> MOW
             else -> FOLLOW
@@ -134,8 +139,8 @@ data class MissionAvoidance(val presumed: List<LocalObstacle>, val avoidAreas: L
      * false contact) left out: the resume kept bypassing obstacles the user had deleted (reported on 2026-10-25). A presumed obstacle
      * is named after its first contact ([fr.luba.poc.difficulty.PresumedObstacles.id]); an unknown contact is kept.
      */
-    fun withoutDismissed(events: List<fr.luba.poc.difficulty.DifficultyEvent>): MissionAvoidance {
-        val dismissed = events.filter { it.dismissed }.map { fr.luba.poc.difficulty.PresumedObstacles.ID_PREFIX + it.id }.toSet()
+    fun withoutDismissed(events: List<DifficultyEvent>): MissionAvoidance {
+        val dismissed = events.filter { it.dismissed }.map { PresumedObstacles.ID_PREFIX + it.id }.toSet()
         return if (presumed.none { it.id in dismissed }) this else copy(presumed = presumed.filterNot { it.id in dismissed })
     }
 }
@@ -348,7 +353,7 @@ object PreviewJson {
         fun ints(key: String) = j.getJSONArray(key).let { a -> (0 until a.length()).map { a.getInt(it) } }
         fun nullablePaths(key: String) = if (j.isNull(key)) null else readPaths(j.getJSONArray(key))
         // Height passes missing from an older save: a single pass.
-        fun optionalHeights(key: String) = j.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getInt(it).also { h -> require(h in fr.luba.poc.protocol.CutHeightRange.ANY) } } }.orEmpty()
+        fun optionalHeights(key: String) = j.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.getInt(it).also { h -> require(h in CutHeightRange.ANY) } } }.orEmpty()
         // Row phases and applied modes missing from an older save: unknown (centred rows, requested mode).
         val zonePhases = j.optJSONArray("zonePhases")?.let { a -> (0 until a.length()).map { a.getDouble(it).also { v -> require(v.isFinite() && v in 0.0..1.0) } } }.orEmpty()
         val zoneModes = j.optJSONArray("zoneModes")?.let { a -> (0 until a.length()).map { CoverageMode.valueOf(a.getString(it)) } }.orEmpty()

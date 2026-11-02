@@ -1,26 +1,35 @@
 package fr.luba.poc.autonomy
 
-import fr.luba.poc.i18n.tr
 import fr.luba.poc.diagnostics.HeightSequence
 import fr.luba.poc.diagnostics.MotionProgressGuard
 import fr.luba.poc.diagnostics.NavSafety
-import fr.luba.poc.map.Geometry
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotPose
 import fr.luba.poc.map.SignalCoverage
+import fr.luba.poc.obstacles.FollowObstacleGuard
 import fr.luba.poc.protocol.CollisionLatch
 import fr.luba.poc.protocol.Commands
+import fr.luba.poc.protocol.OffMapLatch
 import fr.luba.poc.protocol.SelfCheck
+import fr.luba.poc.simulation.AdaptiveSpeed
 import fr.luba.poc.simulation.DeadReckoning
-import fr.luba.poc.simulation.DriftRecovery
 import fr.luba.poc.simulation.DockExit
+import fr.luba.poc.simulation.DriftRecovery
 import fr.luba.poc.simulation.PathFollower
 import fr.luba.poc.simulation.PivotSlide
+import fr.luba.poc.simulation.PivotSlideMeter
+import fr.luba.poc.simulation.PositioningGrace
+import fr.luba.poc.simulation.ProtectionPause
 import fr.luba.poc.simulation.RangeArrival
-import fr.luba.poc.simulation.RouteBladeGate
 import fr.luba.poc.simulation.ReturnDrift
+import fr.luba.poc.simulation.RouteBladeGate
 import fr.luba.poc.simulation.RouteRecharge
 import fr.luba.poc.simulation.SimEdge
+import fr.luba.poc.simulation.SlideSample
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlinx.coroutines.CancellationException
 
 /**
  * Tracking of a route prepared by the pilot, run by the host (gateway placed on the robot).
@@ -54,14 +63,14 @@ class LegRunner(
     /** Slides known to the pilot ([LegSpec.slideField]): prediction and corner vertices. */
     private val slideVelocity: ((Point) -> Point?)? = spec.slideField?.takeUnless { it.isEmpty }?.let { field -> field::velocity }
     /** Slides measured during pivots, handed to the pilot (`pivot_slide` event). */
-    private val slideMeter = fr.luba.poc.simulation.PivotSlideMeter()
+    private val slideMeter = PivotSlideMeter()
     /** Short positioning loss ridden through (self-check 41 under a raised play house, 2026-10-25). */
-    private val positioningGrace = fr.luba.poc.simulation.PositioningGrace()
+    private val positioningGrace = PositioningGrace()
     private var ridingPositioning = false
 
     init { reckoning.slide = slideVelocity }
 
-    private fun reportSlide(sample: fr.luba.poc.simulation.SlideSample) =
+    private fun reportSlide(sample: SlideSample) =
         env.event(PIVOT_SLIDE_EVENT, tr("Pivot slide measured", "Glissement au pivot mesuré"), mapOf("x" to sample.x, "y" to sample.y, "vx" to sample.vx,
             "vy" to sample.vy, "seconds" to sample.seconds, "atMs" to sample.atMs))
     private var index = 0
@@ -104,7 +113,7 @@ class LegRunner(
                 LegResult(spec.legId, LegOutcome.CONTACT, encounter.index, encounter.message.orEmpty(), encounter.contact, calibration = calibration(), trail = recentTrail())
             else LegResult(spec.legId, LegOutcome.OBSTACLE_ADDED, encounter.index, encounter.message.orEmpty(),
                 obstacleIds = encounter.added.map { it.id }, calibration = calibration(), trail = recentTrail())
-        } catch (cancel: kotlinx.coroutines.CancellationException) {
+        } catch (cancel: CancellationException) {
             // Requested interruption: it propagates (as an IllegalStateException it would be taken for a safety stop).
             throw cancel
         } catch (failure: IllegalStateException) {
@@ -154,7 +163,7 @@ class LegRunner(
             check(!motionProgress.blocked(position, view.positionPrevious, now, step.linear)) { tr("Station exit stuck for 3 s", "Sortie de station bloquée depuis 3 s") }
             val rad = Math.toRadians(step.heading)
             val reach = minOf(0.10, position.distance(path[0].b))
-            val next = RobotPose(Point(position.x + reach * kotlin.math.cos(rad), position.y + reach * kotlin.math.sin(rad)), step.heading)
+            val next = RobotPose(Point(position.x + reach * cos(rad), position.y + reach * sin(rad)), step.heading)
             val envelopeGuard = physicalGuard ?: guard
             if (envelopeGuard != null && envelopeGuard.motionCollision(RobotPose(position, step.heading), next) != null) {
                 // Chassis already overlapping the free surface on its station (learnt obstacle or no-go zone near the
@@ -206,7 +215,7 @@ class LegRunner(
 
     private fun obstacleHits(position: Point, next: Point, escaping: Boolean): List<LegObstacle> =
         env.obstacles().filter { obstacle ->
-            fr.luba.poc.obstacles.FollowObstacleGuard.intrudes(Point(obstacle.x, obstacle.y), position, next, obstacle.radiusM,
+            FollowObstacleGuard.intrudes(Point(obstacle.x, obstacle.y), position, next, obstacle.radiusM,
                 obstacle.exclusionRadiusM, obstacle.planned, escaping)
         }
 
@@ -288,8 +297,8 @@ class LegRunner(
                 NavSafety.automaticPositionFailure(now - view.positionPrevious, live.x, live.y)?.let { error(it) }
                 NavSafety.tickFailure(now - view.devicePrevious, live.battery, live.sensorStatus, true, RouteRecharge.RESERVE_PERCENT)?.let { error(it) }
                 // Move beyond the map: self-check 25 published on its sections is not a contact ([OffMapLatch]).
-                val offMapLatch = spec.offMapSections.isNotEmpty() && !blades && fr.luba.poc.protocol.OffMapLatch.ignored(live.selfCheck, live.sensorStatus,
-                    fr.luba.poc.protocol.OffMapLatch.onSections(live.x?.let { x -> live.y?.let { y -> Point(x, y) } }, spec.offMapSections))
+                val offMapLatch = spec.offMapSections.isNotEmpty() && !blades && OffMapLatch.ignored(live.selfCheck, live.sensorStatus,
+                    OffMapLatch.onSections(live.x?.let { x -> live.y?.let { y -> Point(x, y) } }, spec.offMapSections))
                 val protectionUp = !(live.robotState in (if (spec.departure) listOf(11, 15, 20, 39) else listOf(11, 20)) && (SelfCheck.nominal(live.selfCheck) || offMapLatch))
                 // Protection waiting for the contact code: cleared, or delay elapsed without contact → stop on the protection.
                 latch?.let { (since, reason) -> if (!protectionUp || now - since >= CollisionLatch.CONTACT_GRACE_MS) error(reason) }
@@ -297,16 +306,16 @@ class LegRunner(
                 val riding = protectionUp && latch == null &&
                     positioningGrace.rides(now, live.robotState, live.selfCheck, live.x?.let { x -> live.y?.let { y -> Point(x, y) } })
                 if (!protectionUp) positioningGrace.reset()
-                if (riding && !ridingPositioning) env.event(fr.luba.poc.simulation.PositioningGrace.EVENT,
+                if (riding && !ridingPositioning) env.event(PositioningGrace.EVENT,
                     tr("Positioning lost (self-check ${live.selfCheck}): route continued for a few seconds", "Positionnement perdu (self-check ${live.selfCheck}) : trajet poursuivi quelques secondes"),
                     mapOf("selfCheck" to live.selfCheck, "edge" to follower.index, "x" to live.x, "y" to live.y,
-                        "maxMs" to fr.luba.poc.simulation.PositioningGrace.MAX_MS, "maxM" to fr.luba.poc.simulation.PositioningGrace.MAX_M))
-                if (!riding && ridingPositioning && protectionUp) env.event(fr.luba.poc.simulation.PositioningGrace.EVENT + "_spent",
+                        "maxMs" to PositioningGrace.MAX_MS, "maxM" to PositioningGrace.MAX_M))
+                if (!riding && ridingPositioning && protectionUp) env.event(PositioningGrace.EVENT + "_spent",
                     tr("Positioning still lost after the grace: robot stopped", "Positionnement toujours perdu après le délai de grâce : robot arrêté"),
                     mapOf("selfCheck" to live.selfCheck, "elapsedMs" to positioningGrace.elapsedMs(now), "edge" to follower.index))
                 ridingPositioning = riding
                 if (protectionUp && !riding) {
-                    val reason = fr.luba.poc.simulation.ProtectionPause.reason(live.robotState, live.selfCheck)
+                    val reason = ProtectionPause.reason(live.robotState, live.selfCheck)
                     // Collision lock (25) published before the contact code (2026-10-15, 11:00:06): immediate stop, then the
                     // contact read from the error history gives the back-off and the bypass ([CollisionLatch]).
                     if (latch == null) {
@@ -366,9 +375,9 @@ class LegRunner(
                     "deviationM" to follower.deviation(position), "robotState" to live.robotState)
                 val previousIndex = follower.index
                 val speedPercent = spec.speedPercent
-                // Heading not confirmed, or pivot not measured yet: slow advance until the next position.
-                val linearLimit = if (!headingTrusted) minOf(PathFollower.linearFor(speedPercent), DeadReckoning.UNCONFIRMED_LINEAR)
-                    else reckoning.postPivotLinear(PathFollower.linearFor(speedPercent))
+                // Heading not confirmed, or pivot not measured yet: slow advance; adaptive speed on the slowed stretches and degraded RTK.
+                val setLinear = AdaptiveSpeed.setLinear(speedPercent, spec.speedCaps, path, follower.index, predicted.position, live, env.wall(), spec.adaptiveSpeed)
+                val linearLimit = if (!headingTrusted) minOf(setLinear, DeadReckoning.UNCONFIRMED_LINEAR) else reckoning.postPivotLinear(setLinear)
                 val command = follower.command(predicted.position, predicted.headingDegrees, linearLimit,
                     PathFollower.angularLimit(speedPercent), reckoning.degreesPerUnit, reckoning.metersPerUnit,
                     RangeArrival.APPROACH_MIN_LINEAR, follower.deviation(position), reckoning.rotationCalibrated)
@@ -423,7 +432,7 @@ class LegRunner(
                 // bounded by the next stop (corner or end of range).
                 val reach = minOf(maxOf(0.25, linear * reckoning.metersPerUnit * 1.5), command.stopDistanceM)
                 val next = if (linear == 0) RobotPose(position, heading + if (angular > 0) 6.0 else -6.0)
-                    else RobotPose(Point(position.x + reach * kotlin.math.cos(rad), position.y + reach * kotlin.math.sin(rad)), heading)
+                    else RobotPose(Point(position.x + reach * cos(rad), position.y + reach * sin(rad)), heading)
                 // Escape out of an obstacle reserve: same checks, obstacles at their physical radius.
                 val escaping = follower.escaping(position)
                 val intruding = obstacleHits(position, next.position, escaping)

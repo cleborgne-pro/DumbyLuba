@@ -1,17 +1,15 @@
 package fr.luba.poc.history
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CompareArrows
 import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.PauseCircle
-import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.foundation.layout.Row
-import androidx.compose.material.icons.rounded.CompareArrows
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,12 +17,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import fr.luba.poc.map.RobotMap
-import fr.luba.poc.planning.FinishingOffer
-import fr.luba.poc.planning.FinishingPass
 import androidx.compose.ui.Modifier
 import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.RobotMap
+import fr.luba.poc.planning.FinishingOffer
+import fr.luba.poc.planning.FinishingPass
 import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.KeyValueRow
 import fr.luba.poc.ui.components.LubaDialog
@@ -42,6 +40,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Report and history labels, in the interface language (dates and numbers formatted in that language too). */
 object MowingText {
@@ -86,7 +86,7 @@ fun MowingReportDialog(record: MowingRecord, history: List<MowingRecord>, onExcl
             MowingOutcome.INTERRUPTED -> tr("Mowing interrupted at ${MowingText.percent(record.progress * 100)}: $cause",
                 "Tonte interrompue à ${MowingText.percent(record.progress * 100)} : $cause")
             MowingOutcome.RUNNING -> tr("Mowing in progress", "Tonte en cours")
-        }, when (record.outcome) { MowingOutcome.COMPLETE -> NoteTone.SUCCESS; MowingOutcome.INTERRUPTED -> NoteTone.WARNING; else -> NoteTone.INFO })
+        }, tone = when (record.outcome) { MowingOutcome.COMPLETE -> NoteTone.SUCCESS; MowingOutcome.INTERRUPTED -> NoteTone.WARNING; else -> NoteTone.INFO })
         analysis?.finishing?.let { FinishingOfferGroup(it, onFinishing) }
         MowingReportContent(record, comparison, calibration, score)
         SettingsGroup {
@@ -102,7 +102,7 @@ fun MowingReportDialog(record: MowingRecord, history: List<MowingRecord>, onExcl
 internal fun MowingReportContent(record: MowingRecord, c: MowingComparison, calibration: MowingCalibration, score: MowingScore? = null) {
     val partial = record.outcome != MowingOutcome.COMPLETE
     score?.let { ScoreGroup(it) }
-    SettingsGroup(tr("Mowing", "Tonte")) {
+    SettingsGroup(title = tr("Mowing", "Tonte")) {
         KeyValueRow("Zones", MowingText.zones(record))
         KeyValueRow(tr("Start", "Début"), MowingText.date(record.startedAt))
         record.endedAt?.let { KeyValueRow(tr("End", "Fin"), MowingText.date(it)) }
@@ -113,19 +113,19 @@ internal fun MowingReportContent(record: MowingRecord, c: MowingComparison, cali
             listOfNotNull(record.obstacles.takeIf { it > 0 }?.let { tr("$it obstacle${if (it > 1) "s" else ""} bypassed", "$it obstacle${if (it > 1) "s" else ""} contourné${if (it > 1) "s" else ""}") },
                 record.resumes.takeIf { it > 0 }?.let { tr("$it resume${if (it > 1) "s" else ""}", "$it reprise${if (it > 1) "s" else ""}") }).joinToString(" · "))
     }
-    SettingsGroup(if (partial) tr("Duration (part mowed)", "Durée (part tondue)") else tr("Duration", "Durée")) {
+    SettingsGroup(title = if (partial) tr("Duration (part mowed)", "Durée (part tondue)") else tr("Duration", "Durée")) {
         KeyValueRow(tr("Estimated", "Estimée"), "≈ ${MowingText.duration(c.expectedSeconds)}${if (partial) tr(" of ≈ ${MowingText.duration(record.forecast.totalSeconds)}", " sur ≈ ${MowingText.duration(record.forecast.totalSeconds)}") else ""}")
         KeyValueRow(tr("Actual", "Réelle"), MowingText.duration(c.actualSeconds), valueColor = verdictColor(c.durationDelta))
         KeyValueRow(tr("of which mowing and travel", "dont tonte et trajets"), MowingText.duration(record.totals.activeSeconds))
         KeyValueRow(tr("of which recharging", "dont recharge"), MowingText.duration(record.totals.chargingSeconds))
         Text(c.durationVerdict, style = MaterialTheme.typography.labelLarge, color = verdictColor(c.durationDelta))
     }
-    SettingsGroup("Recharges") {
+    SettingsGroup(title = "Recharges") {
         KeyValueRow(tr("Estimated", "Estimées"), "≈ ${c.expectedRecharges}${if (partial && record.forecast.recharges != c.expectedRecharges) tr(" of ≈ ${record.forecast.recharges}", " sur ≈ ${record.forecast.recharges}") else ""}")
         KeyValueRow(tr("Actual", "Réelles"), "${c.actualRecharges}", valueColor = verdictColor(if (c.rechargeDelta == 0) 0.0 else 1.0))
         Text(c.rechargeVerdict, style = MaterialTheme.typography.labelLarge, color = verdictColor(if (c.rechargeDelta == 0) 0.0 else 1.0))
     }
-    SettingsGroup(tr("Battery and pace", "Batterie et rythme")) {
+    SettingsGroup(title = tr("Battery and pace", "Batterie et rythme")) {
         KeyValueRow(tr("Battery", "Batterie"), "${record.batteryStart?.let { "$it %" } ?: "—"} → ${record.batteryEnd?.let { "$it %" } ?: "—"}")
         KeyValueRow(tr("Consumed · recharged", "Consommée · rechargée"), "${MowingText.percent(record.totals.batteryUsed)} · ${MowingText.percent(record.totals.batteryCharged)}")
         KeyValueRow(tr("Duration / theoretical run", "Durée / parcours théorique"), c.observedTimeFactor?.let { tr("${MowingText.factor(it)} (planned ${MowingText.factor(record.forecast.timeFactor)})", "${MowingText.factor(it)} (prévu ${MowingText.factor(record.forecast.timeFactor)})") } ?: tr("not enough data", "mesure insuffisante"))
@@ -143,7 +143,7 @@ internal fun MowingReportContent(record: MowingRecord, c: MowingComparison, cali
  */
 @Composable
 internal fun ScoreGroup(score: MowingScore) {
-    SettingsGroup("Mowing Score") {
+    SettingsGroup(title = "Mowing Score") {
         KeyValueRow(tr("Score", "Score"), "${score.total} / 100", valueColor = scoreColor(score.total))
         score.contributions.forEach { c ->
             KeyValueRow(c.factor.label, ScoreText.contribution(c), valueColor = if (c.penalty >= 1.0) MammotionColors.Warning else MammotionColors.TextPrimary)
@@ -186,7 +186,7 @@ internal fun rememberMowingAnalysis(record: MowingRecord, loadTrack: suspend (St
         if (record.kind != TaskKind.MOW) return@LaunchedEffect
         // Loaded from the calling thread (the positions not yet written live on the main thread), computed aside.
         val track = runCatching { loadTrack(record.id) }.getOrNull()
-        analysis = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        analysis = withContext(Dispatchers.Default) {
             val coverage = track?.let { runCatching { CoverageMap.of(it, fallbackMap) }.getOrNull() }
             val finishing = coverage?.let { c -> runCatching { FinishingPass.offer(record.id, c, record.outcome == MowingOutcome.COMPLETE) }.getOrNull() }
             MowingAnalysis(MowingScore.of(record, track, coverage), finishing)
@@ -206,11 +206,11 @@ internal fun rememberMowingScore(record: MowingRecord, loadTrack: suspend (Strin
  */
 @Composable
 internal fun FinishingOfferGroup(offer: FinishingOffer, onFinishing: ((FinishingOffer) -> Unit)?) {
-    SettingsGroup(tr("Finishing", "Finition")) {
+    SettingsGroup(title = tr("Finishing", "Finition")) {
         KeyValueRow(tr("Left unmowed", "Reste à tondre"), tr("${CoverageText.area(offer.areaM2)} in ${offer.count} gap${if (offer.count > 1) "s" else ""}",
             "${CoverageText.area(offer.areaM2)} en ${offer.count} manque${if (offer.count > 1) "s" else ""}"))
-        InfoNote(tr("A short route mows only these gaps, with a lap on their edges, instead of mowing the zones again. Prepared and started from Service → Trial mowing, with the same checks as a mowing.",
-            "Un trajet court ne tond que ces manques, avec un tour sur leurs bords, au lieu de retondre les zones. Préparé et lancé depuis Service → Tonte d'essai, avec les mêmes contrôles qu'une tonte."))
+        InfoNote(tr("A short route mows only these gaps, with a lap on their edges, instead of mowing the zones again. Prepared and started from Service → Finishing the gaps, with the same checks as a mowing.",
+            "Un trajet court ne tond que ces manques, avec un tour sur leurs bords, au lieu de retondre les zones. Préparé et lancé depuis Service → Finition des manques, avec les mêmes contrôles qu'une tonte."))
         if (onFinishing != null) PrimaryPillButton(tr("Prepare the finishing", "Préparer la finition"), { onFinishing(offer) }, Modifier.fillMaxWidth())
         else InfoNote(tr("Connect the robot of this mowing with its complete map to prepare the finishing.",
             "Connectez le robot de cette tonte avec sa carte complète pour préparer la finition."))
@@ -220,7 +220,7 @@ internal fun FinishingOfferGroup(offer: FinishingOffer, onFinishing: ((Finishing
 /** Two mowings side by side: settings, duration, recharges, coverage and score, factor by factor. */
 @Composable
 fun MowingComparePage(a: MowingRecord, b: MowingRecord, loadTrack: suspend (String) -> TaskTrack?, onBack: () -> Unit, modifier: Modifier = Modifier) {
-    androidx.activity.compose.BackHandler(onBack = onBack)
+    BackHandler(onBack = onBack)
     val (first, second) = if (a.startedAt <= b.startedAt) a to b else b to a
     val left = rememberMowingScore(first, loadTrack, null)
     val right = rememberMowingScore(second, loadTrack, null)
@@ -234,7 +234,7 @@ fun MowingComparePage(a: MowingRecord, b: MowingRecord, loadTrack: suspend (Stri
             CompareRow("Recharges", "${first.recharges}", "${second.recharges}")
             CompareRow(tr("Battery used", "Batterie consommée"), MowingText.percent(first.totals.batteryUsed), MowingText.percent(second.totals.batteryUsed))
         }
-        SettingsGroup("Mowing Score") {
+        SettingsGroup(title = "Mowing Score") {
             CompareRow(tr("Score", "Score"), left?.let { "${it.total} / 100" } ?: "…", right?.let { "${it.total} / 100" } ?: "…", header = true)
             ScoreFactor.entries.forEach { f ->
                 CompareRow(f.label, left?.of(f)?.let(ScoreText::contribution) ?: "…", right?.of(f)?.let(ScoreText::contribution) ?: "…")
@@ -260,7 +260,7 @@ private fun CompareRow(label: String, left: String, right: String, header: Boole
 /** Parameters used for the next estimates, derived from recent mowings. */
 @Composable
 fun CalibrationGroup(calibration: MowingCalibration, note: String? = null) {
-    SettingsGroup(tr("Next estimates", "Prochaines estimations")) {
+    SettingsGroup(title = tr("Next estimates", "Prochaines estimations")) {
         if (calibration.empty) InfoNote(tr("Not enough measurements yet: estimates use the settings (runtime, recharge duration, speed). " +
             "Each real mowing of at least ${(MowingCalibration.MIN_ACTIVE_S / 60).toInt()} min adjusts them.",
             "Pas encore assez de mesures : les estimations utilisent les réglages (autonomie, durée de recharge, vitesse). " +
@@ -304,7 +304,7 @@ fun MowingHistoryPage(history: List<MowingRecord>, current: MowingRecord?, robot
     }
     PushedPage(tr("Task history", "Historique des tâches"), onBack, modifier) {
         current?.let { r ->
-            SettingsGroup(tr("In progress", "En cours")) {
+            SettingsGroup(title = tr("In progress", "En cours")) {
                 TaskRow(r, onOpen)
                 KeyValueRow(tr("Duration", "Durée"), "${MowingText.duration(r.totals.totalSeconds)} / ≈ ${MowingText.duration(r.forecast.totalSeconds)}")
                 KeyValueRow(if (r.kind == TaskKind.MOW) tr("Mowed · recharges", "Tondu · recharges") else tr("Covered · recharges", "Parcouru · recharges"),
@@ -322,7 +322,7 @@ fun MowingHistoryPage(history: List<MowingRecord>, current: MowingRecord?, robot
             }
         }
         val finished = history.filter { it.finished }
-        SettingsGroup(if (finished.isEmpty()) tr("Tasks", "Tâches") else tr("Tasks · ${finished.size}", "Tâches · ${finished.size}")) {
+        SettingsGroup(title = if (finished.isEmpty()) tr("Tasks", "Tâches") else tr("Tasks · ${finished.size}", "Tâches · ${finished.size}")) {
             if (finished.isEmpty()) InfoNote(tr("No task recorded. Every mowing, signal survey or run with blades stopped appears here with its report and its actual route.",
                 "Aucune tâche enregistrée. Chaque tonte, relevé des signaux ou parcours lames arrêtées apparaît ici avec son rapport et son trajet réel."))
             Column(verticalArrangement = Arrangement.spacedBy(Dimens.Xs)) { finished.forEach { TaskRow(it, onOpen) } }

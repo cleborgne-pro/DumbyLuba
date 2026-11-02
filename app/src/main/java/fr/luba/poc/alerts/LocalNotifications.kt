@@ -6,19 +6,23 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import fr.luba.poc.MainActivity
 import fr.luba.poc.R
+import fr.luba.poc.commitNow
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
  * State of the Notifications panel. [entries]: newest first; [seenAt]: time of the last notification seen (panel
@@ -54,7 +58,7 @@ class LocalNotifications(private val context: Context, scope: CoroutineScope, di
             }).apply { description = tr("DumbyLuba local alerts · ${it.name}", "Alertes locales DumbyLuba · ${it.name}") })
         }
         runCatching {
-            val saved = AlertJournal.decode(preferences.getString("journal", "{}")!!)
+            val saved = AlertJournal.decode(preferences.getString("journal", null) ?: "{}")
             entries.addAll(saved.entries)
             seenAt = saved.seenAt
             records.putAll(saved.records)
@@ -132,14 +136,14 @@ class LocalNotifications(private val context: Context, scope: CoroutineScope, di
         }.onFailure { mutable.value = mutable.value.copy(problem = tr("Android display failed: ${it.javaClass.simpleName}", "Affichage Android impossible : ${it.javaClass.simpleName}")) }
     }
     /** Attached image downscaled (at most [PICTURE_MAX_SIDE] px), null if the file no longer exists or is unreadable. */
-    private fun loadPicture(path: String): android.graphics.Bitmap? = runCatching {
-        val file = java.io.File(path)
+    private fun loadPicture(path: String): Bitmap? = runCatching {
+        val file = File(path)
         if (!file.isFile) return null
-        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        android.graphics.BitmapFactory.decodeFile(path, bounds)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
         var sample = 1
         while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= PICTURE_MAX_SIDE) sample *= 2
-        android.graphics.BitmapFactory.decodeFile(path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+        BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
     }.getOrNull()
     private fun enabled(level: Severity): Boolean = manager.areNotificationsEnabled() && manager.getNotificationChannel(channel(level))?.importance != NotificationManager.IMPORTANCE_NONE
     private fun refreshState() {
@@ -149,7 +153,7 @@ class LocalNotifications(private val context: Context, scope: CoroutineScope, di
     }
     private fun persist() {
         val json = AlertJournal(entries.toList(), records, pending, seenAt).encode()
-        if (!preferences.edit().putString("journal", json).commit()) mutable.value = mutable.value.copy(problem = tr("Alert journal not saved", "Journal d’alertes non enregistré"))
+        if (!preferences.commitNow { putString("journal", json) }) mutable.value = mutable.value.copy(problem = tr("Alert journal not saved", "Journal d’alertes non enregistré"))
     }
     private fun key(alert: RobotAlert) = AlertJournal.key(alert)
     private fun channel(level: Severity) = channelId(level)
@@ -158,7 +162,7 @@ class LocalNotifications(private val context: Context, scope: CoroutineScope, di
         fun channelId(level: Severity) = "robot_local_${level.name.lowercase()}_v1"
         const val PICTURE_MAX_SIDE = 1024
         fun format(alert: RobotAlert): String {
-            val time = SimpleDateFormat("dd/MM HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(Date(alert.at))
+            val time = SimpleDateFormat("dd/MM HH:mm:ss", I18n.locale).format(Date(alert.at))
             // The French text keeps the layout of the pre-0.55 history, which AlertEntry.parseLegacy still reads.
             return tr("${alert.severity.name} · ${alert.kind.title} · ${alert.context.robotName}\n$time · ${alert.count} event(s)\nState: ${alert.context.state}\nBattery: ${alert.context.battery?.let { "$it % (last reading)" } ?: "unknown"}\nPosition: ${alert.context.position ?: "unknown"}\n${alert.detail}\nAction: ${alert.kind.action}",
                 "${alert.severity.name} · ${alert.kind.title} · ${alert.context.robotName}\n$time · ${alert.count} événement(s)\nÉtat : ${alert.context.state}\nBatterie : ${alert.context.battery?.let { "$it % (dernière mesure)" } ?: "inconnue"}\nPosition : ${alert.context.position ?: "inconnue"}\n${alert.detail}\nAction : ${alert.kind.action}")

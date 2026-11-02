@@ -8,8 +8,8 @@ always go through Bluetooth (or the [gateway](gateway.md)).
 |---|---|
 | **Access** | Me → profile card (top) → **Mammotion account**; Home → **Read the map via the Mammotion account** (shown when no map and no account) |
 | **Status** | Implemented; real cloud map (43 elements) read and displayed on the test phone. Native return and firmware update covered by JVM tests with a simulated cloud; not verified on the robot (see [Limitations](#limitations)) |
-| **Code** | `auth/` (`AccountScreen.kt`, `AccountRobotPanel.kt`, `AccountRobot.kt`, `MammotionCloud.kt`, `CloudViewModel.kt`, `CloudRobotFilter.kt`, `CloudReadOnly.kt`, `CloudRobotActions.kt`, `FirmwareUpdateUi.kt`, `AccountStore.kt`, `SessionStore.kt`), `map/CloudStationDialog.kt` |
-| **Tests** | `MammotionCloudTest`, `CloudViewModelTest`, `CloudRobotActionsTest`, `AccountRobotTest`, `AccountEncodingTest`, `SecureStoresTest`, `OAuthTest`, `AuthorizedRequestTest` (local fake server) |
+| **Code** | `auth/` (`AccountScreen.kt`, `AccountRobotPanel.kt`, `AccountRobot.kt`, `MammotionCloud.kt`, `AliyunCloud.kt`, `AliyunBroker.kt`, `AliyunSignature.kt`, `CloudViewModel.kt`, `CloudRobotFilter.kt`, `CloudReadOnly.kt`, `CloudRobotActions.kt`, `FirmwareUpdateUi.kt`, `AccountStore.kt`, `SessionStore.kt`), `map/CloudStationDialog.kt` |
+| **Tests** | `MammotionCloudTest`, `AliyunCloudTest`, `AliyunBrokerTest`, `AliyunSignatureTest`, `CloudViewModelTest`, `CloudRobotActionsTest`, `AccountRobotTest`, `AccountEncodingTest`, `SecureStoresTest`, `OAuthTest`, `AuthorizedRequestTest` (local fake server) |
 | **Reference** | [Account inventory: what can be read and done](../MAMMOTION_ACCOUNT.md) |
 
 <p align="center">
@@ -38,10 +38,13 @@ reading" or "Not signed in · sign in"; tapping it opens the **Mammotion account
    none of which is recognized give "N devices in the account, none recognized as a Mammotion mower…", an empty
    account "No device in the account". When the device page (`/v1/user/device/page`) is empty, the app reads, once
    and read-only, the account's owned devices (`/device-server/v1/device/list`, as PyMammotion
-   `get_user_device_list`): a robot listed there but not on the page is bound to Mammotion's older Aliyun cloud,
-   which the page does not list, and the status says "Your LUBA is on Mammotion's older cloud (Aliyun), which this
-   app does not support yet; Bluetooth control still works." ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3));
-   RTK stations and pool cleaners do not count. If that read fails, the status stays "No device in the account".
+   `get_user_device_list`), then signs in to Mammotion's older **Aliyun cloud**, where the robots sold before 2025
+   (LUBA 1 among them) stay bound and which the page does not list ([DumbyLuba#3](https://github.com/cleborgne-pro/DumbyLuba/issues/3),
+   see [Older Aliyun cloud](#older-aliyun-cloud)). Its robots are listed like the others: "1 LUBA in the account
+   (older Aliyun cloud)". When that cloud cannot be reached or lists no robot while the owned devices show one, the
+   status says "Your LUBA is on Mammotion's older cloud (Aliyun), which could not be reached (reason) / does not
+   list it; Bluetooth control still works. Export the diagnostics…"; RTK stations and pool cleaners do not count. If
+   the owned devices cannot be read and the Aliyun cloud gives no robot, the status stays "No device in the account".
    The log keeps `cloud_device_page` (IoT domain, HTTP status, API `code`, `total`, number of records, also when the
    page is refused) and `cloud_device_list` (number of devices, devices missing from the page, product key prefixes,
    model words, short name prefixes; never a full name, a serial number or an iotId; or the error). A refused request
@@ -156,8 +159,41 @@ the Mammotion planner is refused**: this is a project rule.
 - The app reuses PyMammotion's public client constants; it contains no secret of its own.
 - The account log (last 15 lines) is visible at the bottom of the screen; account events also go to the app log.
 
+## Older Aliyun cloud
+
+The robots sold before 2025 stay on Mammotion's former cloud, run by Aliyun (Alibaba Cloud): the Mammotion app chooses
+the cloud from the robot's product key, so neither the user nor the app can move a robot from one to the other. The
+app reaches it as PyMammotion does (`CloudIOTGateway` and `AliyunMQTTTransport`, commit `963209b5`), only when the
+device page of the Mammotion cloud is empty, and keeps the Aliyun session in memory (a new process signs in again):
+
+1. **Sign-in** from the Mammotion session, without asking anything: authorization code of the account (a fresh one,
+   otherwise the one of the last sign-in), region of the account's country (`api.link.aliyun.com`), open account
+   registration and sign-in (`sdk.openaccount.aliyun.com`, then the region gateway), app identity of the phone
+   (`aepauth/handle`, stable per installation) and IoT session. Every request carries the Aliyun API gateway
+   signature; the region endpoints are accepted only under `aliyuncs.com`.
+2. **Robots** of the account (`listBindingByAccount`), filtered like the device page (mowers by name or product key,
+   RTK stations left out and logged anonymously). Pending shares are not accepted, nothing is bound or unbound.
+3. **Reading** (map, position, battery, details, native return): the same protobuf commands go through Aliyun's
+   `thing/service/invoke`, behind the same `CloudReadOnly` barrier and navigation receiver (main controller on a
+   LUBA 1); an IoT token refused (460, 29003) signs in again once. The robot's answers arrive on the Aliyun MQTT
+   broker (`{productKey}.iot-as-mqtt.{region}.aliyuncs.com:8883`, TLS trusting only the Aliyun IoT and GlobalSign roots
+   bundled by PyMammotion): the app connects with its identity, subscribes to its `app/down` topics and binds the
+   account with the IoT token, then keeps the `device_protobuf_msg_event` events of the selected robot (older than
+   60 s: buffered replays, dropped). The bind message is the only one the app publishes, to the broker and not to the
+   robot.
+4. **Refusals**: "Aliyun: account in use by another session, close the Mammotion app and try again (bind 2152)", "IoT
+   token refused by the broker, refresh the robots (bind 2043)" (the session is dropped and signed in again at the
+   next attempt), "Aliyun HTTPS domain required" for an endpoint outside Aliyun.
+
+Diagnostics: `aliyun_step` (one line per request: path, domain, HTTP status, API code), `aliyun_devices` (number of
+devices and robots, product key prefixes, or the error) and `aliyun_bind` (bind code); never a token, a code, an
+identifier, a name or a serial number. The history, firmware and camera reads keep the Mammotion application API.
+Not verified yet on a real LUBA 1: the whole chain is checked against a simulated cloud only.
+
 ## Limitations
 
 - Not verified on the robot: actual rate of update progress reports, native return from standby.
 - The cloud API is not public and may change without notice.
+- Older Aliyun cloud: not verified on a real robot yet; only reached when the device page of the Mammotion cloud is
+  empty, so an account mixing both clouds lists only its Mammotion robots.
 - No cloud STOP of a native Mammotion task other than cancelling the return.

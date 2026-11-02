@@ -31,10 +31,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.luba.poc.R
-import kotlinx.coroutines.delay
 import fr.luba.poc.i18n.tr
 import kotlin.math.PI
 import kotlin.math.sin
+import kotlinx.coroutines.delay
 
 object DumbyBrand {
     val Forest = Color(0xFF10291F)

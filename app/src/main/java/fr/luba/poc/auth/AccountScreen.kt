@@ -3,9 +3,9 @@ package fr.luba.poc.auth
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.CloudQueue
-import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -50,7 +50,7 @@ fun AccountScreen(model: CloudViewModel, state: CloudUi, onOpenMap: () -> Unit =
             if (state.busy) LubaProgress(Modifier.fillMaxWidth())
         }
         if (!state.connected) {
-            SettingsGroup(tr("Sign in", "Connexion")) {
+            SettingsGroup(title = tr("Sign in", "Connexion")) {
                 LubaTextField(email, { email = it }, tr("Email", "E-mail"), enabled = !state.busy,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
                 LubaTextField(password, { password = it }, tr("Password", "Mot de passe"), enabled = !state.busy,
@@ -62,7 +62,7 @@ fun AccountScreen(model: CloudViewModel, state: CloudUi, onOpenMap: () -> Unit =
                 if (state.accountSaved) ForgetAction(state.busy) { model.forgetAccount(); email = ""; password = "" }
             }
         } else {
-            SettingsGroup(tr("Account robots", "Robots du compte")) {
+            SettingsGroup(title = tr("Account robots", "Robots du compte")) {
                 if (state.robots.isEmpty()) InfoNote(tr("No robot: refresh the list.", "Aucun robot : actualisez la liste."))
                 state.robots.forEach { robot ->
                     NavRow(robot.name, icon = Icons.Rounded.CloudQueue, value = tr("Read the map", "Lire la carte"), onClick = { if (!state.busy) model.fetch(robot) })
@@ -74,13 +74,13 @@ fun AccountScreen(model: CloudViewModel, state: CloudUi, onOpenMap: () -> Unit =
             LaunchedEffect(Unit) { model.refreshAccount() }
             if (state.selected != null) AccountRobotPanel(state, model::refreshAccount, onStartFirmwareUpdate = model::startFirmwareUpdate,
                 onFollowFirmwareUpdate = model::followFirmwareUpdate, onStopFirmwareFollow = model::stopFirmwareFollow)
-            SettingsGroup("Session") {
+            SettingsGroup(title = "Session") {
                 SecondaryPillButton(tr("Sign out", "Déconnexion"), model::logout, Modifier.fillMaxWidth(), enabled = !state.busy, icon = Icons.AutoMirrored.Rounded.Logout)
                 if (state.accountSaved) ForgetAction(state.busy) { model.forgetAccount(); email = ""; password = "" }
             }
         }
         InfoNote(tr("The account is used to read the map, state, maintenance, positioning, versions and mowing history. The only possible actions, on request: the native return to base (Charging station, without Bluetooth) and the firmware update. No mowing, blade activation or setting goes through the cloud.", "Le compte sert à lire la carte, l’état, l’entretien, le positionnement, les versions et l’historique des tontes. Seules actions possibles, sur demande : le retour natif à la base (Station de charge, sans Bluetooth) et la mise à jour du firmware. Aucune tonte, activation des lames ni aucun réglage ne passe par le cloud."))
-        if (state.events.isNotEmpty()) SettingsGroup(tr("Account log", "Journal du compte")) {
+        if (state.events.isNotEmpty()) SettingsGroup(title = tr("Account log", "Journal du compte")) {
             LogLines(state.events.takeLast(15).reversed())
         }
     }

@@ -5,12 +5,12 @@ import fr.luba.poc.map.PaintedZone
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.simulation.MapBase
+import kotlin.math.ceil
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
-import kotlin.math.ceil
 
 /** Real coverage of a task: cutting width swept around the recorded track, per zone, gaps usable by the planner. */
 class CoverageMapTest {

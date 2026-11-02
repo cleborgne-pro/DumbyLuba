@@ -1,5 +1,6 @@
 package fr.luba.poc.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -8,12 +9,12 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
 import fr.luba.poc.diagnostics.BladeSafety
@@ -21,9 +22,12 @@ import fr.luba.poc.diagnostics.HeightSequence
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.MapLive
 import fr.luba.poc.map.Point
+import fr.luba.poc.protocol.BumperRest
+import fr.luba.poc.protocol.ModelTrial
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
+import kotlin.math.abs
 import kotlinx.coroutines.delay
 
 /** Tabs of the blade test bench: height setting, rotation at rest, cutting while moving. */
@@ -105,7 +109,7 @@ internal fun BladesPage(robot: RobotBle, state: RobotUi, back: () -> Unit, expor
 @Composable
 private fun BladeLiveStatus(state: RobotUi) {
     val t = state.telemetry
-    SettingsGroup(tr("Live status", "État en direct")) {
+    SettingsGroup(title = tr("Live status", "État en direct")) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             LiveTile(Icons.Rounded.Height, t.bladeHeightMm?.let { "$it mm" } ?: "—", tr("Height", "Hauteur"),
                 if (t.heightMoving == true) MammotionColors.Warning else MammotionColors.GreenDeep)
@@ -135,7 +139,7 @@ private fun HeightBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
     val t = state.telemetry
     val sequence = state.heightSequence
     val locked = state.bladeHeightPending || sequence.running || !state.bladeIdle()
-    SettingsGroup(tr("Setpoint", "Consigne")) {
+    SettingsGroup(title = tr("Setpoint", "Consigne")) {
         SliderRow(tr("Requested height", "Hauteur demandée"), height.toFloat(), { onHeight(it.toInt()) }, state.cutHeights.floatRange(),
             valueLabel = "$height mm", steps = state.cutHeights.sliderSteps, enabled = !locked)
         ChipChoice(state.cutHeights.presets.map { it to "$it" }, height, onHeight, enabled = !locked)
@@ -149,11 +153,11 @@ private fun HeightBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
             val from = sequence.startMm ?: t.bladeHeightMm
             val current = t.bladeHeightMm
             val fraction = if (from != null && current != null && from != target)
-                (1f - kotlin.math.abs(target - current).toFloat() / kotlin.math.abs(target - from)).coerceIn(0f, 1f) else null
+                (1f - abs(target - current).toFloat() / abs(target - from)).coerceIn(0f, 1f) else null
             ProgressNote(tr("Waiting for robot feedback · ${current ?: "—"} mm → $target mm", "Attente du retour robot · ${current ?: "—"} mm → $target mm"), fraction)
         }
     }
-    SettingsGroup(tr("Automatic sequences", "Séquences automatiques")) {
+    SettingsGroup(title = tr("Automatic sequences", "Séquences automatiques")) {
         val heights = state.cutHeights
         val current = t.bladeHeightMm?.takeIf { it in heights }
         val enabled = current != null && !locked
@@ -174,10 +178,10 @@ private fun HeightBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
                     })
                 }
             }
-            if (sequence.status.isNotBlank()) StatusNote(sequence.status, if (sequence.running) NoteTone.WARNING else NoteTone.INFO)
+            if (sequence.status.isNotBlank()) StatusNote(sequence.status, tone = if (sequence.running) NoteTone.WARNING else NoteTone.INFO)
         }
     }
-    SettingsGroup(tr("On-site observation", "Observation sur place")) {
+    SettingsGroup(title = tr("On-site observation", "Observation sur place")) {
         Text(tr("Did the deck move?", "Le plateau a-t-il bougé ?"), style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             SecondaryPillButton(tr("Yes", "Oui"), { robot.recordHeightObservation(true) }, Modifier.weight(1f))
@@ -206,13 +210,13 @@ private fun StaticBench(robot: RobotBle, state: RobotUi, height: Int, knifeAlt: 
                         supervised: Boolean, onSupervised: (Boolean) -> Unit) {
     val t = state.telemetry
     // Model trial armed (read from its state so that the list follows it): the blade test is open to this model.
-    val trial by fr.luba.poc.protocol.ModelTrial.state.collectAsStateWithLifecycle()
-    val modelAllowed = trial.let { fr.luba.poc.protocol.ModelTrial.testAllowed(state.selected?.name, android.os.SystemClock.elapsedRealtime()) }
-    SettingsGroup(tr("Preconditions", "Préconditions")) {
+    val trial by ModelTrial.state.collectAsStateWithLifecycle()
+    val modelAllowed = trial.let { ModelTrial.testAllowed(state.selected?.name, SystemClock.elapsedRealtime()) }
+    SettingsGroup(title = tr("Preconditions", "Préconditions")) {
         PreconditionList(BladeSafety.checks(state.selected?.name, state.ageMs, t.battery, if (state.bladeTestActive) 11 else t.robotState,
-            if (state.bladeTestActive) 0 else fr.luba.poc.protocol.BumperRest.guard(state.selected?.name, t.sensorStatus, state.bumperRest, android.os.SystemClock.elapsedRealtime()), t.selfCheck, state.campaign.running, height, state.cutHeights, modelAllowed).map { it.label to it.ok })
+            if (state.bladeTestActive) 0 else BumperRest.guard(state.selected?.name, t.sensorStatus, state.bumperRest, SystemClock.elapsedRealtime()), t.selfCheck, state.campaign.running, height, state.cutHeights, modelAllowed).map { it.label to it.ok })
     }
-    SettingsGroup(tr("Procedure", "Déroulé")) {
+    SettingsGroup(title = tr("Procedure", "Déroulé")) {
         StepLine(1, tr("Check that the blades are stopped", "Vérifier l'arrêt des lames"), tr("OFF sent, then a fresh OFF state is awaited.", "OFF envoyé, puis état OFF frais attendu."))
         SecondaryPillButton(tr("Check that the blades are stopped", "Vérifier l'arrêt des lames"), { robot.prepareBladeStop(height) }, Modifier.fillMaxWidth(), enabled = state.bladeIdle() && !state.bladeHeightPending)
         StepLine(2, tr("Confirm supervision", "Confirmer la supervision"))
@@ -254,9 +258,9 @@ internal fun StepLine(number: Int, title: String, detail: String = "") {
 internal fun PreconditionList(checks: List<Pair<String, Boolean>>) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val failed = checks.filterNot { it.second }
-    if (failed.isEmpty()) StatusNote(tr("All conditions are met (${checks.size}/${checks.size})", "Toutes les conditions sont remplies (${checks.size}/${checks.size})"), NoteTone.SUCCESS)
+    if (failed.isEmpty()) StatusNote(tr("All conditions are met (${checks.size}/${checks.size})", "Toutes les conditions sont remplies (${checks.size}/${checks.size})"), tone = NoteTone.SUCCESS)
     else StatusNote(tr("${Format.plural(failed.size, "unmet condition", "unmet conditions")} out of ${checks.size}",
-        "${Format.plural(failed.size, "condition non remplie", "conditions non remplies")} sur ${checks.size}"), NoteTone.WARNING)
+        "${Format.plural(failed.size, "condition non remplie", "conditions non remplies")} sur ${checks.size}"), tone = NoteTone.WARNING)
     (if (expanded) checks else failed).forEach { (label, ok) -> CheckLine(label, ok) }
     // Offset so the link text lines up with the card content.
     TextAction(if (expanded) tr("Hide details", "Masquer le détail") else tr("See the ${checks.size} conditions", "Voir les ${checks.size} conditions"), { expanded = !expanded }, Modifier.offset(x = (-12).dp))
@@ -294,8 +298,8 @@ private fun MovingBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
         }
     }
     MovingMap(state)
-    SettingsGroup(tr("Tracking", "Suivi")) {
-        if (nav.status.isNotBlank() && (nav.tonte || !nav.running)) StatusNote(nav.status, navTone(nav.outcome, nav.running))
+    SettingsGroup(title = tr("Tracking", "Suivi")) {
+        if (nav.status.isNotBlank() && (nav.tonte || !nav.running)) StatusNote(nav.status, tone = navTone(nav.outcome, nav.running))
         if (!nav.running && nav.preview.isNotBlank()) InfoNote(nav.preview)
         KeyValueRow(tr("Commanded blades", "Lames commandées"), if (running) (if (nav.bladesOn) tr("running", "en marche") else tr("stopped", "arrêtées")) else "—",
             valueColor = if (running && nav.bladesOn) MammotionColors.Danger else MammotionColors.TextPrimary)
@@ -303,7 +307,7 @@ private fun MovingBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
         KeyValueRow(tr("Distance traveled", "Distance parcourue"), "${Format.num(nav.observedMeters, 2)} m")
         KeyValueRow(tr("Planned with blades running", "Prévu lames en marche"), "${Format.num(nav.plannedCutMeters, 1)} m")
     }
-    SettingsGroup(tr("Test settings", "Réglages de l'essai")) {
+    SettingsGroup(title = tr("Test settings", "Réglages de l'essai")) {
         SliderRow(tr("Cutting height", "Hauteur de coupe"), height.toFloat(), { onHeight(it.toInt()) }, state.cutHeights.floatRange(),
             valueLabel = "$height mm", steps = state.cutHeights.sliderSteps, enabled = !running)
         SliderRow(tr("Travel speed", "Vitesse d'avance"), state.trajectorySpeedPercent.toFloat(), { robot.setTrajectorySpeed(it.toInt()) }, 10f..100f,
@@ -325,7 +329,7 @@ private fun MovingBench(robot: RobotBle, state: RobotUi, height: Int, onHeight: 
 private fun MovingMap(state: RobotUi) {
     val t = state.telemetry
     var cameraReset by remember { mutableIntStateOf(0) }
-    SettingsGroup(tr("Planned route", "Parcours prévu")) {
+    SettingsGroup(title = tr("Planned route", "Parcours prévu")) {
         Box(Modifier.fillMaxWidth().height(300.dp).clip(MaterialTheme.shapes.medium).background(MammotionColors.MapBackground)) {
             MapLive(map = state.robotMap, x = t.x, y = t.y, heading = t.heading,
                 trail = state.navTest.trail.map { Point(it.x, it.y) }, start = state.navTest.trail.firstOrNull()?.let { Point(it.x, it.y) },
@@ -356,7 +360,7 @@ private fun ColumnScope.MovingActions(robot: RobotBle, state: RobotUi, height: I
 private fun BladeInterruptionDialog(robot: RobotBle, state: RobotUi) {
     val reason = state.navTest.interruption?.takeIf { state.navTest.tonte } ?: return
     LubaDialog(onDismissRequest = robot::acknowledgeNavInterruption, title = tr("Cutting test interrupted", "Essai de coupe interrompu"), content = {
-        StatusNote(reason, NoteTone.DANGER)
+        StatusNote(reason, tone = NoteTone.DANGER)
         Text(tr("The robot received STOP and the blade stop. Distance traveled: ${Format.num(state.navTest.observedMeters, 2)} m.",
             "Le robot a reçu STOP et l'arrêt des lames. Distance parcourue : ${Format.num(state.navTest.observedMeters, 2)} m."),
             style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
@@ -374,7 +378,7 @@ private fun BladeResults(state: RobotUi, bench: BladeBench, exportArchive: () ->
         BladeBench.MOVING -> if (state.navTest.tonte) state.navTest.results else emptyList()
     }
     if (results.isEmpty()) return
-    SettingsGroup(tr("Results", "Résultats")) {
+    SettingsGroup(title = tr("Results", "Résultats")) {
         results.asReversed().take(30).forEach { ResultRow(it.outcome, it.title, detail = it.detail, meta = Format.duration(it.durationMs)) }
         TextAction(tr("Export tests and logs", "Exporter les essais et journaux"), exportArchive, enabled = !state.campaign.running && !state.bladeBusy())
     }

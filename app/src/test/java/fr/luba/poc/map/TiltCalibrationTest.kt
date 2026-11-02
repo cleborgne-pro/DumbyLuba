@@ -1,10 +1,10 @@
 package fr.luba.poc.map
 
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import org.junit.Assert.*
+import org.junit.Test
 
 class TiltCalibrationTest {
     /** Rotation by [deg] around a horizontal (x, y) axis of the phone: tilted holder. */

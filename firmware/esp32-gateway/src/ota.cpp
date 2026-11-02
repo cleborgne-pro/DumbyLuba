@@ -7,6 +7,7 @@
 #include <mbedtls/md.h>
 
 #include "gw_ota.h"
+#include "journal.h"
 
 // Otherwise the Arduino core confirms any new version right at boot: confirmation is done here, after
 // 60 s running with Wi-Fi (ota::poll). Without confirmation, the bootloader rolls back to the previous
@@ -87,7 +88,7 @@ String jsonText(const String &s) {
 void remember(const String &text) {
   lastUpdate = text;
   prefs.putString("last", text);
-  Serial.printf("[ota] %s\n", text.c_str());
+  journal::console.printf("[ota] %s\n", text.c_str());
 }
 
 void handleNonce() {
@@ -119,13 +120,13 @@ void start() {
   }
   if (!G::sameHex(proof(nonce, md5).c_str(), auth.c_str())) {
     failure = "Wrong gateway code";
-    Serial.println("[ota] refused: wrong code proof");
+    journal::console.println("[ota] refused: wrong code proof");
     return;
   }
   const std::string refused = G::refusal(situation());
   if (!refused.empty()) {
     failure = refused.c_str();
-    Serial.printf("[ota] refused: %s\n", refused.c_str());
+    journal::console.printf("[ota] refused: %s\n", refused.c_str());
     return;
   }
   const esp_partition_t *target = esp_ota_get_next_update_partition(nullptr);
@@ -139,7 +140,7 @@ void start() {
     // Restart announced: the app stops the robot and will resume when the gateway comes back.
     if (hooks.announce) hooks.announce("Gateway update: restarting in a few seconds");
     delay(G::PILOT_STOP_WAIT_MS);
-    if (hooks.closePilot && !hooks.closePilot(5000)) Serial.println("[ota] pilot session not closed in time");
+    if (hooks.closePilot && !hooks.closePilot(5000)) journal::console.println("[ota] pilot session not closed in time");
   }
   if (!Update.begin(size, U_FLASH)) {
     failure = String("Cannot open the partition: ") + Update.errorString();
@@ -149,7 +150,7 @@ void start() {
   Update.setMD5(md5.c_str());
   imageSize = size;
   accepted = true;
-  Serial.printf("[ota] writing %u bytes to %s\n", (unsigned)size, target->label);
+  journal::console.printf("[ota] writing %u bytes to %s\n", (unsigned)size, target->label);
 }
 
 void handleUpload() {
@@ -202,7 +203,7 @@ void begin(WebServer &web, const Hooks &h) {
   esp_ota_img_states_t state;
   if (runningPart && esp_ota_get_state_partition(runningPart, &state) == ESP_OK)
     pendingVerify = state == ESP_OTA_IMG_PENDING_VERIFY;
-  if (pendingVerify) Serial.println("[ota] new version: confirmed after running 60 s with Wi-Fi");
+  if (pendingVerify) journal::console.println("[ota] new version: confirmed after running 60 s with Wi-Fi");
   // Image written but abandoned at boot (crash before confirmation): the bootloader came back to this one.
   const esp_partition_t *invalid = esp_ota_get_last_invalid_partition();
   if (!pendingVerify && invalid && lastUpdate.startsWith("image written"))
@@ -231,7 +232,7 @@ void setAllowWhilePiloted(bool allow) {
   if (allow == allowPiloted) return;
   allowPiloted = allow;
   prefs.putBool("allow_pilot", allow);
-  Serial.printf("[ota] updates while piloted: %s\n", allow ? "allowed" : "refused");
+  journal::console.printf("[ota] updates while piloted: %s\n", allow ? "allowed" : "refused");
 }
 
 String statusJson() {

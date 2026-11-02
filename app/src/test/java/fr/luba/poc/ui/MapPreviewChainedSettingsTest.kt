@@ -29,38 +29,33 @@ import fr.luba.poc.map.foldAngle
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.SimulationSession
 import fr.luba.poc.ui.theme.LubaTheme
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
-import org.junit.Rule
-import org.junit.Test
-import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
-import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
-import org.robolectric.annotation.GraphicsMode
+import fr.luba.poc.withComposeTestActivity
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.roundToInt
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.RuleChain
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /**
  * Several different task settings changed one after the other in a single composition, each followed by "Route
  * preview": every computation succeeds and its result reflects the setting just changed (mode, manual angle, spacing,
  * perimeter loops, height passes, cutting height), not the one of an older composition. A real map change during the
- * computation is still refused.
+ * computation abandons the computation in progress, without a refusal.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w412dp-h915dp-xxhdpi")
 class MapPreviewChainedSettingsTest {
     val compose = createComposeRule()
-    // The test activity (ui-test-manifest) only exists in debug.
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private val zone = MapShape(1, 0, listOf(Point(0.0, 0.0), Point(12.0, 0.0), Point(12.0, 8.0), Point(0.0, 8.0)), "Pelouse")
     private val state = RobotUi(robotMap = RobotMap(listOf(zone), true, "test"), connection = ConnectionState.Receiving, ready = true,
@@ -81,18 +76,14 @@ class MapPreviewChainedSettingsTest {
         compose.waitForIdle()
     }
 
-    private fun refusals() = compose.onAllNodesWithText("recalcul requis", substring = true).fetchSemanticsNodes().size
-
     private fun screenTexts() = compose.onAllNodes(hasText("", substring = true), useUnmergedTree = true).fetchSemanticsNodes()
         .flatMap { it.config.getOrElse(SemanticsProperties.Text) { emptyList() } }.joinToString(" | ") { it.text }
 
     /** "Route preview" from the settings page, then back to the settings page; the computed preview. */
     private fun computed(step: String): Preview {
-        preview = null
         compose.onNodeWithText("Aperçu du trajet").performClick()
-        runCatching { compose.waitUntil(120_000) { preview != null || refusals() > 0 } }
+        compose.awaitCurrentRoute { preview }
         compose.waitForIdle()
-        assertEquals("$step: no refusal (${screenTexts()})", 0, refusals())
         val result = assertNotNullAnd("$step: preview computed (${screenTexts()})", preview)
         androidx.test.espresso.Espresso.pressBack()
         compose.waitForIdle()
@@ -201,16 +192,16 @@ class MapPreviewChainedSettingsTest {
         assertEquals("Each session", 0, guideMaps())
     }
 
-    @Test fun `zone redrawn during the computation still refuses the route`() {
+    @Test fun `zone redrawn during the computation abandons the route of the old outline`() {
         val ui = mutableStateOf(state)
         open(ui)
         preview = null
         compose.onNodeWithText("Aperçu du trajet").performClick()
-        // Changed before the main thread runs again: the computation in progress started on the old outline.
+        // Changed before the main thread runs again: the computation in progress started on the old outline. The zones
+        // changed, so the selection is reset: the computation is abandoned, without a route nor a refusal.
         val moved = zone.copy(points = zone.points.map { Point(it.x + 0.5, it.y) })
         ui.value = state.copy(robotMap = RobotMap(listOf(moved), true, "test"))
-        runCatching { compose.waitUntil(120_000) { preview != null || refusals() > 0 } }
-        assertEquals(null, preview)
-        compose.onNodeWithText("recalcul requis", substring = true).assertExists()
+        compose.waitUntil(120_000) { compose.onAllNodesWithText("Calcul du trajet", substring = true).fetchSemanticsNodes().isEmpty() }
+        assertEquals("no route of the old outline (${screenTexts()})", null, preview)
     }
 }

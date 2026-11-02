@@ -1,0 +1,27 @@
+# GitLab CI: a single fast build of the fold variant (the one tools/deploy.sh installs), on every push and merge
+# request. Lint and tests stay local (tools/check.sh) to save CI minutes; the release variant is not built here (it
+# needs the signing keystore, which stays off the CI).
+
+default:
+  interruptible: true
+
+build:
+  image: ghcr.io/cirruslabs/android-sdk:36
+  variables:
+    GRADLE_USER_HOME: $CI_PROJECT_DIR/.gradle
+    GRADLE_OPTS: -Dorg.gradle.daemon=false
+  cache:
+    # Gradle: downloaded dependencies and the build cache. Keyed on the wrapper and the version catalog, so a
+    # dependency upgrade starts from a clean cache instead of reusing an incompatible one.
+    key:
+      files:
+        - gradle/wrapper/gradle-wrapper.properties
+        - gradle/libs.versions.toml
+    paths:
+      - .gradle/caches
+      - .gradle/wrapper
+  before_script:
+    # checkFoldDexRegisters (finalized by assembleFold) is a Python script; the image does not always ship it.
+    - command -v python3 >/dev/null || (apt-get update -qq && apt-get install -y -qq --no-install-recommends python3)
+  script:
+    - ./gradlew :app:assembleFold --console=plain

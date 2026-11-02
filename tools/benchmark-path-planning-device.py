@@ -62,7 +62,7 @@ def main():
     root = pathlib.Path(__file__).resolve().parents[1]
     for name, file in {
         "runnerSource": root / "app/src/androidTest/java/fr/luba/poc/planning/PlannerDeviceBenchmark.kt",
-        "testApk": root / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk",
+        "testApk": root / "app/build.noindex/outputs/apk/androidTest/debug/app-debug-androidTest.apk",
     }.items():
         if file.exists():
             metadata[name + "Sha256"] = hashlib.sha256(file.read_bytes()).hexdigest()

@@ -95,9 +95,15 @@ object RobotErrorCatalog {
     val size: Int get() = table.size
     val codes: Set<Int> get() = table.keys
 
+    /**
+     * Table of the codes, by absolute path: R8 moves the classes of the published APK to other packages, so a path
+     * relative to this class found no file there and every robot error lost its label and advice.
+     */
+    const val RESOURCE = "/fr/luba/poc/protocol/robot_error_codes.tsv"
+
     /** Columns: code, module, level, label_en, solution_en, label_fr, solution_fr (tools/build-robot-error-codes.py). */
     private fun load(): Map<Int, Row> {
-        val stream = RobotErrorCatalog::class.java.getResourceAsStream("robot_error_codes.tsv") ?: return emptyMap()
+        val stream = RobotErrorCatalog::class.java.getResourceAsStream(RESOURCE) ?: return emptyMap()
         return stream.bufferedReader(Charsets.UTF_8).useLines { lines ->
             lines.filter { it.isNotBlank() && !it.startsWith("#") }.mapNotNull { line ->
                 val cells = line.split('\t')

@@ -79,10 +79,12 @@ object RadarAnalysis {
     fun approach(frames: List<FrameStats>, windowSec: Long = 40 * 60): RainApproach? {
         val last = frames.maxByOrNull { it.timeSec } ?: return null
         val lastKm = last.nearestKm ?: return null
-        val pts = frames.filter { it.nearestKm != null && last.timeSec - it.timeSec in 0..windowSec }.sortedBy { it.timeSec }
+        // (time, distance) of the recent frames that saw rain.
+        val pts = frames.filter { last.timeSec - it.timeSec in 0..windowSec }
+            .mapNotNull { frame -> frame.nearestKm?.let { frame.timeSec to it } }.sortedBy { it.first }
         if (pts.size < 3) return RainApproach(lastKm, 0.0, null, pts.size)
-        val t0 = pts.first().timeSec
-        val xs = pts.map { (it.timeSec - t0) / 3600.0 }; val ys = pts.map { it.nearestKm!! }
+        val t0 = pts.first().first
+        val xs = pts.map { (it.first - t0) / 3600.0 }; val ys = pts.map { it.second }
         val mx = xs.average(); val my = ys.average()
         val sxx = xs.sumOf { (it - mx) * (it - mx) }
         if (sxx <= 0.0) return RainApproach(lastKm, 0.0, null, pts.size)

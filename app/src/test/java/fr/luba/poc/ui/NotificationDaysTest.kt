@@ -3,10 +3,10 @@ package fr.luba.poc.ui
 import fr.luba.poc.alerts.AlertEntry
 import fr.luba.poc.alerts.AlertKind
 import fr.luba.poc.alerts.Severity
-import org.junit.Assert.assertEquals
-import org.junit.Test
 import java.util.Calendar
 import java.util.Locale
+import org.junit.Assert.assertEquals
+import org.junit.Test
 
 class NotificationDaysTest {
     private fun at(year: Int, month: Int, day: Int, hour: Int, minute: Int = 0) =

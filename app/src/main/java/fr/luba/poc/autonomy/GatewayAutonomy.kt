@@ -1,10 +1,14 @@
 package fr.luba.poc.autonomy
 
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.Point
 import fr.luba.poc.map.SignalSample
 import fr.luba.poc.map.TrajectoryEnvelope
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.simulation.SimEdge
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -13,8 +17,6 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 /** Channel to the pilot phone; absent (null) during a Wi-Fi outage. */
 fun interface PilotSink { fun frame(type: Int, payload: ByteArray) }
@@ -36,7 +38,7 @@ interface LegHost {
      * starting with [OrphanDock.RESULT_PREFIX] if the request was written and confirmed (otherwise a reason for the gateway's
      * own log).
      */
-    fun nativeDock(approach: fr.luba.poc.map.Point): String = tr("docking not supported by this host", "accostage non pris en charge par cet hôte")
+    fun nativeDock(approach: Point): String = tr("docking not supported by this host", "accostage non pris en charge par cet hôte")
 }
 
 /**
@@ -68,7 +70,7 @@ class GatewayAutonomy(
         val samples = ArrayList<SignalSample>()
         @Volatile var progress: LegProgress? = null
         /** Released when the route tracking is finished, robot stopped and slot freed. */
-        val done = java.util.concurrent.CountDownLatch(1)
+        val done = CountDownLatch(1)
     }
     private class Finished(val result: LegResult, val samples: List<SignalSample>)
 

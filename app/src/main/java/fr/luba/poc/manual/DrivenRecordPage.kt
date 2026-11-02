@@ -1,6 +1,7 @@
 package fr.luba.poc.manual
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -66,8 +67,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.Clock
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.camera.LiveCameraView
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.DisplayPose
 import fr.luba.poc.map.DrivenKind
@@ -92,12 +95,12 @@ import fr.luba.poc.ui.components.StatusNote
 import fr.luba.poc.ui.components.TextAction
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
+import kotlin.math.floor
+import kotlin.math.hypot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.floor
-import kotlin.math.hypot
 
 /** Choices of the page that are not part of the recording itself (kept by [RobotBle.driven]). */
 @Stable
@@ -176,7 +179,7 @@ fun DrivenRecordPage(robot: RobotBle, state: RobotUi, back: () -> Unit, modifier
                     }
                 }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp), contentAlignment = Alignment.TopCenter) {
-                    fr.luba.poc.camera.LiveCameraView(Modifier.widthIn(max = 560.dp), large = true)
+                    LiveCameraView(Modifier.widthIn(max = 560.dp), large = true)
                 }
             }
         }
@@ -345,7 +348,7 @@ private fun RecordBar(robot: RobotBle, state: RobotUi, trace: DrivenTrace?, choi
 private fun RoundAction(icon: ImageVector, description: String, enabled: Boolean = true, onClick: () -> Unit) {
     val colors = MammotionColors
     Surface(onClick = onClick, enabled = enabled, shape = CircleShape, color = colors.SurfaceMuted,
-        border = androidx.compose.foundation.BorderStroke(1.dp, colors.Outline), modifier = Modifier.size(48.dp)) {
+        border = BorderStroke(1.dp, colors.Outline), modifier = Modifier.size(48.dp)) {
         Box(contentAlignment = Alignment.Center) {
             Icon(icon, description, Modifier.size(22.dp), tint = if (enabled) colors.TextPrimary else colors.TextTertiary)
         }
@@ -377,7 +380,7 @@ private fun ReviewPanel(robot: RobotBle, state: RobotUi, reviewed: DrivenOutcome
     Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
         Text(tr("Result · ${state.driven?.kind?.label ?: ""}", "Résultat · ${state.driven?.kind?.label ?: ""}"), style = MaterialTheme.typography.titleSmall)
         when (reviewed) {
-            is DrivenOutcome.Refused -> StatusNote(reviewed.reason, NoteTone.DANGER)
+            is DrivenOutcome.Refused -> StatusNote(reviewed.reason, tone = NoteTone.DANGER)
             is DrivenOutcome.Zone -> {
                 val options = buildList {
                     if (reviewed.separate != null) add(false to tr("New DumbyLuba zone", "Nouvelle zone DumbyLuba"))
@@ -389,13 +392,13 @@ private fun ReviewPanel(robot: RobotBle, state: RobotUi, reviewed: DrivenOutcome
                     KeyValueRow(tr("Area", "Surface"), MapCorrections.squareMeters(reviewed.separateAreaM2))
                     reviewed.separateRefusal?.let { StatusNote(it) }
                     if (!reviewed.connected) StatusNote(tr("This zone is not connected to the others: record a passage from an existing zone, otherwise the robot cannot reach it.",
-                        "Cette zone n'est reliée à aucune autre : enregistrez un passage depuis une zone existante, sinon le robot ne pourra pas l'atteindre."), NoteTone.WARNING)
+                        "Cette zone n'est reliée à aucune autre : enregistrez un passage depuis une zone existante, sinon le robot ne pourra pas l'atteindre."), tone = NoteTone.WARNING)
                 } else reviewed.enlargement?.let { e ->
                     KeyValueRow(tr("Area added", "Surface ajoutée"), MapCorrections.squareMeters(e.addedM2))
                     reviewed.separateRefusal?.let { StatusNote(it) }
                 }
                 if (reviewed.beyondM2 >= 0.05) StatusNote(tr("${MapCorrections.squareMeters(reviewed.beyondM2)} beyond the Mammotion boundaries: this surface only exists on this phone (hatched on the map), the robot and the Mammotion app do not know it. Mowed under your responsibility.",
-                    "${MapCorrections.squareMeters(reviewed.beyondM2)} hors des contours Mammotion : cette surface n'existe que sur ce téléphone (hachurée sur la carte), le robot et l'app Mammotion ne la connaissent pas. Tondue sous votre responsabilité."), NoteTone.WARNING)
+                    "${MapCorrections.squareMeters(reviewed.beyondM2)} hors des contours Mammotion : cette surface n'existe que sur ce téléphone (hachurée sur la carte), le robot et l'app Mammotion ne la connaissent pas. Tondue sous votre responsabilité."), tone = NoteTone.WARNING)
             }
             is DrivenOutcome.Passage -> {
                 KeyValueRow(tr("Length", "Longueur"), "${MapCorrections.meters(reviewed.lengthM)} m")
@@ -403,13 +406,13 @@ private fun ReviewPanel(robot: RobotBle, state: RobotUi, reviewed: DrivenOutcome
             }
             is DrivenOutcome.NoGo -> KeyValueRow(tr("Area", "Surface"), MapCorrections.squareMeters(reviewed.areaM2))
         }
-        reviewed.warnings.forEach { StatusNote(it, NoteTone.WARNING) }
+        reviewed.warnings.forEach { StatusNote(it, tone = NoteTone.WARNING) }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
         SecondaryPillButton(tr("Back", "Revenir"), { choices.outcome = null }, Modifier.weight(1f))
         if (reviewed !is DrivenOutcome.Refused) PrimaryPillButton(tr("Save", "Enregistrer"), {
             val correction = DrivenRecording.correction(reviewed, choices.enlarge, choices.name, state.mapCorrections, state.mammotionMap, state.robotMap,
-                System.currentTimeMillis())
+                Clock.now())
             if (correction != null && robot.saveDrivenRecording(correction)) {
                 choices.saved = tr("Saved: ${correction.label}. It is on the map and in Map → Correct the map → Corrections (disable, delete).",
                     "Enregistré : ${correction.label}. Visible sur la carte et dans Carte → Corriger la carte → Corrections (désactiver, supprimer).")

@@ -3,10 +3,17 @@ package fr.luba.poc.gateway
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import fr.luba.poc.Clock
 import fr.luba.poc.ble.SeenRobot
 import fr.luba.poc.i18n.tr
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Result of [GatewayClient.probe]: gateway reached, its version and health, the robots its Bluetooth sees. */
 data class GatewayProbe(val host: String, val handshakeMs: Long, val appVersion: String?, val capabilities: Set<String>,
@@ -23,8 +30,8 @@ object GatewaySearch {
 
     /** Readable reason for a connection failure: Java timeouts translated, otherwise the message as is. */
     fun reason(error: Throwable): String = when {
-        error is java.net.SocketTimeoutException -> tr("timed out", "délai dépassé")
-        error is java.net.ConnectException || error is java.net.NoRouteToHostException -> tr("connection impossible", "connexion impossible")
+        error is SocketTimeoutException -> tr("timed out", "délai dépassé")
+        error is ConnectException || error is NoRouteToHostException -> tr("connection impossible", "connexion impossible")
         else -> error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
     }
 
@@ -48,7 +55,7 @@ object GatewaySearch {
         failures.lastOrNull { it.second is GatewayDenied }?.let { return it.second as GatewayDenied }
         return IllegalStateException(when {
             announced == 0 && saved == null -> tr("gateway not found on the Wi-Fi", "passerelle introuvable sur le Wi-Fi")
-            announced == 0 -> tr("${saved!!.host} unreachable and gateway not found on the Wi-Fi", "${saved!!.host} injoignable et passerelle introuvable sur le Wi-Fi")
+            announced == 0 -> tr("${saved?.host} unreachable and gateway not found on the Wi-Fi", "${saved?.host} injoignable et passerelle introuvable sur le Wi-Fi")
             else -> tr("$announced gateway(s) announced, none reachable", "$announced passerelle(s) annoncée(s), aucune joignable") +
                 failures.joinToString("") { (endpoint, error) -> tr("; ${endpoint.host}: ${reason(error)}", " ; ${endpoint.host} : ${reason(error)}") }
         })
@@ -93,9 +100,9 @@ object GatewayClient {
         try {
             channel.send(GatewayProtocol.SCAN)
             val found = linkedMapOf<String, SeenRobot>()
-            val deadline = System.currentTimeMillis() + timeoutMs
-            var lastPing = System.currentTimeMillis()
-            while (System.currentTimeMillis() < deadline) {
+            val deadline = Clock.now() + timeoutMs
+            var lastPing = Clock.now()
+            while (Clock.now() < deadline) {
                 val frame = channel.read()
                 if (frame.type == GatewayProtocol.SCAN_END) break
                 if (frame.type == GatewayProtocol.SCAN_RESULT) {
@@ -105,7 +112,7 @@ object GatewayClient {
                 // Health sent at the start of the session: the gateway stays monitored even without a linked robot.
                 if (frame.type == GatewayProtocol.HEALTH) GatewayHealth.decode(frame.payload)?.let { GatewayHealthStore.update(it) }
                 if (frame.type == GatewayProtocol.FAILURE) throw GatewayScanFailed(frame.text())
-                if (System.currentTimeMillis() - lastPing >= GatewayProtocol.PING_MS) { channel.send(GatewayProtocol.PING); lastPing = System.currentTimeMillis() }
+                if (Clock.now() - lastPing >= GatewayProtocol.PING_MS) { channel.send(GatewayProtocol.PING); lastPing = Clock.now() }
             }
             runCatching { channel.send(GatewayProtocol.CLOSE) }
             return found.values.toList()
@@ -124,9 +131,9 @@ object GatewayClient {
         var failure: String? = null
         try {
             channel.send(GatewayProtocol.SCAN)
-            val deadline = System.currentTimeMillis() + timeoutMs
-            var lastPing = System.currentTimeMillis()
-            while (System.currentTimeMillis() < deadline) {
+            val deadline = Clock.now() + timeoutMs
+            var lastPing = Clock.now()
+            while (Clock.now() < deadline) {
                 val frame = channel.read()
                 if (frame.type == GatewayProtocol.SCAN_END) break
                 if (frame.type == GatewayProtocol.SCAN_RESULT) {
@@ -135,7 +142,7 @@ object GatewayClient {
                 }
                 if (frame.type == GatewayProtocol.HEALTH) GatewayHealth.decode(frame.payload)?.let { health = it; GatewayHealthStore.update(it) }
                 if (frame.type == GatewayProtocol.FAILURE) { failure = GatewayWireText.display(frame.text()); break }
-                if (System.currentTimeMillis() - lastPing >= GatewayProtocol.PING_MS) { channel.send(GatewayProtocol.PING); lastPing = System.currentTimeMillis() }
+                if (Clock.now() - lastPing >= GatewayProtocol.PING_MS) { channel.send(GatewayProtocol.PING); lastPing = Clock.now() }
             }
             runCatching { channel.send(GatewayProtocol.CLOSE) }
         } finally { channel.close() }
@@ -161,9 +168,9 @@ object GatewayClient {
     fun discoverAll(context: Context, timeoutMs: Long = 3000, firstOnly: Boolean = false): List<GatewayEndpoint> {
         val nsd = context.getSystemService(NsdManager::class.java) ?: return emptyList()
         val done = CountDownLatch(1)
-        val found = java.util.concurrent.CopyOnWriteArrayList<GatewayEndpoint>()
-        val pending = java.util.concurrent.ConcurrentLinkedQueue<NsdServiceInfo>()
-        val resolving = java.util.concurrent.atomic.AtomicBoolean(false)
+        val found = CopyOnWriteArrayList<GatewayEndpoint>()
+        val pending = ConcurrentLinkedQueue<NsdServiceInfo>()
+        val resolving = AtomicBoolean(false)
         fun resolveNext() {
             if (!resolving.compareAndSet(false, true)) return
             val next = pending.poll() ?: run { resolving.set(false); return }

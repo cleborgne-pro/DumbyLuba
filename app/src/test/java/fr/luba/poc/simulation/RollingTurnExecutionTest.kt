@@ -11,7 +11,7 @@ import org.junit.Test
  * in place than the fast route of the same zone. Printed: fast then lawn friendly, mission metrics of the plan and execution.
  */
 class RollingTurnExecutionTest {
-    @Test(timeout = 900000) fun `rolling U-turns are followed without exceeding the deviation limits`() {
+    @Test(timeout = 600000) fun `rolling U-turns are followed without exceeding the deviation limits`() {
         val (map, base) = ReferenceRoutes.referenceMap()
         val failures = mutableListOf<String>()
         for (name in listOf("Potager", "Aire de jeux")) {

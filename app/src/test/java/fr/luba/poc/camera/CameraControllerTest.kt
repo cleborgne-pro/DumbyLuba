@@ -5,7 +5,10 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -41,5 +44,40 @@ class CameraControllerTest {
         assertEquals(1, map.childCount)
         assertEquals(0, thumbnail.childCount)
         assertSame(map, player.parent)
+    }
+
+    private fun playerPage() = context.assets.open("camera/agora.html").bufferedReader().use { it.readText() }
+
+    /** Regression of 2026-10-30: the vendored SDK, relative to the page's fake HTTPS origin, was never served. */
+    @Test fun `every script of the player page is served from the app assets`() {
+        val scripts = Regex("""<script src="([^"]+)"""").findAll(playerPage()).map { it.groupValues[1] }.toList()
+        assertTrue("no script tag in agora.html", scripts.isNotEmpty())
+        for (src in scripts) {
+            val response = cameraPageAsset(context, CAMERA_PAGE_ORIGIN + src)
+            assertNotNull(src, response?.data)
+            assertEquals("text/javascript", response!!.mimeType)
+            val head = response.data.bufferedReader().use { it.readText().take(200) }
+            assertTrue(src, head.contains("AgoraInc"))
+        }
+    }
+
+    @Test fun `only files of the camera folder are served, and only under the page origin`() {
+        assertNull(cameraPageAsset(context, "https://download.agora.io/sdk/release/AgoraRTC_N-4.24.3.js"))
+        assertNull(cameraPageAsset(context, "wss://1-2-3-4.edge.agora.io:4706"))
+        for (name in listOf("../AndroidManifest.xml", "..", "missing.js", "sub/agora.html", "agora.html.bak")) {
+            assertEquals(name, 404, cameraPageAsset(context, CAMERA_PAGE_ORIGIN + name)!!.statusCode)
+        }
+    }
+
+    /** Agora edge servers listen on their own ports and the SDK falls back to its SD-RTN domains and a blob worker. */
+    @Test fun `the player page policy lets the Agora SDK reach its edge servers`() {
+        val policy = Regex("""Content-Security-Policy" content="([^"]+)"""").find(playerPage())!!.groupValues[1]
+        val directives = policy.split(';').map { it.trim().split(' ') }.associate { it.first() to it.drop(1) }
+        val connect = directives.getValue("connect-src")
+        for (source in listOf("wss://*.agora.io:*", "https://*.agora.io:*", "wss://*.sd-rtn.com:*", "https://*.sd-rtn.com:*")) {
+            assertTrue(source, source in connect)
+        }
+        assertEquals(listOf("blob:"), directives["worker-src"])
+        assertEquals(listOf("'self'", "'unsafe-inline'"), directives["script-src"])
     }
 }

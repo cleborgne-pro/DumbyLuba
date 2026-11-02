@@ -30,7 +30,7 @@ class AlertJournalTest {
         assertNull(AlertJournal.decode(older).pending.values.single().photo)
     }
     @Test fun groupingIsolatesRobotsAndIncidentKinds() {
-        val a=alert();val b=alert("robot-2");val c=a.copy(kind=AlertKind.BLOCKED)
+        val a=alert(); val b=alert("robot-2"); val c=a.copy(kind=AlertKind.BLOCKED)
         val keys=listOf(a,b,c).map(AlertJournal::key)
         assertEquals(3,keys.toSet().size)
         val journal=AlertJournal(pending=listOf(a,b,c).associateBy(AlertJournal::key))

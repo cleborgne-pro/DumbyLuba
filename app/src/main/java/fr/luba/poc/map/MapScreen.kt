@@ -1,118 +1,66 @@
 package fr.luba.poc.map
 
-import fr.luba.poc.camera.LiveCameraWindow
-import fr.luba.poc.i18n.tr
-import fr.luba.poc.simulation.*
-import fr.luba.poc.planning.*
-import fr.luba.poc.weather.WeatherPillSegment
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
+import android.content.Context
 import android.os.SystemClock
 import android.util.Log
-import org.json.JSONObject
-import org.json.JSONArray
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.material.icons.Icons
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material.icons.rounded.Grass
-import androidx.compose.material.icons.rounded.Route
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.CenterFocusStrong
-import androidx.compose.material.icons.rounded.MoreHoriz
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.foundation.verticalScroll
-import fr.luba.poc.ui.components.KeyValueRow
-import androidx.compose.material3.Icon
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.IconButton
-import androidx.compose.ui.semantics.Role
-import fr.luba.poc.ble.ConnectionState
-import fr.luba.poc.ui.components.LubaCard
-import fr.luba.poc.ui.components.SettingRow
-import fr.luba.poc.ui.components.StopAction
-import fr.luba.poc.ui.components.*
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculateCentroid
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateRotation
-import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.luba.poc.Clock
+import fr.luba.poc.auth.CloudReturnUi
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.camera.LiveCameraButton
+import fr.luba.poc.camera.LiveCameraWindow
+import fr.luba.poc.history.MowingCalibration
+import fr.luba.poc.history.MowingForecaster
+import fr.luba.poc.history.realCoverageLayer
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.obstacles.LocalObstacle
-import fr.luba.poc.obstacles.RobotEnvelope
-import fr.luba.poc.ui.Format
-import fr.luba.poc.ui.components.LegendSwatch
-import fr.luba.poc.ui.components.LubaCheckRow
-import fr.luba.poc.ui.components.LubaDialog
-import fr.luba.poc.ui.components.SliderRow
-import fr.luba.poc.ui.components.LubaSection
+import fr.luba.poc.planning.*
+import fr.luba.poc.protocol.Telemetry
+import fr.luba.poc.simulation.*
+import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlin.math.ceil
-import kotlin.math.cos
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
-import kotlin.math.sin
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Full-screen map: touch gestures (zoom, rotation, panning), zone selection and local route preparation, simulation
@@ -132,7 +80,7 @@ fun MapScreen(
     openSurvey: Boolean = false,
     onSurveyOpened: () -> Unit = {},
     cloud: Boolean = false,
-    apiPosition: fr.luba.poc.protocol.Telemetry? = null,
+    apiPosition: Telemetry? = null,
     apiKnown: LastKnownPosition? = null,
     onPreview: (Preview) -> Unit = {},
     onSimulationPreparation: (String, Map<String, Any?>) -> Unit = { _, _ -> },
@@ -144,7 +92,7 @@ fun MapScreen(
     onDiscardMissionCheckpoint: () -> Unit = {},
     onStopMammotionTask: () -> Unit = {},
     /** Native return through the Mammotion account (null if the account does not follow this robot). */
-    cloudReturn: fr.luba.poc.auth.CloudReturnUi? = null,
+    cloudReturn: CloudReturnUi? = null,
     onCloudReturn: () -> Unit = {},
     onCancelCloudReturn: () -> Unit = {},
     cloudRobotName: String? = null,
@@ -214,48 +162,33 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
         sim.engine != null && !state.robotRoute.started) }
     val telemetry = state.telemetry
     val known = state.lastKnown
-    var positionClock by remember { mutableStateOf(System.currentTimeMillis()) }
+    var positionClock by remember { mutableLongStateOf(Clock.now()) }
     LaunchedEffect(Unit) {
         while (true) {
-            kotlinx.coroutines.delay(1000)
-            positionClock = System.currentTimeMillis()
+            delay(1000)
+            positionClock = Clock.now()
         }
     }
     // Last BLE position seen: a gateway reconnection does not send the robot back to an old FIX (the base).
     var lastBle by remember(state.selected?.address) { mutableStateOf<DisplayedRobot?>(null) }
-    val marker = RobotPositionDisplay.resolve(if(args.cloud) fr.luba.poc.protocol.Telemetry.EMPTY else telemetry,known,args.apiPosition,args.apiKnown,positionClock,
+    val marker = RobotPositionDisplay.resolve(if(args.cloud) Telemetry.EMPTY else telemetry,known,args.apiPosition,args.apiKnown,positionClock,
         recentBle = lastBle.takeIf { !args.cloud })
-    if (!args.cloud && marker?.source == "BLE" && marker != lastBle) androidx.compose.runtime.SideEffect { lastBle = marker }
+    if (!args.cloud && marker?.source == "BLE" && marker != lastBle) SideEffect { lastBle = marker }
     val recoveryPoints = if (!mapView.demo && sim.engine == null) known?.points.orEmpty() else emptyList()
     val pointIdle = state.ready && !mapView.demo && !args.cloud && !state.robotRoute.running && !state.mowing.active &&
         !state.manualActive && !state.campaign.running && !state.bladeTestActive && !state.bladeHeightPending &&
         !state.teach.running && !state.mapLoading && sim.engine == null
-    androidx.compose.runtime.DisposableEffect(pointMove.pointMode) {
+    DisposableEffect(pointMove.pointMode) {
         onDispose { if (pointMove.pointMode) args.onStopPointNavigation() }
     }
-    LaunchedEffect(pointTarget.destination, map, state.obstacles, pointMove.pointMode, mapBase, state.telemetry.chargeState in setOf(1,2)) {
-        pointTarget.pointPlan = null; pointTarget.pointError = ""; pointMove.pointComputing = false
-        val target = pointTarget.destination
-        if (pointMove.pointMode && target != null && !state.navTest.running) {
-            pointMove.pointComputing = true
-            try {
-                val start = Point(requireNotNull(state.telemetry.x) { tr("Robot position unavailable", "Position robot indisponible") },
-                    requireNotNull(state.telemetry.y) { tr("Robot position unavailable", "Position robot indisponible") })
-                pointTarget.pointPlan = withContext(Dispatchers.Default) {
-                    RoutePlanning.point(map,start,target,state.obstacles,offMap=true,base=mapBase,
-                        charging=state.telemetry.chargeState in setOf(1,2),accesses=accesses)
-                }
-            } catch (cancel: CancellationException) { throw cancel }
-            catch (e: Exception) { pointTarget.pointError = e.message ?: tr("No safe path", "Aucun chemin sûr") }
-            finally { pointMove.pointComputing = false }
-        }
-    }
+    PointPlanEffect(pointTarget, pointMove, state, map, mapBase, accesses)
     val frame = remember(map.originalShapes) { MapFrameState() }
+    val paint = rememberZonePaint(map, frame, marker?.point ?: mapBase?.point)
     var preview by remember(map.shapes, frame.selected) { mutableStateOf<Preview?>(null) }
     // Start point: preview choice, otherwise the saved start of the first zone, otherwise nearest.
     val zoneStarts = remember { ZoneStartsState(ZoneStartStore(context)) }
     val start = remember(map.shapes, frame.selected) { PreviewStartState() }
-    val minimumCoverage=if(mapView.demo) 0.65f else 0.95f
+    val minimumCoverage=if(mapView.demo) 0.65f else if(paint.painting) PaintedZone.MIN_COVERAGE.toFloat() else 0.95f
     // Cutting heights of the connected robot (higher on the H versions). The saved height is kept as chosen and
     // brought into the range where it is used: the model code may arrive a few seconds after the connection.
     val cutHeights = state.cutHeights
@@ -297,10 +230,10 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
     val localObstacles = state.planningObstacles
     // Difficult zones (heatmap) avoided by travel with blades stopped.
     val transitAvoid = state.difficulties.transitAvoidance
-    val planningMap = map
-    val currentPlanningMap by androidx.compose.runtime.rememberUpdatedState(planningMap)
-    val currentPlanningSelection by androidx.compose.runtime.rememberUpdatedState(frame.selected.toList())
-    val currentPlanningObstacles by androidx.compose.runtime.rememberUpdatedState(localObstacles)
+    val planningMap = paint.planningMap(map)
+    val currentPlanningMap by rememberUpdatedState(planningMap)
+    val currentPlanningSelection by rememberUpdatedState(frame.selected.toList())
+    val currentPlanningObstacles by rememberUpdatedState(localObstacles)
     val outerOffset by OuterOffsetSetting.flow.collectAsStateWithLifecycle()
     val surveyOffset by SurveyOffsetSetting.flow.collectAsStateWithLifecycle()
     val planningInputs=listOf(planningMap,localObstacles,frame.selected.toList(),form.mode,
@@ -312,7 +245,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
         form.spiralDirection.takeIf { form.mode == CoverageMode.SPIRAL },
         // Change every session: a mowing that ends updates the directions to move away from.
         state.zoneOrientations.takeIf { form.orientation == OrientationMode.EACH_SESSION && form.mode.usesOrientation })
-    val currentPlanningInputs by androidx.compose.runtime.rememberUpdatedState(planningInputs)
+    val currentPlanningInputs by rememberUpdatedState(planningInputs)
     LaunchedEffect(planningInputs) { preview=null; prep.planningReport=null; prep.estimate=null }
 
     fun simulationConfig(base: MapBase) = SimConfig(form.initialProgress.toDouble(), form.initialBattery.toDouble(), form.autonomy.toDouble(),
@@ -335,11 +268,9 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             prep.preparationStartedNanos = 0L
         }
     }
-    fun buildRoutes(base: MapBase, routeMap: RobotMap = planningMap, obstacles: List<LocalObstacle> = localObstacles,
-                    avoidAreas: List<List<Point>> = transitAvoid): TrajectoryPlanner =
-        RoutePlanning.mission(routeMap, obstacles, accesses, base, recordedBoundary = !mapView.demo, avoidAreas = avoidAreas)
+    fun buildRoutes(base: MapBase): TrajectoryPlanner = RoutePlanning.mission(map, localObstacles, accesses, base, recordedBoundary = !mapView.demo, avoidAreas = transitAvoid)
     fun buildSimulation(plan: Preview, base: MapBase, progress:(String)->Unit = {}): MowingSimulation =
-        MowingSimulation(buildRoutes(base),base.point,plan,planningMap,simulationConfig(base),onPreparationProgress=progress)
+        MowingSimulation(buildRoutes(base),base.point,plan,map,simulationConfig(base),PaintedZone.bladeZones(planningMap,plan.zoneIds),onPreparationProgress=progress)
     fun baseAction(leave: Boolean) {
         val base=mapBase ?: return
         actions.baseBusy=true
@@ -347,7 +278,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             try {
                 val start=Point(requireNotNull(state.telemetry.x),requireNotNull(state.telemetry.y))
                 val engine=withContext(Dispatchers.Default) {
-                    RoutePlanning.station(buildRoutes(base,map),map,base,start,simulationConfig(base))
+                    RoutePlanning.station(buildRoutes(base),map,base,start,simulationConfig(base))
                 }
                 if(args.onBaseAction(engine,leave)) sheets.mapActions=false
             } catch(cancel: CancellationException) { throw cancel }
@@ -369,9 +300,10 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
                 buildSimulation(plan,base) { stage ->
                     context.ensureActive()
                     scope.launch { prep.simulationPreparationStage=stage }
-                }
+                }.also { prep.slowed = AdaptiveSpeed.slowedMeters(it.edges, it.speedCaps) }
             }
-            args.onSimulationPreparation(tr("Route preparation succeeded", "Préparation du trajet réussie"),diagnostic + ("result" to "READY"))
+            val preparationMs = prep.preparationStartedNanos.takeIf { it > 0 }?.let { (SystemClock.elapsedRealtimeNanos() - it) / 1_000_000.0 }
+            args.onSimulationPreparation(tr("Route preparation succeeded", "Préparation du trajet réussie"),diagnostic + mapOf("result" to "READY", "elapsedMs" to preparationMs))
         } catch(e: CancellationException) { throw e }
         catch(e: Exception) {
             prep.error=e.message ?: tr("Route preparation failed", "Préparation du trajet impossible")
@@ -418,18 +350,18 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
         }
     }
     // Resume of an interrupted mowing: same preview prepared again on the current map, base, accesses and obstacles.
-    val currentRouteStatus by androidx.compose.runtime.rememberUpdatedState(state.robotRoute.status)
+    val currentRouteStatus by rememberUpdatedState(state.robotRoute.status)
     // Resume route prepared again once, shared by "Resume", "Resume further on" (preview on the map) and "Unblock";
     // redone if the checkpoint, the map, the base, the accesses or the obstacles change.
     val resumeKey = state.missionCheckpoint?.let { listOf(it.robotId, it.startedAt, it.planFingerprint) }
-    var resumeEngine by remember(resumeKey, mapBase, planningMap, state.obstacles, accesses) { mutableStateOf<MowingSimulation?>(null) }
+    var resumeEngine by remember(resumeKey, mapBase, map, state.obstacles, accesses) { mutableStateOf<MowingSimulation?>(null) }
     val skipState = remember(resumeKey) { ResumeSkipState() }
     suspend fun resumeEngineFor(checkpoint: MissionCheckpoint, base: MapBase): MowingSimulation = resumeEngine ?: run {
         // Presumed obstacles and avoided zones of the start: a contact since then (often the one that interrupted the
         // mowing) is bypassed during tracking, it does not change the resumed plan.
         // Task started from the tests (border, painted zone): same continuous-blade zones as at its start.
         withContext(Dispatchers.Default) {
-            fr.luba.poc.planning.RoutePlanning.resume(checkpoint, planningMap, base, accesses, state.obstacles, state.difficulties,
+            RoutePlanning.resume(checkpoint, map, base, accesses, state.obstacles, state.difficulties,
                 simulationConfig(base), recordedBoundary = !mapView.demo)
         }.also { resumeEngine = it }
     }
@@ -462,7 +394,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
     fun openResumeSkip() { skipState.skipMode = true; if (resumeEngine == null) withResumeEngine { _, _ -> } }
     val resumeSkip = state.missionCheckpoint?.takeIf { skipState.skipMode }?.let { cp -> resumeEngine?.let { ResumeSkipView.of(it.edges, cp, skipState.skipMeters.toDouble()) } }
     // Map tap in "Resume further on" mode: resume at the nearest point of the remaining stripes.
-    val resumeSkipTap by androidx.compose.runtime.rememberUpdatedState<(Point) -> Boolean> { p ->
+    val resumeSkipTap by rememberUpdatedState<(Point) -> Boolean> { p ->
         val cp = state.missionCheckpoint; val engine = resumeEngine
         if (!skipState.skipMode || cp == null || engine == null) false
         else { MissionProgress.skipToward(engine.edges, cp.edge, cp.point, p)?.let { skip ->
@@ -510,7 +442,6 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
         val planHeights = if (form.mode.isSurvey) emptyList() else passHeights
         val planOrientationMemory = if (form.orientation == OrientationMode.EACH_SESSION && planMode.usesOrientation) state.zoneOrientations else emptyMap()
         prep.progress = Triple(0, zones.size, tr("Preparing the zones", "Préparation des zones"))
-        prep.computing = true
         prep.error = ""
         preview = null
         prep.estimate = null; prep.estimateError = ""; prep.planningReport=null
@@ -524,52 +455,51 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             turnStyle=if(planMode.isSurvey || planMode==CoverageMode.SPIRAL) TurnStyle.FAST else if(planMode==CoverageMode.ZAMBONI) TurnStyle.LAWN else form.turnStyle,
             orientation=if(planMode.usesOrientation) form.orientation else OrientationMode.AUTOMATIC,manualAngleDeg=foldAngle(form.manualAngle),
             spiralDirection=if(planMode==CoverageMode.SPIRAL) form.spiralDirection else SpiralDirection.FROM_EDGE)
-        form.mowingStep = 2
-
-        scope.launch {
+        prep.begin(calculationInputs) { scope.launch {
             try {
                 val result = withContext(Dispatchers.Default) {
                     val coroutine=currentCoroutineContext()
-                    val startRoutes=planMapBase?.let { b -> RoutePlanning.mission(calculationMap,planRoutingObstacles,planAccesses,b,recordedBoundary=!mapView.demo,avoidAreas=transitAvoid) }
+                    val startRoutes=planMapBase?.let { b -> RoutePlanning.mission(map,planRoutingObstacles,planAccesses,b,recordedBoundary=!mapView.demo,avoidAreas=transitAvoid) }
                     // Chosen or saved start: nearest free point where the robot can pivot.
                     val robotStart=startRequest.point?.let { requested ->
                         if(startRoutes==null) requested
                         else requireNotNull(RoutePlanning.nearestUsable(startRoutes,requested)) {
                             tr("Start point unreachable: choose a point further inside the zone", "Point de départ inaccessible : choisissez un point plus à l'intérieur de la zone") }
-                    } ?: planMapBase?.let { b -> RoutePlanning.missionStart(startRoutes!!,planRobot,planDocked,b.point) }
+                    } ?: startRoutes?.let { routes -> planMapBase?.let { b -> RoutePlanning.missionStart(routes,planRobot,planDocked,b.point) } }
                         ?: planRobot.takeIf { !planDocked }
                     val start=robotStart ?: planBase ?: org.locationtech.jts.geom.GeometryFactory().createPolygon(
                         (zones.first().points+zones.first().points.first()).map { org.locationtech.jts.geom.Coordinate(it.x,it.y) }.toTypedArray())
                         .interiorPoint.let { Point(it.x,it.y) }
                     // Mission ends at the base: the order does not come back towards the robot's start position.
                     val planned=RoutePlanning.coverage(PlanningRequest(calculationMap,zones.map { it.id },start,config=requestConfig,
-                        obstacles=fr.luba.poc.planning.DockClearance.planning(calculationObstacles,planMapBase),
+                        obstacles=DockClearance.planning(calculationObstacles,planMapBase),
                         navigation=calculationNavigation,end=planBase?.takeIf { it!=start },orientationMemory=planOrientationMemory),
                         planMode,checkpoint={ coroutine.ensureActive() },
                         progress={ done,total,name -> scope.launch { prep.progress=Triple(done,total,name) } })
                     withContext(Dispatchers.Main) {
-                        require(currentPlanningInputs==calculationInputs && currentPlanningMap==calculationMap && currentPlanningObstacles==calculationObstacles && currentPlanningSelection==zones.map { it.id }) { tr("Map changed: recomputation required", "Carte modifiée : recalcul requis") }
+                        // Inputs changed meanwhile: abandoned without a message, the route of the new ones is computed by itself.
+                        if (currentPlanningInputs!=calculationInputs || currentPlanningMap!=calculationMap || currentPlanningObstacles!=calculationObstacles || currentPlanningSelection!=zones.map { it.id }) throw CancellationException("planning inputs changed")
                         prep.planningReport=planned.report
                     }
                     // Height passes: same route repeated, every other pass in reverse.
                     CutPasses.expand(planned.preview, planHeights)
                 }
-                require(currentPlanningInputs==calculationInputs && currentPlanningMap==calculationMap && currentPlanningObstacles==calculationObstacles && currentPlanningSelection==zones.map { it.id }) { tr("Map or obstacles changed during the computation: recomputation required", "Carte ou obstacles modifiés pendant le calcul : recalcul requis") }
+                if (currentPlanningInputs!=calculationInputs || currentPlanningMap!=calculationMap || currentPlanningObstacles!=calculationObstacles || currentPlanningSelection!=zones.map { it.id }) throw CancellationException("planning inputs changed")
                 preview = result
                 args.onPreview(result)
                 prep.estimate = realEstimate(state, mapView.demo, result.meters, form.mowingSpeed, form.autonomy, form.chargeTime, form.initialBattery, form.chargeLow, form.chargeHigh)
-                prep.estimateError = fr.luba.poc.history.MowingForecaster.note(estimateCalibration(state, mapView.demo))
-                form.mowingStep = 2
+                prep.estimateError = MowingForecaster.note(estimateCalibration(state, mapView.demo))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 prep.error = e.message ?: tr("Computation failed", "Calcul impossible")
             } finally {
-                prep.computing = false
-
+                prep.end(coroutineContext[Job])
             }
-        }
+        } }
     }
+    AutoRouteComputation(prep, sheets.mowingDialog && !state.robotRoute.running && !state.mowing.active && map.complete && frame.selected.isNotEmpty(),
+        planningInputs, latestAction(::calculateMowingPreview))
 
     val density = LocalDensity.current
     val viewportTop = with(density) { 80.dp.toPx() }
@@ -581,7 +511,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
 
     // Values read by the gestures in their latest version, without restarting the detector: the robot position is part
     // of the framing and changes on every reading; as a pointerInput key, it interrupted the pinch in progress.
-    val gestureViewport by androidx.compose.runtime.rememberUpdatedState(viewportMap)
+    val gestureViewport by rememberUpdatedState(viewportMap)
     // A single full-screen box: the map takes the whole height, no bar scrolls below it.
     Box(Modifier.fillMaxSize()) {
         Box(
@@ -592,57 +522,15 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
                 .background(colors.MapBackground)
                 .mapDotGrid(colors.TextTertiary.copy(alpha = 0.16f))
                 .pointerInput(map, actions.placingAccess, pointMove.pointMode, sheets.selectingZones, state.navTest.running, pointIdle, sim.engine, viewportTop, viewportBottom) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        var handledByControl = down.isConsumed
-                        var transformed = false
-                        var travel = Offset.Zero
-                        do {
-                            val event = awaitPointerEvent()
-                            handledByControl = handledByControl || event.changes.any { it.isConsumed }
-                            val pan = event.calculatePan()
-                            travel += pan
-                            if (event.changes.count { it.pressed } > 1 || travel.getDistance() > viewConfiguration.touchSlop) transformed = true
-                            if (!handledByControl && transformed && event.changes.any { it.pressed }) {
-                                val centroid = event.calculateCentroid(useCurrent = false)
-                                if (centroid != Offset.Unspecified) {
-                                    // One-finger drag while following: the view stays where it is, following stopped.
-                                    if (follow.enabled && event.changes.count { it.pressed } == 1) { frame.camera = follow.view(frame.camera); follow.stop() }
-                                    frame.camera = follow.view(frame.camera).transform(
-                                        Point(centroid.x.toDouble(), centroid.y.toDouble()),
-                                        Point(size.width / 2.0, size.height / 2.0),
-                                        Point(pan.x.toDouble(), pan.y.toDouble()),
-                                        event.calculateZoom().toDouble(),
-                                        event.calculateRotation().toDouble(),
-                                    )
-                                }
-                                event.changes.forEach { it.consume() }
-                            }
-                        } while (event.changes.any { it.pressed })
-                        // Single tap: selects or deselects the zone under the finger.
-                        if (!transformed && !handledByControl && !prep.computing && sim.engine == null) {
-                            val base = follow.view(frame.camera).inverse(
-                                Point(down.position.x.toDouble(), down.position.y.toDouble()),
-                                Point(size.width / 2.0, size.height / 2.0),
-                            )
-                            val tappedViewport = gestureViewport
-                            val availableHeight = (size.height - viewportTop - viewportBottom).coerceAtLeast(120f)
-                            val scale = min((size.width - 40) / mapExtentX(tappedViewport), availableHeight / mapExtentY(tappedViewport))
-                            val ox = (size.width - mapExtentX(tappedViewport) * scale) / 2
-                            val oy = viewportBottom + (availableHeight - mapExtentY(tappedViewport) * scale) / 2
-                            val p = Point(
-                                (base.x - ox) / scale + mapMinX(tappedViewport),
-                                (size.height - base.y - oy) / scale + mapMinY(tappedViewport),
-                            )
-                            if (resumeSkipTap(p)) Unit
-                            else if (pointMove.pointMode) {
-                                if (pointIdle && !state.navTest.running) { pointTarget.destination = p; pointMove.pointConfirmed = false; pointMove.pointAttempted = false }
-                            } else if (actions.placingAccess) {
-                                actions.draftAccess = actions.draftAccess + p
-                            } else if (zoneSelectionAllowed && sheets.selectingZones) map.shapes.firstOrNull { it.kind == ShapeKind.ZONE && Geometry.inside(p, it.points) }?.id?.let { id ->
-                                frame.selected = if (id in frame.selected) frame.selected - id else frame.selected + id
-                            } else if (!sheets.selectingZones) MapExtraLayers.tap(p, scale * frame.camera.zoom)
-                        }
+                    mapViewGestures(frame, follow, { gestureViewport }, viewportTop, viewportBottom, tapEnabled = { !prep.computing && sim.engine == null }, painter = { paint.input(map).takeIf { sheets.selectingZones && !pointMove.pointMode && !actions.placingAccess && sim.engine == null } }) { p, scale ->
+                        if (resumeSkipTap(p)) Unit
+                        else if (pointMove.pointMode) {
+                            if (pointIdle && !state.navTest.running) { pointTarget.destination = p; pointMove.pointConfirmed = false; pointMove.pointAttempted = false }
+                        } else if (actions.placingAccess) {
+                            actions.draftAccess = actions.draftAccess + p
+                        } else if (zoneSelectionAllowed && sheets.selectingZones && !paint.active) map.shapes.firstOrNull { it.kind == ShapeKind.ZONE && Geometry.inside(p, it.points) }?.id?.let { id ->
+                            frame.selected = if (id in frame.selected) frame.selected - id else frame.selected + id
+                        } else if (!sheets.selectingZones) MapExtraLayers.tap(p, scale * frame.camera.zoom)
                     }
                 },
         ) {
@@ -650,7 +538,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             IsolatedBox {
             val extraLayers by MapExtraLayers.flow.collectAsStateWithLifecycle()
             // Real coverage of the current or last mowing, when it belongs to this map ([fr.luba.poc.history.RealCoverage]).
-            val coverageLayer = fr.luba.poc.history.realCoverageLayer(map, MapExtraLayer.COVERAGE in extraLayers)
+            val coverageLayer = realCoverageLayer(map, MapExtraLayer.COVERAGE in extraLayers)
             val bounds = remember(viewportMap) { MapBounds.of(viewportMap.shapes.flatMap { it.points }) }
             // Preview paths (thousands of passes) kept from one frame to the next: a zoom only changes the widths.
             val routeGeometry = remember { LiveGeometry() }
@@ -659,7 +547,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             MapRouteCanvas(map, frame.selected, { frame.camera }, follow, bounds, viewportTop, viewportBottom, state, sim, preview, mapBase,
                 form.cutWidth, extraLayers, layers.showSignalHeat && signals.surveyMatches, signals.signalView, accesses, actions.draftAccess,
                 showingRobotRoute, simWheels, resumeSkip, pointMove, pointTarget, mapView.demo, recoveryPoints, zoneNameLabels, routeGeometry,
-                coverageLayer)
+                coverageLayer, paint.takeIf { sheets.selectingZones && it.active })
             // Animated effects (separate layer, the only one redrawn on each frame): robot glided between two readings,
             // halo, comet on the planned route, wave at the start, flash of the chosen zone.
             val fxRoute = (sim.engine?.preview ?: preview)?.takeIf { sim.state == null && !showingRobotRoute }?.cuttingPaths.orEmpty()
@@ -675,11 +563,11 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             // Outside the right bar: added to that centered column, it pushed the last button under the panels.
             // Thumbnail that can be moved (drag) and resized (bottom left corner, pinch), position saved.
             if (!mapView.demo) LiveCameraWindow(Modifier.padding(end = Dimens.Md + 44.dp + Dimens.Sm, top = 72.dp))
-            fr.luba.poc.camera.LiveCameraButton(Modifier.align(Alignment.TopEnd).padding(end = Dimens.Md, top = 72.dp), enabled = !mapView.demo)
+            LiveCameraButton(Modifier.align(Alignment.TopEnd).padding(end = Dimens.Md, top = 72.dp), enabled = !mapView.demo)
 
             // Scale: round length in meters, at the top left under the back button, recomputed on zoom.
             if (MapDisplaySettings.current.scaleBar && mapView.mapSize.width > 0) MapScaleBar(
-                mapScreenProjection(bounds, androidx.compose.ui.geometry.Size(mapView.mapSize.width.toFloat(), mapView.mapSize.height.toFloat()),
+                mapScreenProjection(bounds, Size(mapView.mapSize.width.toFloat(), mapView.mapSize.height.toFloat()),
                     viewportTop, viewportBottom).scale * frame.camera.zoom,
                 Modifier.align(Alignment.TopStart).padding(start = Dimens.Md, top = 72.dp))
 
@@ -749,7 +637,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
                 RouteComputationPanels(prep, sheets)
                 // Zone choice on the map, in mowing order (numbers on the map).
                 if (sheets.selectingZones && !pointMove.pointMode && !actions.placingAccess && sim.engine == null)
-                    ZoneChoicePanel(sheets, form, prep, map, frame.selected) { frame.selected = it }
+                    ZoneChoicePanel(sheets, form, prep, map, frame.selected, paint) { frame.selected = it }
                 val showActions = !pointMove.pointMode && !actions.placingAccess && !sheets.selectingZones && sim.engine == null && !state.robotRoute.running
                 if (showActions) MapActions(state, mapView.demo, args.cloud, map, preview != null, sheets, form, onChooseZones = { selectTask(false) },
                     onFetchMap = { mapView.demo = false; args.onFetchMap() }, onOpenAccount = args.onOpenAccount, onOpenManual = args.onOpenManual)
@@ -762,7 +650,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
     MapSignalsSheet(sheets, layers, state, sim, simulation, signals.signalView, signals.displayedSignalSamples, signals.simulatedSurvey, signals.surveyMatches,
         mapView.demo, args.cloud, cuttingHeight, args.onStartRobotRoute, args.onTrajectorySpeed, args.onStop)
     val mapSource = when { sim.engine != null -> MapSource.SIMULATION; mapView.demo -> MapSource.DEMO; args.cloud -> MapSource.ACCOUNT; else -> MapSource.ROBOT }
-    MapInfoSheets(sheets, state, if (args.cloud) args.apiPosition ?: fr.luba.poc.protocol.Telemetry.EMPTY else telemetry, mapSource, showingRobotRoute,
+    MapInfoSheets(sheets, state, if (args.cloud) args.apiPosition ?: Telemetry.EMPTY else telemetry, mapSource, showingRobotRoute,
         marker.takeIf { !mapView.demo }, known.takeIf { !mapView.demo && sim.engine == null }, args.onOpenTask, args.onOpenAllTasks, args.onOpenRobot)
     MapTerrainDialogs(sheets, layers, signals.relief, signals.simulatedSurvey, signalHistoryStore, map, if (signals.simulatedSurvey) sim.engine?.map ?: map else map,
         signals.signalView, signals.displayedSignalSamples, state.signalSurvey.sessionId)
@@ -770,7 +658,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
         simulating = sim.engine != null, demo = mapView.demo, cloud = args.cloud, prep = prep,
         onToggleDemo = { mapView.demo = !mapView.demo; preview = null }, onFetchMap = { mapView.demo = false; args.onFetchMap() }, onOpenAccount = args.onOpenAccount,
         onOpenDrivenRecord = args.onOpenDrivenRecord, onSaveCorrections = args.onSaveCorrections)
-    MapSimulationDialog(sheets, form, sim, simulation, preview.takeIf { preparedSimulation != null }, mapBase, map, frame.selected, { frame.selected = it },
+    MapSimulationDialog(sheets, form, sim, simulation, preview.takeIf { preparedSimulation != null }, mapBase, planningMap, frame.selected, { frame.selected = it },
         mapView.demo, zoneSelectionAllowed, prep, state.robotRoute.running, latestAction(::startMowingSimulation))
     // Task pages: named composable reading the state holders (MowingTaskPages.kt). Local functions passed through
     // latestAction: a bare reference ran on the settings of an old composition (LatestAction.kt).
@@ -791,7 +679,7 @@ private fun SaveMowingTask(store: MowingTaskStore, settings: MowingTaskSettings)
 
 /** Layer choice written whenever it changes (kept until the next change, [MapLayerSettings]). */
 @Composable
-private fun SaveMapLayers(context: android.content.Context, choice: MapLayerChoice) {
+private fun SaveMapLayers(context: Context, choice: MapLayerChoice) {
     LaunchedEffect(choice) { MapLayerSettings.save(context, choice) }
 }
 
@@ -808,28 +696,15 @@ internal fun selectedZoneLine(map: RobotMap, order: List<Long>): String =
         .joinToString(" → ").ifBlank { tr("none", "aucune") }
 
 /** Calibration taken from the robot's real mowing history (none in demo). */
-private fun estimateCalibration(state: RobotUi, demo: Boolean): fr.luba.poc.history.MowingCalibration? =
-    if (demo) null else fr.luba.poc.history.MowingCalibration.from(state.mowingHistory, state.selected?.address)
+private fun estimateCalibration(state: RobotUi, demo: Boolean): MowingCalibration? =
+    if (demo) null else MowingCalibration.from(state.mowingHistory, state.selected?.address)
 
 /** Real mowing estimate: battery of the connected robot (setting otherwise), parameters adjusted by the history. */
 internal fun realEstimate(state: RobotUi, demo: Boolean, meters: Double, speed: Float, autonomy: Float, charge: Float,
                          battery: Float, low: Float, high: Float): MowingEstimate =
-    fr.luba.poc.history.MowingForecaster.estimate(meters, speed.toDouble(), autonomy.toDouble(), charge.toDouble(),
+    MowingForecaster.estimate(meters, speed.toDouble(), autonomy.toDouble(), charge.toDouble(),
         state.telemetry.battery?.takeIf { state.ready && !demo }?.toDouble() ?: battery.toDouble(), low.toDouble(), high.toDouble(),
         estimateCalibration(state, demo))
-
-private fun mapMinX(map: RobotMap): Double = map.shapes.flatMap { it.points }.minOfOrNull { it.x } ?: 0.0
-private fun mapMinY(map: RobotMap): Double = map.shapes.flatMap { it.points }.minOfOrNull { it.y } ?: 0.0
-
-private fun mapExtentX(map: RobotMap): Double {
-    val p = map.shapes.flatMap { it.points }
-    return max(1.0, (p.maxOfOrNull { it.x } ?: 20.0) - (p.minOfOrNull { it.x } ?: 0.0))
-}
-
-private fun mapExtentY(map: RobotMap): Double {
-    val p = map.shapes.flatMap { it.points }
-    return max(1.0, (p.maxOfOrNull { it.y } ?: 15.0) - (p.minOfOrNull { it.y } ?: 0.0))
-}
 
 /**
  * Map content compiled in its own class (non-inline composable lambda).
@@ -840,4 +715,4 @@ private fun mapExtentY(map: RobotMap): Double {
  * composables taking them. Build check: tools/check-dex-registers.py.
  */
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.IsolatedBox(content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) = content()
+private fun BoxScope.IsolatedBox(content: @Composable BoxScope.() -> Unit) = content()

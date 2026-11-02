@@ -41,15 +41,20 @@ enum class TurnKind(private val en: String, private val fr: String) {
  */
 data class TurnPlan(val kind: TurnKind, val points: List<Point>, val trimA: Double = 0.0, val trimB: Double = 0.0,
                     val durationS: Double = Double.POSITIVE_INFINITY, val pivotDegrees: Double = 0.0, val wear: Double = 0.0,
-                    val tight: Boolean = false, val refusal: String? = null) {
+                    val tight: Boolean = false, val refusal: String? = null,
+                    /** Oblique U ([TurnOptimizer.TurnContext.obliqueUnsweptM]): metres of shortened pass the manoeuvre does
+                     * not sweep, in the acute corner of a slanted border. */
+                    val unsweptM: Double = 0.0) {
     val possible: Boolean get() = refusal == null
     fun score(style: TurnStyle): Double = when (style) {
         TurnStyle.FAST -> durationS + 0.02 * wear + if (tight) TIGHT_PENALTY else 0.0
         TurnStyle.LAWN -> 0.25 * durationS + 0.06 * wear + if (tight) TIGHT_PENALTY else 0.0
-    }
+    } + UNSWEPT_PENALTY_PER_M * unsweptM
     companion object {
         /** Footprint closer than [TurnOptimizer.RISK_MARGIN_M] to the boundary somewhere along the manoeuvre. */
         const val TIGHT_PENALTY = 8.0
+        /** Pass end left unswept by an oblique U, per metre. */
+        const val UNSWEPT_PENALTY_PER_M = 20.0
     }
 }
 
@@ -75,6 +80,12 @@ object TurnOptimizer {
     const val ARC_STEP_DEGREES = 4.0
     /** Pass shortened by at most this much at each end, by steps of [TRIM_STEP_M]. */
     const val MAX_TRIM_M = 0.6
+    /** Zamboni: pass end an oblique U may leave unswept, per pass (about 0.06 m² at 30° from the passes, 0.3 m at 35°). */
+    const val OBLIQUE_UNSWEPT_M = 0.3
+    /** Oblique U: the longer pass shortened by at most this much. */
+    const val MAX_OBLIQUE_TRIM_M = 1.0
+    /** Oblique U: pass kept at least after its trim (short passes, as across a narrow corridor, keep the pivots). */
+    const val OBLIQUE_MIN_PASS_M = 1.5
     const val TRIM_STEP_M = 0.05
     /** Pass part kept at least after a trim. */
     const val MIN_PASS_M = 0.3
@@ -94,7 +105,10 @@ object TurnOptimizer {
     class TurnContext(val spacingM: Double, val speedMps: Double, val drivable: (List<Point>) -> Boolean,
                       val roomy: (List<Point>) -> Boolean = drivable, val robot: RobotEnvelope = RobotEnvelope.LUBA2,
                       /** Cut width: a shortened pass part is mowed if it lies within half of it of the manoeuvre. */
-                      val cutWidthM: Double = spacingM)
+                      val cutWidthM: Double = spacingM,
+                      /** Oblique U along a slanted border: pass end each pass may leave unswept (0: none, every shortened
+                       * part swept). */
+                      val obliqueUnsweptM: Double = 0.0)
 
     private data class Frame(val end: Point, val dir: Point, val left: Point, val side: Double, val lateral: Double, val along: Double)
 
@@ -208,7 +222,36 @@ object TurnOptimizer {
             } else reason = tr("Shortened passes not swept by the manoeuvre", "Passes raccourcies non balayées par la manœuvre")
             trim += TRIM_STEP_M
         }
+        if (kind == TurnKind.U_ARC && context.obliqueUnsweptM > 0 && abs(f.along) > 1e-3)
+            oblique(f, lengthA, lengthB, bStart, dirB, leads, context, shape)?.let { return it }
         return TurnPlan(kind, emptyList(), refusal = reason)
+    }
+
+    /**
+     * Oblique U between staggered pass ends (slanted border): the longer pass shortened by 2 r × stagger / lateral more
+     * than the other, so that the straight line of the U runs parallel to the border, both by the smallest common trim
+     * the planner accepts. The acute corner by the longer end is not swept: accepted up to
+     * [TurnContext.obliqueUnsweptM] per pass, counted in the plan ([TurnPlan.unsweptM]). Each pass keeps
+     * [OBLIQUE_MIN_PASS_M]. Null when none fits.
+     */
+    private fun oblique(f: Frame, lengthA: Double, lengthB: Double, bStart: Point, dirB: Point, leads: Pair<Double, Double>,
+                        context: TurnContext, shape: (Pose, Pose) -> List<Point>?): TurnPlan? {
+        val extra = 2 * FOLLOW_RADIUS_M * f.along / f.lateral
+        var trim = 0.0
+        while (trim + abs(extra) <= MAX_OBLIQUE_TRIM_M + 1e-9) {
+            val trimA = trim + max(0.0, -extra); val trimB = trim + max(0.0, extra)
+            if (lengthA - trimA < OBLIQUE_MIN_PASS_M || lengthB - trimB < OBLIQUE_MIN_PASS_M) return null
+            val points = shape(Pose(at(f.end, f.dir, -trimA), f.dir), Pose(at(bStart, dirB, trimB), dirB))
+                ?.fold(mutableListOf<Point>()) { acc, p -> if (acc.isEmpty() || acc.last().distance(p) > 1e-6) acc.add(p); acc } ?: return null
+            val unsweptA = unswept(points, f.end, f.dir, trimA, context.cutWidthM)
+            val unsweptB = unswept(points, bStart, Point(-dirB.x, -dirB.y), trimB, context.cutWidthM)
+            if (unsweptA <= context.obliqueUnsweptM + 1e-9 && unsweptB <= context.obliqueUnsweptM + 1e-9) {
+                val plan = evaluate(TurnKind.U_ARC, points, trimA, trimB, f.end, f.dir, bStart, dirB, leads, context)
+                if (plan.possible) return plan.copy(unsweptM = unsweptA + unsweptB)
+            }
+            trim += TRIM_STEP_M
+        }
+        return null
     }
 
     /**
@@ -250,6 +293,18 @@ object TurnOptimizer {
             trim += TRIM_STEP_M
         }
         return TurnPlan(kind, emptyList(), refusal = reason)
+    }
+
+    /** Length of the [trim] metres of pass before [end] (direction [dir] towards [end]) farther than half a [cut] from [path]. */
+    private fun unswept(path: List<Point>, end: Point, dir: Point, trim: Double, cut: Double): Double {
+        if (trim < 1e-9) return 0.0
+        val reach = cut / 2 - SWEPT_TOLERANCE_M
+        val samples = max(1, ceil(trim / 0.02).toInt())
+        val far = (0..samples).count { k ->
+            val p = at(end, dir, -trim * k / samples)
+            path.zipWithNext().none { (a, b) -> Geometry.distance(p, a, b) <= reach }
+        }
+        return trim * far / (samples + 1)
     }
 
     /** The [trim] metres of pass before [end] (direction [dir] towards [end]) lie within half a [cut] of [path]. */

@@ -19,22 +19,20 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
-import androidx.compose.ui.unit.width
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.width
 import androidx.test.core.app.ApplicationProvider
 import fr.luba.poc.camera.CameraWindow
 import fr.luba.poc.camera.CameraWindowState
 import fr.luba.poc.camera.rememberCameraWindowState
+import fr.luba.poc.withComposeTestActivity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
@@ -43,9 +41,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35], qualifiers = "w400dp-h800dp-mdpi")
 class CameraWindowGestureTest {
     val compose = createComposeRule()
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private lateinit var window: CameraWindowState
     private var taps = 0

@@ -1,7 +1,9 @@
 package fr.luba.poc.map
 
 import android.content.Context
+import androidx.core.content.edit
 import fr.luba.poc.protocol.CutHeightRange
+import fr.luba.poc.simulation.ReturnReserve
 import kotlin.math.roundToInt
 
 /**
@@ -26,7 +28,7 @@ data class MowingTaskSettings(
     val heightPasses: Int = 1,
     val firstPassHeightMm: Float = 70f,
     /** Battery left on arrival that the dynamic return aims for ([fr.luba.poc.simulation.ReturnReserve]). */
-    val returnReserve: Float = fr.luba.poc.simulation.ReturnReserve.DEFAULT_PERCENT.toFloat(),
+    val returnReserve: Float = ReturnReserve.DEFAULT_PERCENT.toFloat(),
     /** U-turns between the passes: fast pivots or lawn friendly rolling U-turns ([TurnOptimizer]). */
     val turnStyle: TurnStyle = TurnStyle.FAST,
     /** Direction of the passes ([OrientationMode]); kept while a mode that does not use it is chosen. */
@@ -60,7 +62,7 @@ data class MowingTaskSettings(
             noGoPasses = noGoPasses.coerceIn(0, MAX_PASSES),
             chargeLow = if (chargeValid) low else default.chargeLow,
             chargeHigh = if (chargeValid) high else default.chargeHigh,
-            returnReserve = fr.luba.poc.simulation.ReturnReserve.sanitize(
+            returnReserve = ReturnReserve.sanitize(
                 returnReserve.within(0f..100f, default.returnReserve).roundToInt(), (if (chargeValid) low else default.chargeLow).roundToInt()).toFloat(),
             manualAngleDeg = foldAngle(manualAngleDeg),
         )
@@ -110,15 +112,24 @@ class MowingTaskStore(context: Context) {
 
     fun write(settings: MowingTaskSettings) {
         val s = settings.sanitized()
-        prefs.edit()
-            .putFloat("height_mm", s.heightMm).putFloat("speed_mps", s.speedMps).putString("mode", s.mode.name)
-            .putFloat("spacing_m", s.spacingM).putInt("border_passes", s.borderPasses).putInt("no_go_passes", s.noGoPasses)
-            .putBoolean("borders_first", s.bordersFirst).putBoolean("nearby_no_go", s.nearbyNoGo)
-            .putFloat("charge_low", s.chargeLow).putFloat("charge_high", s.chargeHigh)
-            .putInt("height_passes", s.heightPasses).putFloat("first_pass_height_mm", s.firstPassHeightMm)
-            .putFloat("return_reserve", s.returnReserve).putString("turn_style", s.turnStyle.name)
-            .putString("orientation_mode", s.orientation.name).putInt("manual_angle_deg", s.manualAngleDeg)
-            .putString("spiral_direction", s.spiralDirection.name)
-            .apply()
+        prefs.edit {
+            putFloat("height_mm", s.heightMm)
+            putFloat("speed_mps", s.speedMps)
+            putString("mode", s.mode.name)
+            putFloat("spacing_m", s.spacingM)
+            putInt("border_passes", s.borderPasses)
+            putInt("no_go_passes", s.noGoPasses)
+            putBoolean("borders_first", s.bordersFirst)
+            putBoolean("nearby_no_go", s.nearbyNoGo)
+            putFloat("charge_low", s.chargeLow)
+            putFloat("charge_high", s.chargeHigh)
+            putInt("height_passes", s.heightPasses)
+            putFloat("first_pass_height_mm", s.firstPassHeightMm)
+            putFloat("return_reserve", s.returnReserve)
+            putString("turn_style", s.turnStyle.name)
+            putString("orientation_mode", s.orientation.name)
+            putInt("manual_angle_deg", s.manualAngleDeg)
+            putString("spiral_direction", s.spiralDirection.name)
+        }
     }
 }

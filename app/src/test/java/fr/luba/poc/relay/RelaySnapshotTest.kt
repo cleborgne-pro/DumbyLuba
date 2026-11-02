@@ -2,9 +2,9 @@ package fr.luba.poc.relay
 
 import fr.luba.poc.ble.RobotUi
 import fr.luba.poc.protocol.Telemetry
+import java.nio.file.Files
 import org.junit.Assert.*
 import org.junit.Test
-import java.nio.file.Files
 
 class RelaySnapshotTest {
     @Test fun exportsAllTelemetryAndDomainStateWithNoCredential() {

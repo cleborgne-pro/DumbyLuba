@@ -2,6 +2,8 @@ package fr.luba.poc.planning
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Finish the started cell, then join a neighbouring block. No pass splitting,
  * no global permutation after this choice, no unvalidated connection.
@@ -64,7 +66,7 @@ internal object LocalMowingOrder {
         return visits(scheduled).groupBy { it.layer }.entries.sumOf { (layer,group) ->
             listOf(90.0,0.0).sumOf { relative ->
                 val axis=Math.toRadians(scheduled.angle+90.0*layer+relative)
-                val c=kotlin.math.cos(axis);val s=kotlin.math.sin(axis)
+                val c=cos(axis); val s=sin(axis)
                 val ranges=group.map { v -> v.points.map { it.x*c+it.y*s }.let { it.min() to it.max() } }
                 listOf(1,-1).minOf { sign ->
                     val signed=ranges.map { (a,b) -> if(sign>0) a to b else -b to -a }
@@ -158,13 +160,13 @@ internal object LocalMowingOrder {
                     val path=entry.path
                     // A candidate whose lower bound already exceeds the best access would be rejected
                     // by the next test: no need to compute its full oriented link.
-                    if(best!=null && entryLowerBound!=null && entryLowerBound(path)>best!!.third+1e-8) continue
+                    if(best.let { b -> b!=null && entryLowerBound!=null && entryLowerBound(path)>b.third+1e-8 }) continue
                     val distance=entryDistance(path)
                     if(!distance.isFinite() || distance>(best?.third ?: Double.POSITIVE_INFINITY)+1e-8) continue
                     if(!safeEntry(task,entry)) continue
                     val cost=link(null,path)
-                    if(cost.isFinite() && (best==null || distance<best!!.third-1e-8 || cost<bestCost && distance<=best!!.third+1e-8)) {
-                        best=Triple(task,path,distance);bestCost=cost
+                    if(cost.isFinite() && best.let { b -> b==null || distance<b.third-1e-8 || cost<bestCost && distance<=b.third+1e-8 }) {
+                        best=Triple(task,path,distance); bestCost=cost
                     }
                     // Extended entry chosen or possible: the loop alone is only a fallback.
                     if(cost.isFinite()) break
@@ -191,10 +193,10 @@ internal object LocalMowingOrder {
         fun take(pool: MutableList<Task>) {
             while(pool.isNotEmpty() && result.size<limit) {
                 val (task,path)=choose(pool)
-                pool.remove(task);result.add(path);previous=path
+                pool.remove(task); result.add(path); previous=path
             }
         }
-        if(!nearbyNoGo && bordersFirst) { take(holes);take(outer) }
+        if(!nearbyNoGo && bordersFirst) { take(holes); take(outer) }
         else if(bordersFirst) take(outer)
         // Checkerboard: orientation of a pass (0 = the computed one, 1 = the perpendicular).
         val layered=preview.mode==CoverageMode.CHECKERBOARD
@@ -223,7 +225,7 @@ internal object LocalMowingOrder {
         var sign=sweepBar?.sign ?: 1
         /** Projection of a block (whole cell or no-go loop) onto the bar's axis of advance. */
         fun span(tasks: List<Task>,axis: Double): Pair<Double,Double> {
-            val c=kotlin.math.cos(axis);val s=kotlin.math.sin(axis)
+            val c=cos(axis); val s=sin(axis)
             val values=tasks.flatMap { t -> t.path.map { it.x*c+it.y*s } }
             return values.min() to values.max()
         }
@@ -242,7 +244,7 @@ internal object LocalMowingOrder {
             if(activeLayer!=null && layer!=activeLayer) {
                 // Next orientation: the bar starts from the side where the robot is.
                 val (low,high)=span(open,axis)
-                val here=previous!!.last().let { it.x*kotlin.math.cos(axis)+it.y*kotlin.math.sin(axis) }
+                val here=(previous ?: return open).last().let { it.x*cos(axis)+it.y*sin(axis) }
                 sign=if(here-low<=high-here) 1 else -1
             }
             val units=open.groupBy { it.cell ?: -(it.index+1) }.values.map { tasks ->
@@ -265,16 +267,16 @@ internal object LocalMowingOrder {
                     else if(entry.first.index==chain.first().index && entry.first.path==chain.first().path) 1 else -1 }
                 entry
             }
-            if(task.cell==null) { holes.remove(task);activeCell=null }
+            if(task.cell==null) { holes.remove(task); activeCell=null }
             else {
-                rows.removeAll { it.index==task.index };activeCell=task.cell
+                rows.removeAll { it.index==task.index }; activeCell=task.cell
                 placed[task.index]=result.size
                 activeLayer=layers.getValue(task.index)
                 chainAt=chains[task.cell]?.indexOfFirst { it.index==task.index } ?: -1
             }
-            result.add(path);previous=path
+            result.add(path); previous=path
         }
-        if(!bordersFirst) { take(holes);take(outer) }
+        if(!bordersFirst) { take(holes); take(outer) }
         // Zones of the paths kept only if every path is still found whole (split or rotated loop: unknown).
         // Spiral from the centre: each outward chain with the paths to mow before it, as positions in the order: its
         // constraints, and every path mowed before it within a core's reach of its centre end (pocket passes whichever

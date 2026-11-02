@@ -3,7 +3,13 @@ package fr.luba.poc.diagnostics
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Geometry
 import fr.luba.poc.map.Point
+import fr.luba.poc.protocol.BumperRest
+import fr.luba.poc.protocol.CollisionLatch
 import fr.luba.poc.protocol.Commands
+import fr.luba.poc.protocol.CutHeightRange
+import fr.luba.poc.protocol.ModelSupport
+import fr.luba.poc.protocol.SelfCheck
+import kotlin.math.hypot
 
 /** Position sample observed during a random walk; absent if telemetry provides no position. */
 data class NavSample(val x: Double, val y: Double, val heading: Double?, val elapsedMs: Long)
@@ -30,7 +36,7 @@ data class NavConfig(
         require(segments in 3..20) { tr("Number of segments outside the 3–20 range", "Nombre de segments hors plage 3–20") }
         require(linearSpeed in 1..Commands.MAX_LINEAR_SPEED) { tr("Linear speed outside 1–${Commands.MAX_LINEAR_SPEED}", "Vitesse linéaire hors bornes 1–${Commands.MAX_LINEAR_SPEED}") }
         require(angularSpeed in 1..Commands.MAX_ANGULAR_SPEED) { tr("Angular speed outside 1–${Commands.MAX_ANGULAR_SPEED}", "Vitesse angulaire hors bornes 1–${Commands.MAX_ANGULAR_SPEED}") }
-        require(heightMm in fr.luba.poc.protocol.CutHeightRange.ANY) { fr.luba.poc.protocol.CutHeightRange.ANY.refusal(heightMm)!! }
+        CutHeightRange.ANY.requireHeight(heightMm)
         require(maxDurationMs in 10_000..MAX_DURATION_MS) { tr("Duration outside the 10–600 s range", "Durée hors plage 10–600 s") }
         require(maxRadiusM in 1.0..(if (pointDestination) 200.0 else 20.0)) { tr("Radius outside the 1–20 m range", "Rayon hors plage 1–20 m") }
         require(batteryFloor in 10..80) { tr("Battery floor outside the 10–80 % range", "Plancher batterie hors plage 10–80 %") }
@@ -94,9 +100,9 @@ object NavSafety {
         /** Move to a point beyond the mapped zones: self-check 25 ignored there ([fr.luba.poc.protocol.OffMapLatch]). */
         ignoreOffMapLatch: Boolean = false,
         /** Cutting heights of the connected model. */
-        heights: fr.luba.poc.protocol.CutHeightRange = fr.luba.poc.protocol.CutHeightRange.forRobot(name),
+        heights: CutHeightRange = CutHeightRange.forRobot(name),
     ): String? {
-        if (!fr.luba.poc.protocol.ModelSupport.motionValidated(name)) return tr("Walk reserved for a LUBA 2 identified as Luba-VS or Luba-VP", "Marche réservée au LUBA 2 identifié Luba-VS ou Luba-VP")
+        if (!ModelSupport.motionValidated(name)) return tr("Walk reserved for a LUBA 2 identified as Luba-VS or Luba-VP", "Marche réservée au LUBA 2 identifié Luba-VS ou Luba-VP")
         if (campaignRunning) return tr("Stop the BLE campaign before the walk", "Arrêter la campagne BLE avant la marche")
         if (bladeTestRunning) return tr("Finish the cutting test before the walk", "Terminer l'essai de coupe avant la marche")
         if (mapLoading) return tr("Wait for the map to be read", "Attendre la lecture de carte")
@@ -104,9 +110,9 @@ object NavSafety {
         if (stateAgeMs == null || stateAgeMs !in 0..2000) return tr("Robot state missing or older than 2 s", "État robot absent ou âgé de plus de 2 s")
         if (battery == null || battery <= batteryFloor) return tr("Battery unknown or ≤$batteryFloor %", "Batterie inconnue ou ≤$batteryFloor %")
         if (robotState != 11) return tr("Robot not ready (MODE_READY=11 expected)", "Robot non prêt (MODE_READY=11 attendu)")
-        if (!fr.luba.poc.protocol.SelfCheck.nominal(selfCheck) && !(ignoreOffMapLatch && selfCheck == fr.luba.poc.protocol.CollisionLatch.VALUE))
-            return fr.luba.poc.protocol.SelfCheck.refusal(selfCheck)
-        if (sensors == null || sensors and 7 != 0) return fr.luba.poc.protocol.BumperRest.refusal(sensors)
+        if (!SelfCheck.nominal(selfCheck) && !(ignoreOffMapLatch && selfCheck == CollisionLatch.VALUE))
+            return SelfCheck.refusal(selfCheck)
+        if (sensors == null || sensors and 7 != 0) return BumperRest.refusal(sensors)
         if (sensors and (7 shl 9) != 0) return tr("Blades not confirmed OFF by telemetry", "Lames non confirmées OFF par la télémétrie")
         return null
     }
@@ -120,14 +126,14 @@ object NavSafety {
     ): String? {
         if (stateAgeMs == null || stateAgeMs !in 0..2000) return tr("Robot state missing or stale", "État robot absent ou périmé")
         if (battery == null || battery <= batteryFloor) return tr("Battery unknown or ≤$batteryFloor %", "Batterie inconnue ou ≤$batteryFloor %")
-        if (sensors == null || sensors and 7 != 0) return fr.luba.poc.protocol.BumperRest.refusal(sensors)
+        if (sensors == null || sensors and 7 != 0) return BumperRest.refusal(sensors)
         val bladeBits = (sensors shr 9) and 7
         // Mowing: bits at 0 tolerated — the disc may only be driven while moving (firmware 1.30);
         // only an unrecognised raw state stops the walk. Without mowing, any active blade stays fatal.
         if (tonte && bladeBits > 1) return tr("Blade state not recognized", "État lames non reconnu")
         if (!tonte && bladeBits != 0) return tr("Unexpected active blades", "Lames actives inattendues")
         if (start != null && x != null && y != null) {
-            if (kotlin.math.hypot(x - start.x, y - start.y) > maxRadiusM) return tr("Maximum radius exceeded around the start", "Rayon maximal dépassé autour du départ")
+            if (hypot(x - start.x, y - start.y) > maxRadiusM) return tr("Maximum radius exceeded around the start", "Rayon maximal dépassé autour du départ")
             if (zone != null && zone.size >= 3 && !insideMargin(x, y, zone, margin)) return tr("Left the zone or its margin", "Sortie de la zone ou de la marge")
         }
         return null
@@ -138,7 +144,7 @@ object NavSafety {
         if (trail.size < 2) return null
         val previous = trail[trail.size - 2]; val last = trail.last()
         if (previous.elapsedMs < stopElapsedMs || last.elapsedMs <= previous.elapsedMs) return null
-        if (kotlin.math.hypot(last.x - previous.x, last.y - previous.y) >= 0.005) return null
+        if (hypot(last.x - previous.x, last.y - previous.y) >= 0.005) return null
         return last.elapsedMs - stopElapsedMs
     }
 

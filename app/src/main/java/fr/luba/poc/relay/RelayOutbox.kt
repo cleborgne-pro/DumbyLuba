@@ -1,7 +1,6 @@
 package fr.luba.poc.relay
 
 import fr.luba.poc.i18n.tr
-
 import java.io.File
 
 /** A bounded durable latest snapshot: newer data supersedes older data while offline. */

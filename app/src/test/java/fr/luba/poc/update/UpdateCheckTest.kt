@@ -3,6 +3,7 @@ package fr.luba.poc.update
 import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
+import fr.luba.poc.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.After
@@ -23,7 +24,7 @@ class UpdateCheckTest {
     private val calls = mutableListOf<String>()
     /** Release served by default: always newer than the build under test, whatever its version. */
     private val next = "99.0.0"
-    private var served: () -> String = { releaseJson(next, fr.luba.poc.BuildConfig.VERSION_CODE + 1) }
+    private var served: () -> String = { releaseJson(next, BuildConfig.VERSION_CODE + 1) }
 
     /** Same shape as the asset written by tools/publication/release.sh (v1.13.0). */
     private fun releaseJson(version: String, code: Int, id: String = UpdateCheck.PUBLISHED_ID) = """
@@ -36,6 +37,12 @@ class UpdateCheckTest {
     /** The published build: same app, release identifier. */
     private val published = object : ContextWrapper(app) {
         override fun getPackageName() = UpdateCheck.PUBLISHED_ID
+        override fun getApplicationContext(): Context = this
+    }
+
+    /** A development build (fold or debug): its own identifier, never the published one, whatever the test variant. */
+    private val development = object : ContextWrapper(app) {
+        override fun getPackageName() = "fr.luba.poc"
         override fun getApplicationContext(): Context = this
     }
 
@@ -109,7 +116,7 @@ class UpdateCheckTest {
     }
 
     @Test fun upToDateWhenTheReleaseIsThisVersion() {
-        served = { releaseJson("1.13.0", fr.luba.poc.BuildConfig.VERSION_CODE) }
+        served = { releaseJson("1.13.0", BuildConfig.VERSION_CODE) }
         UpdateCheck.init(published)
         UpdateCheck.checkNow()
         val s = UpdateCheck.flow.value
@@ -117,16 +124,33 @@ class UpdateCheckTest {
         assertEquals("À jour · vérifié à l'instant", UpdateCheck.summary(s, now))
     }
 
-    @Test fun developmentBuildNeverChecksByItselfAndNeverOffersTheUpdate() {
-        UpdateCheck.init(app)
+    @Test fun developmentBuildNeverChecksByItselfButOpensANewerRelease() {
+        UpdateCheck.init(development)
         UpdateCheck.maybeCheck()
         assertTrue(calls.isEmpty())
         UpdateCheck.checkNow()
         val s = UpdateCheck.flow.value
         assertFalse(s.publishedBuild)
         assertEquals(next, s.latest?.version)
+        // Not an update of this app (no badge), but the row opens the newer release instead of checking again.
         assertNull(s.available)
-        assertTrue(UpdateCheck.summary(s, now).startsWith("Version de développement · dernière publiée $next"))
+        assertEquals(next, s.publishedNewer?.version)
+        assertEquals(next, s.releaseToOpen?.version)
+        assertTrue(UpdateCheck.summary(s, now), UpdateCheck.summary(s, now).contains("version $next publiée, ouvrir la publication"))
+    }
+
+    @Test fun developmentBuildAtThePublishedVersionOnlyChecks() {
+        served = { releaseJson(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE) }
+        UpdateCheck.init(development)
+        UpdateCheck.checkNow()
+        val s = UpdateCheck.flow.value
+        assertNull(s.releaseToOpen)
+        assertTrue(UpdateCheck.summary(s, now).startsWith("Version de développement · dernière publiée ${BuildConfig.VERSION_NAME}"))
+        // Case seen on the Fold: development build 1.14.0 while 1.15.0 is published.
+        val latest = ReleaseInfo("1.15.0", 183, UpdateCheck.PUBLISHED_ID, null)
+        val fold = s.copy(installedName = "1.14.0", latest = latest)
+        assertEquals("1.15.0", fold.releaseToOpen?.version)
+        assertNull("other app identifier", fold.copy(latest = latest.copy(applicationId = "fr.luba.poc")).releaseToOpen)
     }
 
     @Test fun failureIsShownAndKeepsTheLastRelease() {

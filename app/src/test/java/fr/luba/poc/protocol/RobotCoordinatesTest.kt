@@ -1,8 +1,8 @@
 package fr.luba.poc.protocol
 
 import fr.luba.poc.diagnostics.MapNavFollower
-import fr.luba.poc.map.Point
 import fr.luba.poc.manual.Joystick
+import fr.luba.poc.map.Point
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import org.junit.Assert.*
 import org.junit.Test

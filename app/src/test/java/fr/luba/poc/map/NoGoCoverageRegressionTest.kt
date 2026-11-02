@@ -1,8 +1,8 @@
 package fr.luba.poc.map
 
 import org.json.JSONObject
-import org.junit.Test
 import org.junit.Assert.*
+import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.operation.union.UnaryUnionOp

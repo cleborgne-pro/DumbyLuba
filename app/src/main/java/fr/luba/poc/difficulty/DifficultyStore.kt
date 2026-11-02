@@ -1,9 +1,9 @@
 package fr.luba.poc.difficulty
 
 import fr.luba.poc.i18n.tr
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 /** JSON encoding of the difficulty log (app-private file). */
 object DifficultyJson {

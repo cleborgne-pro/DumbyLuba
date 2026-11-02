@@ -1,10 +1,10 @@
 package fr.luba.poc.planning
 
 import fr.luba.poc.map.Point
-import org.locationtech.jts.geom.Envelope
-import org.locationtech.jts.geom.Polygon
-import org.locationtech.jts.geom.Geometry as JtsGeometry
 import kotlin.math.*
+import org.locationtech.jts.geom.Envelope
+import org.locationtech.jts.geom.Geometry as JtsGeometry
+import org.locationtech.jts.geom.Polygon
 
 /** Mowed surface measured on a fine grid (cell centres), same temporal definition
  * as the vector oracle: a pass extending the previous one does not revisit

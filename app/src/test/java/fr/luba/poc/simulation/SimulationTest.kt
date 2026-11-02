@@ -15,11 +15,11 @@ class SimulationTest {
         fun zone(id:Long,x:Double)=MapShape(id,0,listOf(Point(x,0.0),Point(x+6,0.0),Point(x+6,6.0),Point(x,6.0)))
         val routes=TrajectoryPlanner(RobotMap(listOf(zone(1,0.0),zone(2,20.0)),true),0.6,emptyList())
         fun failure(finalHeading:Double):String {
-            try { routes.between(Point(2.0,2.0),Point(22.0,2.0),0.0,finalHeading);fail("Access missing") }
+            try { routes.between(Point(2.0,2.0),Point(22.0,2.0),0.0,finalHeading); fail("Access missing") }
             catch(e:IllegalArgumentException) { return e.message.orEmpty() }
             return ""
         }
-        val first=failure(0.0);val queries=routes.geometryQueries
+        val first=failure(0.0); val queries=routes.geometryQueries
         assertEquals(first,failure(0.0))
         assertEquals("An identical failure must not restart the pivot searches",queries,routes.geometryQueries)
         failure(180.0)

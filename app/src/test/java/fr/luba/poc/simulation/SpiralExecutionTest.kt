@@ -11,7 +11,7 @@ import org.junit.Test
  * middle of a straight edge. Printed: mission metrics of the plan and execution at 30 and 50 %.
  */
 class SpiralExecutionTest {
-    @Test(timeout = 900000) fun `spiral routes are followed without exceeding the deviation limits`() {
+    @Test(timeout = 600000) fun `spiral routes are followed without exceeding the deviation limits`() {
         val (map, base) = ReferenceRoutes.referenceMap()
         val failures = mutableListOf<String>()
         for (name in listOf("Potager", "Jardin d’Eden")) {

@@ -5,6 +5,11 @@ import fr.luba.poc.gateway.GatewayLink
 import fr.luba.poc.gateway.GatewayProtocol
 import fr.luba.poc.map.Point
 import fr.luba.poc.protocol.ModelTrial
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.net.Socket
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -13,11 +18,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.DataInputStream
-import java.io.DataOutputStream
-import java.net.Socket
 
 /**
  * Acceptance criteria of the bumper resting value (DumbyLuba#1, LUBA 2 AWD 3000X `Luba-VP` reading the bumper slot of
@@ -315,7 +315,7 @@ class RobotBleBumperRestCriteriaTest {
         val previous = gatt.get(ble)
         gatt.set(ble, gateway)
         try {
-            return RobotBle::class.java.getDeclaredMethod("autonomousLegsAvailable").apply { isAccessible = true }.invoke(ble) as Boolean
+            return ble.autonomousLegsAvailable()
         } finally { gatt.set(ble, previous) }
     }
 

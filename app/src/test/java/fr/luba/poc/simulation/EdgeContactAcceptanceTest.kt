@@ -5,11 +5,11 @@ import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.RobotEnvelope
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import org.junit.Assert.*
+import org.junit.Test
 
 /**
  * Acceptance edge cases of the border contact classification ([EdgeContact], plan 2.1-2.3) and of the detour budget

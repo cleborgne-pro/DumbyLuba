@@ -1,13 +1,16 @@
 package fr.luba.poc.map
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.core.content.edit
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.ui.components.SliderRow
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.math.roundToInt
 
 /**
  * Margin between the side of the robot and the recorded boundary for an outer loop, kept between two launches. The
@@ -15,7 +18,7 @@ import kotlin.math.roundToInt
  * [label] is evaluated at display time (interface language).
  */
 open class OffsetSetting(val defaultM: Double, private val key: String, private val label: () -> String) {
-    private var prefs: android.content.SharedPreferences? = null
+    private var prefs: SharedPreferences? = null
     private val state = MutableStateFlow(defaultM)
     val flow: StateFlow<Double> get() = state
 
@@ -29,7 +32,7 @@ open class OffsetSetting(val defaultM: Double, private val key: String, private 
     fun set(value: Double) {
         val clean = sanitize(value)
         state.value = clean
-        prefs?.edit()?.putFloat(key, clean.toFloat())?.apply()
+        prefs?.edit { putFloat(key, clean.toFloat()) }
     }
     fun sanitize(value: Double): Double =
         if (!value.isFinite()) defaultM else ((value * 100).roundToInt() / 100.0).coerceIn(MIN_M, CoveragePlanner.MAX_OUTER_OFFSET_M)
@@ -38,7 +41,7 @@ open class OffsetSetting(val defaultM: Double, private val key: String, private 
     @Composable
     fun Slider(enabled: Boolean) {
         val value by state.collectAsState()
-        fr.luba.poc.ui.components.SliderRow(label(), value.toFloat(), { set(it.toDouble()) },
+        SliderRow(label(), value.toFloat(), { set(it.toDouble()) },
             MIN_M.toFloat()..CoveragePlanner.MAX_OUTER_OFFSET_M.toFloat(),
             valueLabel = tr("${(value * 100).roundToInt()} cm from the edge", "${(value * 100).roundToInt()} cm entre le robot et la limite"), steps = 18, enabled = enabled)
     }

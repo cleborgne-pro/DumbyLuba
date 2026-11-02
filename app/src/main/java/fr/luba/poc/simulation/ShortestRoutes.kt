@@ -2,11 +2,12 @@ package fr.luba.poc.simulation
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
+import java.util.PriorityQueue
+import kotlin.math.abs
+import kotlin.math.sqrt
 import org.locationtech.jts.geom.Geometry
 import org.locationtech.jts.geom.LineString
 import org.locationtech.jts.geom.Polygon
-import java.util.PriorityQueue
-import kotlin.math.abs
 
 /** Polygonal shortest path: reflex vertices and visible segments tangent to the outlines.
  *
@@ -18,7 +19,7 @@ import kotlin.math.abs
  */
 internal class ShortestRoutes(area: Geometry, private val safe: (Point, Point) -> Boolean) {
     private data class Corner(val point: Point, val before: Point, val after: Point)
-    private fun distance(a: Point, b: Point): Double { val dx=a.x-b.x; val dy=a.y-b.y; return kotlin.math.sqrt(dx*dx+dy*dy) }
+    private fun distance(a: Point, b: Point): Double { val dx=a.x-b.x; val dy=a.y-b.y; return sqrt(dx*dx+dy*dy) }
     private fun cross(a: Point, b: Point, c: Point) =
         (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)
     private val corners = buildList {

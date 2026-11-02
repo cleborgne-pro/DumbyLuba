@@ -1,7 +1,5 @@
 package fr.luba.poc.ui
 
-import fr.luba.poc.i18n.tr
-
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -15,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import com.github.takahirom.roborazzi.captureRoboImage
 import fr.luba.poc.ble.ConnectionState
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.MissionCheckpoint
@@ -152,6 +151,20 @@ class UiShotsCarteTest {
         capture("carte-task")
         compose.onNodeWithText(tr("Advanced settings", "Réglages avancés")).performClick()
         capture("carte-task-advanced")
+    }
+    /** Mow → "Paint a zone": strokes in the Aire de jeux, retained area outlined, painting tools. */
+    @Test fun zonesPaint() {
+        val playground = map.shapes.single { it.name == "Aire de jeux" }.points
+        val cx = playground.map { it.x }.average(); val cy = playground.map { it.y }.average()
+        PaintDraft.update(map) { listOf(
+            PaintStroke((0..16).map { Point(cx - 4.0 + it * 0.5, cy - 1.5 + kotlin.math.sin(it * 0.6) * 0.8) }, 1.4),
+            PaintStroke((0..10).map { Point(cx - 0.5 + it * 0.35, cy + 0.8 + it * 0.3) }, 1.1)) }
+        try {
+            shot("carte-zones") { screen(openMowing = true) }
+            compose.onNodeWithText(tr("Paint a zone", "Peindre une zone")).performClick()
+            compose.waitUntil(30_000) { compose.onAllNodesWithText(tr("painted zone", "zone peinte"), substring = true).fetchSemanticsNodes().isNotEmpty() }
+            capture("carte-zones-peinture")
+        } finally { PaintDraft.update(map) { emptyList() } }
     }
     /** Dedicated survey route, opened from Service → Signal surveys: full loop or grid only. */
     @Test fun surveyTask() {

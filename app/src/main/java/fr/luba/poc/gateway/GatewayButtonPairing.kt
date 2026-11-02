@@ -2,6 +2,7 @@ package fr.luba.poc.gateway
 
 import android.content.Context
 import fr.luba.poc.i18n.tr
+import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -39,7 +40,7 @@ object GatewayButtonPairing {
                 flush()
             }
             val input = socket.getInputStream()
-            val out = java.io.ByteArrayOutputStream()
+            val out = ByteArrayOutputStream()
             val buffer = ByteArray(1024)
             while (out.size() < MAX_RESPONSE) {
                 val n = input.read(buffer)

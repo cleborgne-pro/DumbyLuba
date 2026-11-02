@@ -5,9 +5,9 @@ import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleKind
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.planning.RoutePlanning
+import kotlin.math.atan2
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.atan2
 
 /**
  * Bypass of an obstacle discovered during mowing: back-off along the trail, remaining route repaired by the same

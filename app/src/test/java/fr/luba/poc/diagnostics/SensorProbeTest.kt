@@ -7,8 +7,8 @@ import fr.luba.poc.proto.LubaMsgProto.MsgDevice
 import fr.luba.poc.proto.MctrlPeptProto.MctlPept
 import fr.luba.poc.proto.MctrlPeptProto.perception_universal_buff_t
 import fr.luba.poc.proto.MctrlSysProto.MctlSys
-import fr.luba.poc.proto.MctrlSysProto.rpt_dev_status
 import fr.luba.poc.proto.MctrlSysProto.report_info_data
+import fr.luba.poc.proto.MctrlSysProto.rpt_dev_status
 import fr.luba.poc.proto.MctrlSysProto.vio_to_app_info_msg
 import fr.luba.poc.proto.MctrlSysProto.vision_point_info_msg
 import fr.luba.poc.proto.MctrlSysProto.vision_point_msg

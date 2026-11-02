@@ -2,7 +2,10 @@ package fr.luba.poc.diagnostics
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.protocol.CutHeightRange
+import fr.luba.poc.protocol.ModelSupport
+import fr.luba.poc.protocol.SelfCheck
 import fr.luba.poc.protocol.Telemetry
+import kotlin.math.abs
 
 /** Precondition of a cutting test, shown live in the Blades panel. */
 data class BladeCheck(val label: String, val ok: Boolean, val detail: String)
@@ -18,20 +21,20 @@ object BladeSafety {
                sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int,
                heights: CutHeightRange = CutHeightRange.forRobot(name),
                /** Model check: validated model, or a model trial for the blade test ([fr.luba.poc.protocol.ModelTrial]). */
-               modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(name)): List<BladeCheck> = listOf(
+               modelAllowed: Boolean = ModelSupport.motionValidated(name)): List<BladeCheck> = listOf(
         BladeCheck("Robot LUBA 2", modelAllowed, tr("Test reserved for a LUBA 2 identified as Luba-VS or Luba-VP (or a model trial armed)", "Test réservé au LUBA 2 identifié Luba-VS ou Luba-VP (ou à un essai du modèle armé)")),
         BladeCheck(tr("BLE diagnostics stopped", "Diagnostic BLE arrêté"), !campaignRunning, tr("Stop the BLE campaign before this test", "Arrêter la campagne BLE avant ce test")),
         BladeCheck(tr("Height ${heights.label}", "Hauteur ${heights.label}"), heightMm in heights, heights.refusal(heightMm) ?: ""),
         BladeCheck(tr("Fresh robot state (≤ 2 s)", "État robot frais (≤ 2 s)"), stateAgeMs != null && stateAgeMs in 0..2000, tr("Robot state missing or older than 2 s", "État robot absent ou âgé de plus de 2 s")),
         BladeCheck(tr("Battery > 30 %", "Batterie > 30 %"), battery != null && battery > 30, tr("Battery unknown or ≤30 %", "Batterie inconnue ou ≤30 %")),
         BladeCheck(tr("Robot ready (state 11)", "Robot prêt (état 11)"), robotState == 11, tr("Robot not ready (MODE_READY=11 expected)", "Robot non prêt (MODE_READY=11 attendu)")),
-        BladeCheck(tr("No protection active", "Aucune protection active"), fr.luba.poc.protocol.SelfCheck.nominal(selfCheck), fr.luba.poc.protocol.SelfCheck.refusal(selfCheck)),
+        BladeCheck(tr("No protection active", "Aucune protection active"), SelfCheck.nominal(selfCheck), SelfCheck.refusal(selfCheck)),
         BladeCheck(tr("Bumper free, blades OFF", "Bumper libre, lames OFF"), sensors != null && sensors and 7 == 0 && (sensors shr 9) and 7 == 0, tr("Bumper not free or blades not confirmed OFF", "Bumper non libre ou lames non confirmées OFF")),
     )
 
     fun requireReady(name: String?, stateAgeMs: Long?, battery: Int?, robotState: Int?,
         sensors: Int?, selfCheck: Long?, campaignRunning: Boolean, heightMm: Int, heights: CutHeightRange = CutHeightRange.forRobot(name),
-        modelAllowed: Boolean = fr.luba.poc.protocol.ModelSupport.motionValidated(name)) {
+        modelAllowed: Boolean = ModelSupport.motionValidated(name)) {
         checks(name, stateAgeMs, battery, robotState, sensors, selfCheck, campaignRunning, heightMm, heights, modelAllowed)
             .firstOrNull { !it.ok }?.let { throw IllegalArgumentException(it.detail) }
     }
@@ -76,5 +79,5 @@ object HeightSequence {
 
     /** Timeout for the robot's feedback: the height motor travels about 1 mm/s. */
     fun timeoutMs(fromMm: Int?, toMm: Int): Long =
-        if (fromMm == null) 60_000 else (20_000L + kotlin.math.abs(toMm - fromMm) * 1_000L).coerceIn(30_000L, 90_000L)
+        if (fromMm == null) 60_000 else (20_000L + abs(toMm - fromMm) * 1_000L).coerceIn(30_000L, 90_000L)
 }

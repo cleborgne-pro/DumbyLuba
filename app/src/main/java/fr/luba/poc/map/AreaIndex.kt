@@ -1,8 +1,8 @@
 package fr.luba.poc.map
 
+import kotlin.math.*
 import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.Polygon
-import kotlin.math.*
 
 /** Fast inclusion test in a fixed polygonal area (polygons and holes).
  *
@@ -135,7 +135,7 @@ class AreaIndex(area: JtsGeometry, private val tolerance: Double = 1e-5) {
      * shared by all indexes: a single ThreadLocal entry). */
     private class Marks { var seen = IntArray(64); var generation = 0 }
     private fun nextGeneration(): Marks {
-        val m = MARKS.get()
+        val m = MARKS.get() ?: Marks().also { MARKS.set(it) }
         if (m.seen.size < ax.size) { m.seen = IntArray(max(ax.size, m.seen.size * 2)); m.generation = 0 }
         if (++m.generation == Int.MAX_VALUE) { m.seen.fill(0); m.generation = 1 }
         return m

@@ -2,10 +2,10 @@ package fr.luba.poc.history
 
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
+import kotlin.random.Random
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.random.Random
 
 /** Route tracking quality of a history task: deviation from the prepared stripes, holes, tracking link. */
 class RouteDeviationTest {

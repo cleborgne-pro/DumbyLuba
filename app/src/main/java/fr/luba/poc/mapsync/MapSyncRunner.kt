@@ -2,6 +2,7 @@ package fr.luba.poc.mapsync
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.MapCorrection
+import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import kotlinx.coroutines.CancellationException
@@ -26,7 +27,7 @@ interface MapSyncPort {
     /** Current differences between the robot map and the corrected map, with their traces checked. */
     suspend fun differences(): List<SyncItem>
     /** Element removed by the robot with a replaced zone, as a sync item (traces checked on the current map). */
-    fun recreate(shape: fr.luba.poc.map.MapShape): SyncItem?
+    fun recreate(shape: MapShape): SyncItem?
     /** Move, blades stopped, by the usual move to a point, to the first of [targets] that the move accepts. */
     suspend fun driveTo(targets: List<Point>): String?
     /** Puts the robot in recording mode for [kind] (robot state [SyncKind.drawState] confirmed). */
@@ -160,7 +161,7 @@ class MapSyncRunner(private val port: MapSyncPort, private val scope: CoroutineS
         }
     }
 
-    private class Synced(val map: RobotMap, val lost: List<fr.luba.poc.map.MapShape>)
+    private class Synced(val map: RobotMap, val lost: List<MapShape>)
 
     /** One element; null after a failure (already reported). */
     private suspend fun sync(item: SyncItem, before: RobotMap): Synced? {
@@ -221,7 +222,7 @@ class MapSyncRunner(private val port: MapSyncPort, private val scope: CoroutineS
         }
         port.log("map_sync_recorded", tr("Element recorded by the robot", "Élément enregistré par le robot"), mapOf("key" to item.key, "hash" to created.id, "points" to created.points.size))
         var map = read
-        var lost = emptyList<fr.luba.poc.map.MapShape>()
+        var lost = emptyList<MapShape>()
         val previous = item.previous
         if (previous != null) {
             phase(SyncPhase.DELETING, item.key)

@@ -1,14 +1,16 @@
 package fr.luba.poc.protocol
 
+import fr.luba.poc.Clock
 import fr.luba.poc.i18n.tr
-import fr.luba.poc.proto.LubaMsgProto.*
+import fr.luba.poc.mowing.MowConfig
 import fr.luba.poc.proto.DevNetProto.DevNet
 import fr.luba.poc.proto.DevNetProto.DrvDebugDdsZmq
 import fr.luba.poc.proto.DevNetProto.GetNetworkInfoReq
+import fr.luba.poc.proto.LubaMsgProto.*
+import fr.luba.poc.proto.LubaMulProto.*
 import fr.luba.poc.proto.MctrlDriverProto.*
 import fr.luba.poc.proto.MctrlNavProto.*
 import fr.luba.poc.proto.MctrlSysProto.*
-import fr.luba.poc.proto.LubaMulProto.*
 import fr.luba.poc.ui.RobotModel
 
 /**
@@ -52,11 +54,11 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
             .setRcver(receiver).setMsgattr(MsgAttr.MSG_ATTR_REQ).setSeqs(sequence)
             .setVersion(1).setSubtype(userAccount).setTimestamp(now)
     }
-    fun sync(now: Long = System.currentTimeMillis(), syncType: Int = 2): ByteArray =
+    fun sync(now: Long = Clock.now(), syncType: Int = 2): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_ESP, MsgDevice.DEV_COMM_ESP, now)
             .setNet(DevNet.newBuilder().setTodevBleSync(syncType)).build().toByteArray()
 
-    fun stop(now: Long = System.currentTimeMillis()): ByteArray =
+    fun stop(now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_DRIVER, MsgDevice.DEV_MAINCTL, now)
             .setDriver(MctlDriver.newBuilder().setTodevDevmotionCtrl(
                 DrvMotionCtrl.newBuilder().setSetLinearSpeed(0).setSetAngularSpeed(0)))
@@ -65,7 +67,7 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
     /** Joystick movement (upstream `send_movement`): raw int32 speeds, uncalibrated units.
      * Strict bounds; joystick and controllers use the same mathematical convention. */
     // Internal convention: positive = left (increasing mathematical angle). Firmware: positive = right.
-    fun movement(linear: Int, angular: Int, now: Long = System.currentTimeMillis()): ByteArray {
+    fun movement(linear: Int, angular: Int, now: Long = Clock.now()): ByteArray {
         require(linear in -PROTOCOL_MAX_LINEAR..PROTOCOL_MAX_LINEAR) { tr("Linear speed out of bounds", "Vitesse linéaire hors bornes") }
         require(angular in -PROTOCOL_MAX_ANGULAR..PROTOCOL_MAX_ANGULAR) { tr("Angular speed out of bounds", "Vitesse angulaire hors bornes") }
         return envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_DRIVER, MsgDevice.DEV_MAINCTL, now)
@@ -74,7 +76,7 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
             .build().toByteArray()
     }
 
-    fun bladeHeight(mm: Int, now: Long = System.currentTimeMillis()): ByteArray {
+    fun bladeHeight(mm: Int, now: Long = Clock.now()): ByteArray {
         require(mm in CutHeightRange.ANY)
         return envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_DRIVER, MsgDevice.DEV_MAINCTL, now)
             .setDriver(MctlDriver.newBuilder().setTodevKnifeHeightSet(DrvKnifeHeight.newBuilder().setKnifeHeight(mm)))
@@ -84,15 +86,15 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
     /** Exact parameters of mower_api.async_start_stop_blades for non-LUBA 1 models.
      * max_run_speed is an upstream limit, not a requested speed. No non-zero movement is sent.
      */
-    fun manualBlades(enabled: Boolean, heightMm: Int, now: Long = System.currentTimeMillis()): ByteArray =
+    fun manualBlades(enabled: Boolean, heightMm: Int, now: Long = Clock.now()): ByteArray =
         manualMow(if (enabled) 1 else 0, if (enabled) 1 else 0, heightMm, now)
 
     /** Configurable manual mowing: `main_ctrl` (manual mowing mode) and `cut_knife_ctrl` (discs) are
      * separate to reproduce the official app's sequence: mode first, then discs. */
-    fun manualMow(mainCtrl: Int, cutKnifeCtrl: Int, heightMm: Int, now: Long = System.currentTimeMillis()): ByteArray {
+    fun manualMow(mainCtrl: Int, cutKnifeCtrl: Int, heightMm: Int, now: Long = Clock.now()): ByteArray {
         require(mainCtrl in 0..1) { tr("main_ctrl outside 0..1", "main_ctrl hors 0..1") }
         require(cutKnifeCtrl in 0..1) { tr("cut_knife_ctrl outside 0..1", "cut_knife_ctrl hors 0..1") }
-        require(heightMm in CutHeightRange.ANY) { CutHeightRange.ANY.refusal(heightMm)!! }
+        CutHeightRange.ANY.requireHeight(heightMm)
         return envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_DRIVER, MsgDevice.DEV_MAINCTL, now)
             .setDriver(MctlDriver.newBuilder().setMowCtrlByHand(DrvMowCtrlByHand.newBuilder()
                 .setMainCtrl(mainCtrl).setCutKnifeCtrl(cutKnifeCtrl)
@@ -102,7 +104,7 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
 
     /** "LUBA 1" cutting command (MctlSys.todev_knife_ctrl): the one the upstream joystick uses for
      * every model. Documented alternative path, never a silent workaround. */
-    fun knifeControl(enabled: Boolean, now: Long = System.currentTimeMillis()): ByteArray =
+    fun knifeControl(enabled: Boolean, now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
             .setSys(MctlSys.newBuilder().setTodevKnifeCtrl(
                 SysKnifeControl.newBuilder().setKnifeStatus(if (enabled) 1 else 0)))
@@ -110,14 +112,14 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
 
     /** Cutter mode query (upstream `get_cutter_mode`); reply expected in
      * `MctlDriver.current_cutter_mode` (current mode, RPM, query result). */
-    fun cutterQuery(now: Long = System.currentTimeMillis()): ByteArray =
+    fun cutterQuery(now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_DRIVER, MsgDevice.DEV_MAINCTL, now)
             .setDriver(MctlDriver.newBuilder().setCurrentCutterMode(AppGetCutterWorkMode.getDefaultInstance()))
             .build().toByteArray()
 
-    private fun nav(n: MctlNav): ByteArray = envelope(MsgCmdType.MSG_CMD_TYPE_NAV, navReceiver, System.currentTimeMillis()).setNav(n).build().toByteArray()
+    private fun nav(n: MctlNav): ByteArray = envelope(MsgCmdType.MSG_CMD_TYPE_NAV, navReceiver, Clock.now()).setNav(n).build().toByteArray()
     /** Native preparation, conservative manufacturer parameters from upstream. */
-    fun prepareMowing(config: fr.luba.poc.mowing.MowConfig): ByteArray = nav(MctlNav.newBuilder()
+    fun prepareMowing(config: MowConfig): ByteArray = nav(MctlNav.newBuilder()
         .setBidireReqconverPath(NavReqCoverPath.newBuilder().setPver(1).setSubCmd(0)
             .setJobMode(4).setEdgeMode(1).setKnifeHeight(config.heightMm).setSpeed(config.speedMps)
             .setUltraWave(2).setChannelWidth(config.spacingCm).setChannelMode(if (config.checkerboard) 1 else 0)
@@ -179,7 +181,7 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
     }
 
     /** Upstream get_error_code query: no change to the protections. */
-    fun errorQuery(now: Long = System.currentTimeMillis()): ByteArray =
+    fun errorQuery(now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
             .setSys(MctlSys.newBuilder().setBidireCommCmd(SysCommCmd.newBuilder().setId(5).setContext(2).setRw(1)))
             .build().toByteArray()
@@ -188,7 +190,7 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
      * Self-check details (MctlSys field 70 `to_dev_self_check_info_req`, reply field 71: `scp`/`scr` pairs).
      * Read only, to decode an undocumented protection (self-check 25 of 2026-10-14).
      */
-    fun selfCheckInfo(now: Long = System.currentTimeMillis()): ByteArray =
+    fun selfCheckInfo(now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
             .setSys(MctlSys.newBuilder().setToDevSelfCheckInfoReq(self_check_info_req.newBuilder().setSelfCheckReqid(1)))
             .build().toByteArray()
@@ -202,7 +204,7 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
      * at 1 Hz: on 2026-10-20, 20 s after a 200 ms request with no other request, the positions were 1.0 s apart
      * (median 1005-1010 ms, routes of 17:16 and 19:19). Kept in case another firmware honours it.
      */
-    fun reports(keep: Boolean, now: Long = System.currentTimeMillis(), periodMs: Int = 1000, vision: Boolean = false, account: Boolean = false): ByteArray {
+    fun reports(keep: Boolean, now: Long = Clock.now(), periodMs: Int = 1000, vision: Boolean = false, account: Boolean = false): ByteArray {
         require(periodMs in 200..1000)
         return envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
             .setSys(MctlSys.newBuilder().setTodevReportCfg(report_info_cfg.newBuilder()
@@ -224,13 +226,13 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
      * publish (1) or stop (0) the Agora video stream. No movement or blade command.
      * Position LEFT for every model other than the original Yuka.
      */
-    fun video(on: Boolean, position: MUL_CAMERA_POSITION = MUL_CAMERA_POSITION.LEFT, now: Long = System.currentTimeMillis()): ByteArray =
+    fun video(on: Boolean, position: MUL_CAMERA_POSITION = MUL_CAMERA_POSITION.LEFT, now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_MUL, MsgDevice.SOC_MODULE_MULTIMEDIA, now)
             .setMul(SocMul.newBuilder().setSetVideo(MulSetVideo.newBuilder().setPosition(position).setViSwitch(if (on) 1 else 0)))
             .build().toByteArray()
 
     /** Video encoder restart (PyMammotion `refresh_fpv`), every 3 s when the robot streams over 4G. */
-    fun refreshFpv(now: Long = System.currentTimeMillis()): ByteArray =
+    fun refreshFpv(now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_MUL, MsgDevice.SOC_MODULE_MULTIMEDIA, now)
             .setMul(SocMul.newBuilder().setReqEncode(MulSetEncode.newBuilder().setEncode(true)))
             .build().toByteArray()
@@ -239,7 +241,7 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
      * Global firmware debug switch (APK `setDebugEnable`, `debug_enable_t`): sensor probe only, reset to 0 when
      * the capture stops. Any `debug_common_report` reports are read.
      */
-    fun debugEnable(on: Boolean, now: Long = System.currentTimeMillis()): ByteArray =
+    fun debugEnable(on: Boolean, now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
             .setSys(MctlSys.newBuilder().setDebugEnable(debug_enable_t.newBuilder().setEnbale(if (on) 1 else 0)))
             .build().toByteArray()
@@ -248,13 +250,13 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
      * Robot model (PyMammotion `get_device_product_model`): reply `device_product_type_info` with the internal model
      * code (`sub_product_type`), which tells the H versions (high cut) apart. Read-only query.
      */
-    fun productModel(now: Long = System.currentTimeMillis()): ByteArray =
+    fun productModel(now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_EMBED_SYS, MsgDevice.DEV_MAINCTL, now)
             .setSys(MctlSys.newBuilder().setDeviceProductTypeInfo(device_product_type_info_t.newBuilder().setResult(1)))
             .build().toByteArray()
 
     /** Robot network information (APK `getDeviceNetWorkInfo`): reply `toapp_networkinfo_rsp` (SSID, IP, mask). */
-    fun networkInfo(now: Long = System.currentTimeMillis()): ByteArray =
+    fun networkInfo(now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_ESP, MsgDevice.DEV_COMM_ESP, now)
             .setNet(DevNet.newBuilder().setTodevNetworkinfoReq(GetNetworkInfoReq.newBuilder().setReqIds(1)))
             .build().toByteArray()
@@ -263,7 +265,7 @@ class Commands(private val userAccount: Int = 0, val navReceiver: MsgDevice = Ms
      * Robot DDS → ZMQ debug bridge (APK `setZMQEnable`): the DDS topic [PERCEPTION_TOPIC] is republished over ZMQ on
      * [PERCEPTION_ZMQ_URL] (robot port 5555, local Wi-Fi network). Sensor probe only, turned off when it stops.
      */
-    fun perceptionZmq(on: Boolean, now: Long = System.currentTimeMillis()): ByteArray =
+    fun perceptionZmq(on: Boolean, now: Long = Clock.now()): ByteArray =
         envelope(MsgCmdType.MSG_CMD_TYPE_ESP, MsgDevice.DEV_COMM_ESP, now)
             .setNet(DevNet.newBuilder().setTodevSetDds2Zmq(DrvDebugDdsZmq.newBuilder().setIsEnable(on)
                 .setRxTopicName(PERCEPTION_TOPIC).setTxZmqUrl(PERCEPTION_ZMQ_URL)))

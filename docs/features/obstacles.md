@@ -162,12 +162,17 @@ slip**, lift, lack of progress, deviation from the route) are recorded too, at t
 [encountered obstacles and difficulty heatmap](../DIFFICULTIES.md).
 
 - **Map layers**: **Obstacles** (contacts as red dots, presumed obstacles as dotted outlines) and **Difficulties**
-  (yellow → red heatmap), in the layer bar and the **Map** sheet (*On the map*). Tapping a contact opens its record:
+  (yellow → red heatmap), in the layer bar and the **Map** sheet (*On the map*). Presumed obstacles that routes avoid
+  (option on) are drawn whatever the layers, like saved obstacles: the mowing preview showed them while the map hid
+  them with the Obstacles layer off (Unreleased). Tapping a contact opens its record:
   photo, date, origin, code, estimated position, bypass side, number of contacts at this place, **Dismiss** (object
   removed, false contact) or **Save the obstacle**. The **Obstacles** layer is shown by default; both choices are kept
   between launches.
 - **Exclusion size chosen on the map** (since 0.43.0): tapping a contact, the dotted circle of a presumed obstacle
-  or a **saved obstacle** opens its record. There you choose the type (the type suggests its usual radius: swing leg
+  or a **saved obstacle** opens its record. A presumed obstacle opens its own record (Unreleased): position, contacts,
+  last contact, **Open the latest contact** (photo), the size editor prefilled with its estimated radius and margin,
+  **Dismiss** (all its contacts) or **Save the obstacle** at its center, after which it is edited like any saved
+  obstacle. There you choose the type (the type suggests its usual radius: swing leg
   0.12 m, tree 0.30 m, pole 0.10 m, hole 0.35 m, low branch 0.15 m, other 0.20 m), the **Object radius** (0.05 to
   2 m) and the **Margin around the object** (0 to 2 m), both in 5 cm steps, with shortcuts **Margin 0.3 m / 0.5 m /
   1.0 m**. The record shows the excluded area (radius + margin) and the minimum distance of the robot's
@@ -316,7 +321,9 @@ followed (repaired after contact), red object and contacts, circles estimated ob
 
 The contact is classified like in real mowing ([border contacts](#contact-at-the-border-of-the-zone)): a limit
 contact backs off and resumes without an obstacle, an object at the border takes the 0.2 m margin, and a repair over
-the detour budget is noted in the log (kept: the simulation has no saved progress to defer to).
+the detour budget is noted in the log (kept: the simulation has no saved progress to defer to). Wheels turning
+without the robot moving for 3 s (presumed blockage: branch under the chassis, root) are handled like in real mowing:
+estimated obstacle in front of the robot, back-off and bypass (until then the simulation stopped there).
 
 The simulated robot is driven by the **same navigation module as real mowing** (line tracking, predicted pose
 between two positions, pivots at corners, stop and confirmation at every blade state change, safety stop beyond

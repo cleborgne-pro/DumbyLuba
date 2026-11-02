@@ -16,7 +16,10 @@ python3 home-server/server.py --data home-server/data/relay.sqlite3
 The server listens on port **8765** and prints
 `DumbyLuba: http://HOST:PORT/ — code NNNNNN` (a **six-digit** code).
 The code is stored in the database and stays the same after a restart.
-Options: `--host` (default `0.0.0.0`), `--port` (default `8765`), `--data`
+By default it only accepts connections from this machine (`127.0.0.1`):
+phones need `--lan` to reach it over the local network.
+Options: `--host` (explicit bind address), `--lan` (listen on every interface),
+`--port` (default `8765`), `--data`
 (default `./data/relay.sqlite3`, relative to the current folder) and `--code`.
 In **Service → Home server** on Android: enter
 `http://SERVER_IP:8765` and the code, then **Start the relay**.
@@ -39,10 +42,11 @@ or the database is created. Change the Android field to
 use the existing server's code; do not delete the database to change
 the code, as that would erase the observations. The code may start with zero.
 
-For a test on the same machine only, add `--host 127.0.0.1`.
-For the LAN, use this machine's IP and allow TCP 8765 in its
-firewall. Reserve its address in the router's DHCP. The Redmi requires a 2.4 GHz
-Wi-Fi without client isolation. Do not expose this HTTP POC to the Internet.
+Start it with `--lan` to serve the LAN, use this machine's IP and allow TCP 8765
+in its firewall. Reserve its address in the router's DHCP. The Redmi requires a
+2.4 GHz Wi-Fi without client isolation. Do not expose this HTTP POC to the
+Internet: the six-digit code crosses the network in clear, which is why the
+default bind is loopback only.
 The phone can use an HTTPS URL if a reverse proxy with a valid
 certificate terminates TLS in front of this server; the sender follows no HTTP
 redirect, so the code always goes to its configured destination.

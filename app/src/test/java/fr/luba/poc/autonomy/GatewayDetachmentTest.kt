@@ -1,12 +1,12 @@
 package fr.luba.poc.autonomy
 
 import fr.luba.poc.map.Point
+import kotlin.math.log10
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.log10
 
 class GatewayDetachmentTest {
     /** Robot driving along x at 0.4 m/s, one reading per second; [rssi] from the robot position. */

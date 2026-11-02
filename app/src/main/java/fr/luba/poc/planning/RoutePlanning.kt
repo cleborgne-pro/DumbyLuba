@@ -1,13 +1,21 @@
 package fr.luba.poc.planning
 
+import fr.luba.poc.difficulty.DifficultyUi
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.LocalObstacle
+import fr.luba.poc.obstacles.ObstacleDisc
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.simulation.MapBase
+import fr.luba.poc.simulation.MissionAvoidance
+import fr.luba.poc.simulation.MissionCheckpoint
 import fr.luba.poc.simulation.MowingSimulation
+import fr.luba.poc.simulation.ObstacleBypass
+import fr.luba.poc.simulation.PointPlanner
 import fr.luba.poc.simulation.SimConfig
 import fr.luba.poc.simulation.TrajectoryPlanner
+import kotlin.math.cos
+import kotlin.math.sin
 
 data class CoveragePlan(val preview: Preview, val report: PlanningResult?)
 
@@ -77,7 +85,7 @@ object RoutePlanning {
         val preview=MultiZonePlanner.plan(zones,
             snapshot.map.shapes.filter { it.excludes }.map { it.points },
             config.spacingM,config.marginM,mode,config.borders,config.borderPasses,config.noGoPasses,
-            obstacles=snapshot.obstacles.map { fr.luba.poc.obstacles.ObstacleDisc(it.center.x,it.center.y,
+            obstacles=snapshot.obstacles.map { ObstacleDisc(it.center.x,it.center.y,
                 it.radiusM+snapshot.robot.turnClearanceM) },robot=snapshot.robot,
             recordedBoundary=config.boundary==BoundaryMeaning.RECORDED_TRACE,basePoint=snapshot.start,
             bordersFirst=config.bordersFirst,nearbyNoGo=config.nearbyNoGo,
@@ -128,7 +136,7 @@ object RoutePlanning {
      */
     fun station(routes: TrajectoryPlanner, map: RobotMap, base: MapBase, robot: Point, config: SimConfig): MowingSimulation {
         val axis=Math.toRadians(requireNotNull(base.entryHeadingDegrees) { tr("Unknown base axis: observe the robot while charging", "Axe de base inconnu : observer le robot en charge") })
-        val approach=Point(base.point.x-kotlin.math.cos(axis)*base.approachDistanceM,base.point.y-kotlin.math.sin(axis)*base.approachDistanceM)
+        val approach=Point(base.point.x-cos(axis)*base.approachDistanceM,base.point.y-sin(axis)*base.approachDistanceM)
         val factory=org.locationtech.jts.geom.GeometryFactory()
         val candidates=listOf(robot)+map.shapes.filter { it.kind==ShapeKind.ZONE && it.points.size>=3 }.map { zone ->
             val poly=factory.createPolygon((zone.points+zone.points.first()).map { org.locationtech.jts.geom.Coordinate(it.x,it.y) }.toTypedArray())
@@ -153,8 +161,8 @@ object RoutePlanning {
         val obstacleHoles=DockClearance.fit(obstacles,base).map { obstacle ->
             (0 until 64).map { i ->
                 val a=i*Math.PI*2/64
-                val radius=obstacle.exclusionRadiusM/kotlin.math.cos(Math.PI/64)
-                Point(obstacle.x+radius*kotlin.math.cos(a),obstacle.y+radius*kotlin.math.sin(a))
+                val radius=obstacle.exclusionRadiusM/cos(Math.PI/64)
+                Point(obstacle.x+radius*cos(a),obstacle.y+radius*sin(a))
             }
         }
         return navigation(map,RobotEnvelope.LUBA2.halfWidthM+0.05,
@@ -172,10 +180,10 @@ object RoutePlanning {
      * Base of the start if [base] is the same station ([fr.luba.poc.simulation.MissionCheckpoint.planningBase]): the
      * station observed when docking again no longer changes the resumed plan.
      */
-    fun resume(checkpoint: fr.luba.poc.simulation.MissionCheckpoint, map: RobotMap, base: MapBase, accesses: List<List<Point>>,
-        registered: List<LocalObstacle>, difficulties: fr.luba.poc.difficulty.DifficultyUi, config: SimConfig,
+    fun resume(checkpoint: MissionCheckpoint, map: RobotMap, base: MapBase, accesses: List<List<Point>>,
+        registered: List<LocalObstacle>, difficulties: DifficultyUi, config: SimConfig,
         recordedBoundary: Boolean = true, progress: (String) -> Unit = {}): MowingSimulation {
-        val avoidance = fr.luba.poc.simulation.MissionAvoidance.forResume(checkpoint, difficulties, registered)
+        val avoidance = MissionAvoidance.forResume(checkpoint, difficulties, registered)
         val planningBase = checkpoint.planningBase(base)
         val routes = mission(map, avoidance.planningObstacles(registered), accesses, planningBase, recordedBoundary, avoidance.avoidAreas)
         return MowingSimulation(routes, planningBase.point, checkpoint.preview, map, config.copy(returnPercent = checkpoint.returnPercent.toDouble(),
@@ -186,7 +194,7 @@ object RoutePlanning {
     fun physical(map: RobotMap,obstacles: List<LocalObstacle>,recordedBoundary: Boolean = true): TrajectoryPlanner =
         navigation(map,RobotEnvelope.LUBA2.halfWidthM+0.05,
             map.shapes.filter { it.excludes }.map { it.points } +
-                obstacles.map { fr.luba.poc.simulation.ObstacleBypass.circle(Point(it.x,it.y),it.radiusM) },
+                obstacles.map { ObstacleBypass.circle(Point(it.x,it.y),it.radiusM) },
             recordedBoundary=recordedBoundary)
 
     /**
@@ -195,7 +203,7 @@ object RoutePlanning {
      * Without it, the unlock under the collision lock (25) and the back-off after a contact were always refused off the map.
      */
     fun backOffPhysical(map: RobotMap,obstacles: List<LocalObstacle>,robot: Point,trail: List<Point>,recordedBoundary: Boolean = true): TrajectoryPlanner {
-        val corridors = fr.luba.poc.simulation.PointPlanner.trailCorridors(map,robot,trail)
+        val corridors = PointPlanner.trailCorridors(map,robot,trail)
         return physical(if(corridors.isEmpty()) map else map.copy(shapes=map.shapes+corridors),obstacles,recordedBoundary)
     }
 
@@ -221,7 +229,7 @@ object RoutePlanning {
         if(usable(p)) return p
         for(distance in listOf(0.1,0.2,0.3,0.45,0.6,0.8,1.0,1.5,2.0)) {
             (0 until 36).map { step -> val a=Math.toRadians(step*10.0)
-                Point(p.x+distance*kotlin.math.cos(a),p.y+distance*kotlin.math.sin(a)) }
+                Point(p.x+distance*cos(a),p.y+distance*sin(a)) }
                 .firstOrNull(::usable)?.let { return it }
         }
         return null
@@ -248,7 +256,8 @@ object RoutePlanning {
             position=path.last()
             incoming=path.zipWithNext().last { (a,b) -> a.distance(b)>1e-9 }.let { heading(it.first,it.second) }
         }
-        end?.let { result.add(MissionLeg(between(position!!,it,incoming,endHeading) ?: return null,false)) }
+        // After the loop the robot stands at the end of the last path (paths checked non-empty above).
+        end?.let { result.add(MissionLeg(between(paths.last().last(),it,incoming,endHeading) ?: return null,false)) }
         return result
     }
 }

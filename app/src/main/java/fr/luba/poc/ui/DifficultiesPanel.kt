@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
 import fr.luba.poc.difficulty.DifficultyKind
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.EncounterSheet
 import fr.luba.poc.map.MapExtraLayer
@@ -18,6 +19,9 @@ import fr.luba.poc.map.MapExtraLayers
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.UUID
 
 /**
  * Service → Obstacles: encountered obstacles (contacts with photo), presumed obstacles (repeated contacts) and the
@@ -29,7 +33,7 @@ internal fun DifficultiesGroup(robot: RobotBle, state: RobotUi) {
     val layers by MapExtraLayers.flow.collectAsState()
     var clearing by remember { mutableStateOf(false) }
     val active = ui.events.filter { !it.dismissed }
-    SettingsGroup(tr("Encountered obstacles and difficulties", "Obstacles rencontrés et difficultés")) {
+    SettingsGroup(title = tr("Encountered obstacles and difficulties", "Obstacles rencontrés et difficultés")) {
         if (active.isEmpty()) InfoNote(tr("No difficulty recorded: contacts, blockages, wheel slip, lifts and deviations " +
             "during autonomous moves are recorded here and on the map.", "Aucune difficulté consignée : contacts, blocages, patinage, soulèvements et écarts " +
             "pendant les déplacements autonomes s'inscrivent ici et sur la carte."))
@@ -49,7 +53,7 @@ internal fun DifficultiesGroup(robot: RobotBle, state: RobotUi) {
                     }
                     SecondaryPillButton(tr("Dismiss", "Écarter"), { robot.dismissPresumedObstacle(o.id) })
                     SecondaryPillButton(tr("Save", "Enregistrer"), {
-                        robot.saveObstacle(o.copy(id = java.util.UUID.randomUUID().toString(), label = tr("Encountered obstacle (${o.label.substringAfter("(").removeSuffix(")")})", "Obstacle rencontré (${o.label.substringAfter("(").removeSuffix(")")})")))
+                        robot.saveObstacle(o.copy(id = UUID.randomUUID().toString(), label = tr("Encountered obstacle (${o.label.substringAfter("(").removeSuffix(")")})", "Obstacle rencontré (${o.label.substringAfter("(").removeSuffix(")")})")))
                     })
                 }
             }
@@ -64,7 +68,7 @@ internal fun DifficultiesGroup(robot: RobotBle, state: RobotUi) {
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
                     if (photo != null) PhotoImage(photo, Modifier.width(80.dp).aspectRatio(4f / 3f), maxSide = 320)
                     Column(Modifier.weight(1f)) {
-                        Text(java.text.SimpleDateFormat("dd/MM HH:mm", fr.luba.poc.i18n.I18n.locale).format(java.util.Date(e.atMs)),
+                        Text(SimpleDateFormat("dd/MM HH:mm", I18n.locale).format(Date(e.atMs)),
                             style = MaterialTheme.typography.titleSmall)
                         val side = e.side?.takeIf { it != 0 }?.let { if (it > 0) tr(" · bypassed on the left", " · contourné par la gauche") else tr(" · bypassed on the right", " · contourné par la droite") }.orEmpty()
                         Text("${e.source.ifBlank { "contact" }} · ${Format.num(e.point.x, 1)} / ${Format.num(e.point.y, 1)} m$side" +
@@ -78,7 +82,7 @@ internal fun DifficultiesGroup(robot: RobotBle, state: RobotUi) {
         if (ui.events.isNotEmpty()) SecondaryPillButton(tr("Clear the difficulty log", "Effacer le journal des difficultés"), { clearing = true }, Modifier.fillMaxWidth())
     }
     // Settings kept apart from the data: use in routes, then display on the map.
-    SettingsGroup(tr("Use in routes", "Prise en compte dans les trajets")) {
+    SettingsGroup(title = tr("Use in routes", "Prise en compte dans les trajets")) {
         ToggleRow(tr("Avoid obstacles hit several times", "Éviter les obstacles rencontrés plusieurs fois"), ui.avoidPresumed, robot::setAvoidPresumedObstacles,
             subtitle = tr("Two or more contacts at the same place (less than 75 cm apart, separate moves): presumed obstacle, " +
                 "avoided by routes prepared afterwards like a saved obstacle (radius 0.2 m at least, margin 0.3 m).",
@@ -90,7 +94,7 @@ internal fun DifficultiesGroup(robot: RobotBle, state: RobotUi) {
                 "Lames arrêtées (départ, retour à la base, recharge), le trajet évite les zones rouges de la heatmap " +
                 "si le détour reste raisonnable (×1,5 + 4 m au plus). Les contournements d'obstacle évitent aussi les difficultés connues."))
     }
-    SettingsGroup(tr("Map layers", "Calques de la carte")) {
+    SettingsGroup(title = tr("Map layers", "Calques de la carte")) {
         MapExtraLayer.entries.forEach { layer ->
             ToggleRow(tr("“${layer.label}” layer", "Calque « ${layer.label} »"), layer in layers, { MapExtraLayers.toggle(layer) }, subtitle = layer.description)
         }

@@ -4,6 +4,8 @@ import fr.luba.poc.map.Point
 import fr.luba.poc.map.TrajectoryEnvelope
 import fr.luba.poc.simulation.PathFollower
 import fr.luba.poc.simulation.SimEdge
+import fr.luba.poc.simulation.SpeedCap
+import fr.luba.poc.simulation.SpeedReason
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -49,6 +51,33 @@ class LegRunnerTest {
         assertTrue(env.sent.any { it.startsWith("ROUTE_BLADES_1_OFF") })
         assertTrue(env.sent.any { it.startsWith("ROUTE_BLADES_2_ON") })
         assertTrue("progress reported", env.progresses.isNotEmpty() && env.progresses.last().index >= 2)
+    }
+
+    @Test fun slowedStretchesAndAFloatRtkLowerTheSetSpeed() {
+        val fast = robotAtStart()
+        assertEquals(LegOutcome.DONE, run(fast, spec().copy(speedPercent = 80)).outcome)
+        assertTrue("set speed reached: ${fast.maxLinearSeen}", fast.maxLinearSeen > 300)
+        val capped = robotAtStart()
+        val result = run(capped, spec().copy(speedPercent = 80, speedCaps = listOf(SpeedCap(0.0, 3.0, 50))))
+        assertEquals(result.text, LegOutcome.DONE, result.outcome)
+        assertTrue("half of 400 at most: ${capped.maxLinearSeen}", capped.maxLinearSeen <= 200)
+        val float = robotAtStart().also { it.rtkStatus = 5 }
+        assertEquals(LegOutcome.DONE, run(float, spec().copy(speedPercent = 80)).outcome)
+        assertTrue("RTK float: 60 % of 400 at most: ${float.maxLinearSeen}", float.maxLinearSeen <= 240)
+        // Switched off by the pilot: set speed everywhere, RTK float and slowed stretches included.
+        val off = robotAtStart().also { it.rtkStatus = 5 }
+        assertEquals(LegOutcome.DONE, run(off, spec().copy(speedPercent = 80, speedCaps = listOf(SpeedCap(0.0, 3.0, 50)), adaptiveSpeed = false)).outcome)
+        assertTrue("switched off: set speed reached: ${off.maxLinearSeen}", off.maxLinearSeen > 300)
+    }
+
+    @Test fun speedCapsTravelWithTheLegAndAnOlderPilotSendsNone() {
+        val caps = listOf(SpeedCap(0.0, 1.25, 60, SpeedReason.NARROW), SpeedCap(2.5, 3.0, 70, SpeedReason.INCIDENT))
+        val decoded = LegSpec.decode(spec().copy(speedCaps = caps).encode())
+        assertEquals("reason not sent, share kept", caps.map { it.copy(reason = null) }, decoded.speedCaps)
+        val older = spec().encode().let { it.copyOf(it.size - 2) }
+        assertTrue(LegSpec.decode(older).speedCaps.isEmpty())
+        assertTrue("older pilot: adaptive speed on", LegSpec.decode(older).adaptiveSpeed)
+        assertTrue(!LegSpec.decode(spec().copy(adaptiveSpeed = false).encode()).adaptiveSpeed)
     }
 
     @Test fun surveySamplesCarryThePhoneTiltForTheReliefLayers() {

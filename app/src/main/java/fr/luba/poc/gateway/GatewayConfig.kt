@@ -1,8 +1,16 @@
 package fr.luba.poc.gateway
 
 import android.content.Context
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.edit
 import fr.luba.poc.i18n.tr
+import java.security.SecureRandom
+import java.util.Locale
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** Phone role: direct link, gateway lying on the robot, or pilot going through the gateway. */
 enum class GatewayRole {
@@ -37,15 +45,15 @@ data class GatewayConfig(val role: GatewayRole = GatewayRole.OFF, val host: Stri
             val prefs = context.getSharedPreferences(PREFS, 0)
             var code = prefs.getString("code", null)
             if (code == null) {
-                code = "%06d".format(java.util.Locale.ROOT, java.security.SecureRandom().nextInt(1_000_000))
-                prefs.edit().putString("code", code).apply()
+                code = "%06d".format(Locale.ROOT, SecureRandom().nextInt(1_000_000))
+                prefs.edit { putString("code", code) }
             }
             val role = runCatching { GatewayRole.valueOf(prefs.getString("role", null) ?: "OFF") }.getOrDefault(GatewayRole.OFF)
             // Before 1.6.0 a single "code" served both sides: a pilot kept the gateway's code there, carried over once.
             val pilotCode = prefs.getString(PILOT_CODE, null) ?: (if (role == GatewayRole.CLIENT) code else "").also {
-                prefs.edit().putString(PILOT_CODE, it).apply()
+                prefs.edit { putString(PILOT_CODE, it) }
             }
-            return GatewayConfig(role = role, host = prefs.getString("host", "")!!, port = prefs.getInt("port", GatewayProtocol.PORT), code = code,
+            return GatewayConfig(role = role, host = prefs.getString("host", "") ?: "", port = prefs.getInt("port", GatewayProtocol.PORT), code = code,
                 pilotCode = pilotCode)
         }
 
@@ -62,22 +70,26 @@ data class GatewayConfig(val role: GatewayRole = GatewayRole.OFF, val host: Stri
          * ~8 %/h (versus ~1.5-2 %/h screen off). New key: the old implicit value (on) is not carried over.
          */
         fun keepScreen(context: Context) = context.getSharedPreferences(PREFS, 0).getBoolean(KEEP_SCREEN, false)
-        fun setKeepScreen(context: Context, value: Boolean) { context.getSharedPreferences(PREFS, 0).edit().putBoolean(KEEP_SCREEN, value).apply() }
+        fun setKeepScreen(context: Context, value: Boolean) { context.getSharedPreferences(PREFS, 0).edit { putBoolean(KEEP_SCREEN, value) } }
         private const val KEEP_SCREEN = "keepScreenOn"
         private const val PILOT_CODE = "pilotCode"
 
         fun saveRobot(context: Context, address: String?, name: String?) {
-            context.getSharedPreferences(PREFS, 0).edit().putString("robotAddress", address).putString("robotName", name).apply()
+            context.getSharedPreferences(PREFS, 0).edit { putString("robotAddress", address); putString("robotName", name) }
         }
 
-        private val saves = kotlinx.coroutines.flow.MutableStateFlow(0)
+        private val saves = MutableStateFlow(0)
         /** Incremented on every save: screens that depend on the role read the configuration again. */
-        val changes: kotlinx.coroutines.flow.StateFlow<Int> = saves
+        val changes: StateFlow<Int> = saves
 
         fun save(context: Context, value: GatewayConfig) {
-            context.getSharedPreferences(PREFS, 0).edit().putString("role", value.role.name).putString("host", value.host.trim())
-                .putInt("port", value.port).putString("code", value.code)
-                .putString(PILOT_CODE, value.pilotCode).apply()
+            context.getSharedPreferences(PREFS, 0).edit {
+                putString("role", value.role.name)
+                putString("host", value.host.trim())
+                putInt("port", value.port)
+                putString("code", value.code)
+                putString(PILOT_CODE, value.pilotCode)
+            }
             // Role possibly changed: silence keeping applied or released right away.
             SilenceKeeper.refresh()
             saves.value++
@@ -86,9 +98,9 @@ data class GatewayConfig(val role: GatewayRole = GatewayRole.OFF, val host: Stri
 }
 
 /** Role of this phone, read again whenever the gateway configuration is saved (role change, pairing). */
-@androidx.compose.runtime.Composable
+@Composable
 fun rememberGatewayRole(): GatewayRole {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val version = GatewayConfig.changes.collectAsState().value
-    return androidx.compose.runtime.remember(version) { GatewayConfig.read(context).role }
+    return remember(version) { GatewayConfig.read(context).role }
 }

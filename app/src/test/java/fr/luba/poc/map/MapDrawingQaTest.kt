@@ -3,17 +3,17 @@ package fr.luba.poc.map
 import fr.luba.poc.planning.CoverageEngine
 import fr.luba.poc.planning.PlanningConfig
 import fr.luba.poc.planning.PlanningRequest
-import fr.luba.poc.protocol.Commands
 import fr.luba.poc.proto.CommonProto.CommDataCouple
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlNavProto.*
+import fr.luba.poc.protocol.Commands
 import fr.luba.poc.simulation.TrajectoryPlanner
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import org.junit.Assert.*
+import org.junit.Test
 
 private const val QA_SQUARE = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><path d=\"M10 10H90V90H10Z\" fill=\"#111\"/></svg>"
 

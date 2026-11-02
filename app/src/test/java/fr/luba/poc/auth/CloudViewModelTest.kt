@@ -3,13 +3,14 @@ package fr.luba.poc.auth
 import android.app.Application
 import android.os.Looper
 import android.util.Base64
-import fr.luba.poc.auth.FakeMammotionServer.Companion.IOT
 import fr.luba.poc.auth.FakeMammotionServer.Companion.TOKEN_PATH
 import fr.luba.poc.auth.FakeMammotionServer.Companion.ok
 import fr.luba.poc.auth.FakeMammotionServer.Companion.session
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.LubaMsgProto.MsgCmdType
+import fr.luba.poc.proto.LubaMsgProto.MsgDevice
 import fr.luba.poc.proto.MctrlSysProto.*
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.channels.Channel
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,7 +22,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Account screen: sign-in, robots, reading and native return through the account, against a simulated HTTP cloud
@@ -43,12 +43,16 @@ class CloudViewModelTest {
 
     /** Local mode read by the model ([AccountMode] by default, false here). */
     private var localOnly = false
-    private fun model() = CloudViewModel(app, MammotionCloud(sessionStore, server.open), accounts, { localOnly }) { _, _ ->
+    /** Robots whose MQTT link the model opened, in order. */
+    private val linked = CopyOnWriteArrayList<CloudRobot>()
+    private fun model() = MammotionCloud(sessionStore, server.open).let { cloud ->
+        CloudViewModel(app, cloud, accounts, { localOnly }, AliyunCloud(cloud, { "seed-DEMO" }, server.open)) { robot, _ ->
+        linked += robot
         val events = Channel<CloudViewModel.CloudEvent>(64)
         synchronized(pendingEvents) { pendingEvents.forEach { events.trySend(CloudViewModel.CloudEvent.Proto(it)) }; pendingEvents.clear() }
         links += events
         CloudViewModel.MqttLink(events)
-    }
+    } }
     /** Report to receive as soon as the next MQTT connection opens. */
     private fun preload(vararg bytes: ByteArray) = synchronized(pendingEvents) { pendingEvents += bytes }
     private fun push(bytes: ByteArray) = assertTrue(links.last().trySend(CloudViewModel.CloudEvent.Proto(bytes)).isSuccess)
@@ -166,6 +170,44 @@ class CloudViewModelTest {
         assertFalse(owned.toString(), owned.toString().contains("SECRET") || owned.toString().contains("DEMO0000") || owned.toString().contains("a1FbaU4Bqk5"))
         assertEquals(2, owned.getJSONObject("fields").getInt("devices")); assertEquals(1, owned.getJSONObject("fields").getInt("missingFromPage"))
         assertEquals("a1", owned.getJSONObject("fields").getJSONArray("productKeyPrefixes").getString(0))
+    }
+
+    @Test fun `robot of the older Aliyun cloud listed and read through that cloud`() {
+        sessionStore.save(AliyunFakeCloud.session("AUTH-SAVED").toString())
+        server.json(devicesPath, ok(JSONObject().put("records", JSONArray()).put("total", 0)))
+        server.json(MammotionCloud.DEVICE_LIST, ok(JSONArray().put(JSONObject().put("iotId", "iot-DEMO-1").put("deviceName", "MA5000DEMO000001").put("deviceType", "LUBA"))))
+        AliyunFakeCloud.routes(server)
+        val vm = model()
+        vm.refresh()
+        until("Aliyun robots") { !vm.state.value.busy && vm.state.value.robots.isNotEmpty() }
+        // The RTK station of the binding list is not a robot.
+        assertEquals(listOf(CloudRobot("MA5000DEMO000001", "iot-DEMO-1", "a1FbaU4Bqk5", CloudKind.ALIYUN)), vm.state.value.robots)
+        assertEquals("1 LUBA dans le compte (ancien cloud Aliyun)", vm.state.value.status)
+        // Map reading: commands through the Aliyun invoke, LUBA 1 navigation to the main controller, never the Mammotion path.
+        vm.fetch(vm.state.value.robots.single())
+        until("Aliyun map request") { server.requests.any { it.path == "/thing/service/invoke" && it.body.contains("iot-DEMO-1") } && links.isNotEmpty() }
+        assertEquals(CloudKind.ALIYUN, linked.last().cloud)
+        assertTrue(server.requests.none { it.path == invokePath })
+        val commands = server.requests.filter { it.path == "/thing/service/invoke" }.map {
+            LubaMsg.parseFrom(Base64.decode(JSONObject(it.body).getJSONObject("params").getJSONObject("args").getString("content"), Base64.DEFAULT)) }
+        assertTrue(commands.filter { it.hasNav() }.all { it.rcver == MsgDevice.DEV_MAINCTL })
+        until("Aliyun steps logged") { logged("aliyun_devices").isNotEmpty() && logged("aliyun_step").size >= 7 }
+        val text = (logged("aliyun_step") + logged("aliyun_devices")).joinToString { it.toString() }
+        listOf("AUTH-", "SID-", "IOT-TOKEN", "DEVSECRET", "iot-DEMO", "MA5000DEMO").forEach { assertFalse(it, text.contains(it)) }
+        vm.logout()
+    }
+
+    @Test fun `Aliyun cloud unreachable keeps the older cloud explanation with the reason`() {
+        sessionStore.save(AliyunFakeCloud.session("AUTH-SAVED").toString())
+        server.json(devicesPath, ok(JSONObject().put("records", JSONArray()).put("total", 0)))
+        server.json(MammotionCloud.DEVICE_LIST, ok(JSONArray().put(JSONObject().put("iotId", "iot-DEMO-1").put("deviceName", "MA5000DEMO000001").put("deviceType", "LUBA"))))
+        AliyunFakeCloud.routes(server)
+        server.json("/account/createSessionByAuthCode", """{"code":2401,"message":"refreshToken invalid"}""")
+        val vm = model()
+        vm.refresh()
+        until("explanation") { !vm.state.value.busy && vm.state.value.status.startsWith("Votre LUBA est sur l'ancien cloud Mammotion (Aliyun)") }
+        assertTrue(vm.state.value.status, vm.state.value.status.contains("n'a pas pu être joint (code 2401 (/account/createSessionByAuthCode))"))
+        assertTrue(vm.state.value.robots.isEmpty())
     }
 
     @Test fun `empty device page and owned devices unreadable keep the current status, refused page names its endpoint`() {

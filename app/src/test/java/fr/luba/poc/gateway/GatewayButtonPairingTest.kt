@@ -1,9 +1,9 @@
 package fr.luba.poc.gateway
 
-import org.junit.Assert.*
-import org.junit.Test
 import java.net.ServerSocket
 import kotlin.concurrent.thread
+import org.junit.Assert.*
+import org.junit.Test
 
 /** ESP32 pairing by its PWR button: answer of GET /pair read, closed window and other gateways ignored. */
 class GatewayButtonPairingTest {

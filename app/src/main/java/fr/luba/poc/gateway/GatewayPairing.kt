@@ -1,6 +1,7 @@
 package fr.luba.poc.gateway
 
 import android.content.Context
+import android.os.Build
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -37,7 +38,7 @@ data class GatewayPairing(val host: String, val port: Int = GatewayProtocol.PORT
                 val index = part.indexOf('=')
                 if (index <= 0) null else part.substring(0, index).lowercase() to
                     runCatching { URLDecoder.decode(part.substring(index + 1), "UTF-8") }.getOrNull()
-            }.filter { it.second != null }.associate { it.first to it.second!! }
+            }.mapNotNull { (name, value) -> value?.let { name to it } }.toMap()
             val host = params["host"]?.trim()?.takeIf { HOSTNAME.matches(it) } ?: return null
             val port = (params["port"]?.toIntOrNull() ?: GatewayProtocol.PORT).takeIf { it in 1..65535 } ?: return null
             val code = params["code"]?.takeIf { it.matches(Regex("[0-9]{6}")) } ?: return null
@@ -48,7 +49,7 @@ data class GatewayPairing(val host: String, val port: Int = GatewayProtocol.PORT
         /** Pairing of the gateway running on this phone, for its QR code; null while its Wi-Fi address is unknown. */
         fun ofThisGateway(context: Context, address: String?): GatewayPairing? {
             val host = address?.takeIf { it.isNotBlank() } ?: return null
-            return GatewayPairing(host, GatewayProtocol.PORT, GatewayConfig.read(context).code, android.os.Build.MODEL.orEmpty())
+            return GatewayPairing(host, GatewayProtocol.PORT, GatewayConfig.read(context).code, Build.MODEL.orEmpty())
         }
 
         /** Pilot side: controls the robot through this gateway from now on (role, address, port and code saved). */

@@ -15,13 +15,12 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
@@ -33,9 +32,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34], qualifiers = "w412dp-h915dp-xxhdpi")
 class BorderTypeEditorTest {
     private val compose = createAndroidComposeRule<ComponentActivity>()
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { org.junit.Assume.assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private val zone = MapShape(1, 0, listOf(Point(0.0, 0.0), Point(20.0, 0.0), Point(20.0, 10.0), Point(0.0, 10.0)), "Pelouse")
     private val map = RobotMap(listOf(zone), true, "test")

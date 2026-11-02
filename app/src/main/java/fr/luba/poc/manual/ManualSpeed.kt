@@ -2,6 +2,7 @@ package fr.luba.poc.manual
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 
 /** Maximum speed for manual control (joystick), kept from one opening and one launch to the next. */
 object ManualSpeed {
@@ -18,7 +19,7 @@ object ManualSpeed {
 
     fun save(prefs: SharedPreferences, percent: Int) {
         val value = sanitize(percent)
-        if (prefs.getInt(KEY, Int.MIN_VALUE) != value) prefs.edit().putInt(KEY, value).apply()
+        if (prefs.getInt(KEY, Int.MIN_VALUE) != value) prefs.edit { putInt(KEY, value) }
     }
 
     fun sanitize(percent: Int): Int = percent.coerceIn(MIN_PERCENT, MAX_PERCENT)

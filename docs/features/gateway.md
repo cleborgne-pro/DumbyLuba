@@ -87,7 +87,10 @@ other gateway 192.168.0.187: Incorrect gateway code"). Previously, only the reje
 Wi-Fi (the ESP32, with its own code) was shown: "Incorrect gateway code" even though the code was right. A rejection
 from the saved gateway itself is still shown as is. If the last Wi-Fi level received from the gateway (less than
 15 min old) is below −70 dBm, the disconnection and reconnection messages mention it ("Gateway Wi-Fi −89 dBm: too
-weak, move the robot closer to the access point or add a repeater").
+weak, move the robot closer to the access point or add a repeater"). When the robot itself reported, within 30 s of
+that level, a Wi-Fi level at least 10 dB better, the message points to the gateway instead ("Gateway Wi-Fi −70 dBm
+while the robot gets −56 dBm at the same place: check the gateway's antenna and where it sits on the robot"; Fold
+test of 2026-11-02: the ESP32 got 10 to 15 dB less than the robot at the same places).
 
 ### Pairing QR code
 

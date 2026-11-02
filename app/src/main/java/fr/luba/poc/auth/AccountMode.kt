@@ -1,11 +1,13 @@
 package fr.luba.poc.auth
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.core.content.edit
+import fr.luba.poc.i18n.tr
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import fr.luba.poc.i18n.tr
 
 /**
  * Local mode (Me → Mammotion account): the app works without the Mammotion account. No request is sent to the
@@ -13,7 +15,7 @@ import fr.luba.poc.i18n.tr
  * map, camera, obstacle photo, native return without Bluetooth, firmware). Off by default; stored on the phone only.
  */
 object AccountMode {
-    private var prefs: android.content.SharedPreferences? = null
+    private var prefs: SharedPreferences? = null
     private val state = MutableStateFlow(false)
     val flow: StateFlow<Boolean> get() = state
     val localOnly: Boolean get() = state.value
@@ -27,7 +29,7 @@ object AccountMode {
 
     fun setLocalOnly(enabled: Boolean) {
         state.value = enabled
-        prefs?.edit()?.putBoolean(KEY, enabled)?.apply()
+        prefs?.edit { putBoolean(KEY, enabled) }
     }
 
     /** Local mode read in a composable (recomposed when it changes). */

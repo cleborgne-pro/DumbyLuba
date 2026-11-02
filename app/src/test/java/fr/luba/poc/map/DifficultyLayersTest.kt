@@ -4,9 +4,9 @@ import fr.luba.poc.camera.ObstaclePhoto
 import fr.luba.poc.difficulty.DifficultyEvent
 import fr.luba.poc.difficulty.DifficultyKind
 import fr.luba.poc.difficulty.DifficultyUi
+import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
-import java.io.File
 
 /** Encountered obstacles layer: photo linked to the contact, sheet opened on tap. */
 class DifficultyLayersTest {

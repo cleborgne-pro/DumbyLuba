@@ -122,6 +122,13 @@ adb start-server
 adb devices
 ```
 
+An adb server started by an agent (AgentDeck session) has no macOS Local Network access: `adb devices` stays empty
+and `adb connect IP:port` answers "No route to host" while the phone is on the Wi-Fi. `tools/deploy.sh` then finds the
+wireless debugging phones itself with `dns-sd` and connects each missing one through a local `nc` relay
+(`127.0.0.1:<port>`, `tools/adb-relay.sh`), stopped at the end of the deployment; it is skipped when `DEPLOY_SERIALS`
+names the devices. By hand, the same relay is
+`nc -l 127.0.0.1 <port> < fifo | nc <phone IP> <phone port> > fifo` then `adb connect 127.0.0.1:<port>`.
+
 During and after the session, from the computer:
 
 ```sh

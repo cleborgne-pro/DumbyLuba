@@ -1,10 +1,10 @@
 package fr.luba.poc.map
-import org.junit.Test
-import org.junit.Assert.*
-import fr.luba.poc.protocol.Commands
+import fr.luba.poc.proto.CommonProto.CommDataCouple
 import fr.luba.poc.proto.LubaMsgProto.*
 import fr.luba.poc.proto.MctrlNavProto.*
-import fr.luba.poc.proto.CommonProto.CommDataCouple
+import fr.luba.poc.protocol.Commands
+import org.junit.Assert.*
+import org.junit.Test
 class MapTest {
     private val zone=listOf(Point(0.0,0.0),Point(10.0,0.0),Point(10.0,8.0),Point(0.0,8.0))
     @Test fun `refuses a link crossing an exclusion`() {
@@ -13,16 +13,16 @@ class MapTest {
         assertTrue(Geometry.safe(Point(1.0,1.0),Point(9.0,1.0),zone,listOf(hole),0.5))
     }
     @Test fun `all computed segments respect boundaries and exclusions`() {
-        val m=Geometry.demo();val z=m.shapes[0].points;val h=listOf(m.shapes[1].points)
+        val m=Geometry.demo(); val z=m.shapes[0].points; val h=listOf(m.shapes[1].points)
         val p=Geometry.plan(z,h)
         assertTrue(p.meters>0)
         p.runs.forEach { run -> run.zipWithNext().forEach { (a,b)->assertTrue(Geometry.safe(a,b,z,h,0.6)) } }
     }
     @Test fun `no route in a zone that is too small`() {
-        try {Geometry.plan(listOf(Point(0.0,0.0),Point(0.2,0.0),Point(0.2,0.2)),emptyList());fail()}catch(_:IllegalArgumentException){}
+        try {Geometry.plan(listOf(Point(0.0,0.0),Point(0.2,0.0),Point(0.2,0.2)),emptyList()); fail()}catch(_:IllegalArgumentException){}
     }
     @Test fun `read-only map request matches upstream`() {
-        val c=Commands();val msg=LubaMsg.parseFrom(c.mapData(42))
+        val c=Commands(); val msg=LubaMsg.parseFrom(c.mapData(42))
         assertEquals(MsgCmdType.MSG_CMD_TYPE_NAV,msg.msgtype)
         assertEquals(MsgDevice.DEV_NAVIGATION,msg.rcver)
         // LUBA 1: same request, addressed to the main controller (PyMammotion get_msg_device).
@@ -33,7 +33,7 @@ class MapTest {
     }
     private fun msg(n:MctlNav)=LubaMsg.newBuilder().setNav(n).build()
     @Test fun `does not publish a partial boundary and deduplicates frames`() {
-        val t=MapTransfer();val c=Commands()
+        val t=MapTransfer(); val c=Commands()
         val root=NavGetHashListAck.newBuilder().setTotalFrame(1).setCurrentFrame(1).addDataCouple(42).build()
         val requests=t.accept(msg(MctlNav.newBuilder().setToappGethashAck(root).build()),c)
         assertEquals(3,requests.size)
@@ -49,7 +49,7 @@ class MapTest {
         assertEquals(listOf(Point(1.0,2.0),Point(2.0,2.0)),t.snapshot().shapes.single().points)
     }
     @Test fun `rectangular no-go zone of a Luba 3 completes the map as an exclusion`() {
-        val t=MapTransfer();val c=Commands()
+        val t=MapTransfer(); val c=Commands()
         t.accept(msg(MctlNav.newBuilder().setToappGethashAck(NavGetHashListAck.newBuilder().setTotalFrame(1).setCurrentFrame(1).addDataCouple(42)).build()),c)
         fun pt(x:Float,y:Float)=CommDataCouple.newBuilder().setX(x).setY(y)
         t.accept(msg(MctlNav.newBuilder().setToappGetCommondataAck(NavGetCommDataAck.newBuilder().setHash(42).setType(23).setAction(8).setTotalFrame(1).setCurrentFrame(1)
@@ -61,7 +61,7 @@ class MapTest {
     }
     @Test fun `vision zones of a Luba 2 AWD X complete the map`() {
         // Issue DumbyLuba#1 (Luba-VP, firmware 1.30.31.19): 4 zones, 3 no-go, 4 passages and 11 rectangles of type 25.
-        val t=MapTransfer();val c=Commands()
+        val t=MapTransfer(); val c=Commands()
         t.accept(msg(MctlNav.newBuilder().setToappGethashAck(NavGetHashListAck.newBuilder().setTotalFrame(1).setCurrentFrame(1).addDataCouple(41).addDataCouple(42).addDataCouple(43)).build()),c)
         fun pt(x:Float,y:Float)=CommDataCouple.newBuilder().setX(x).setY(y)
         fun frame(hash:Long,type:Int)=NavGetCommDataAck.newBuilder().setHash(hash).setType(type).setAction(8).setTotalFrame(1).setCurrentFrame(1)

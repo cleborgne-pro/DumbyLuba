@@ -86,4 +86,6 @@ Code: `app/src/main/java/fr/luba/poc/weather/`. The animated radar panel of 0.25
 - **Service → Rain and weather**: decision and reason, the last 7 radar images analyzed, estimated movement, forecast, grass state, "Rain sensor: not read yet", Settings (Garden position, "Monitor rain" switch, Refresh now).
 - **Network**: radar refreshed every 5 min while monitoring is active (≈ 1 KB of list + a few radar tiles per new image), forecast every 15 min, hourly weather (wet grass) every hour. Only the garden's coordinates (4 decimal places) are sent to Open-Meteo; RainViewer only receives tile numbers. Requests identify themselves as "DumbyLuba" with the app version.
 
-Still to do: decoding the rain sensor (`RainStateCfg`), calibrating thresholds on real showers, then, after validation, automatic suspension and return.
+- **Automatic return** (2026-11-02, `RainReturn`, `ble/RainReturnRunner.kt`, off by default): on **Rain**, a mowing stops and returns to the base like at the end of the working hours; it resumes by itself once the decision is **Dry** and the robot has waited 30 min on the base, at most twice per mowing, never on stale weather, given up after 6 h ([user view](features/rain-and-weather.md#return-to-base-on-confirmed-rain)).
+
+Still to do: decoding the rain sensor (`RainStateCfg`), calibrating thresholds on real showers, then switching the automatic return on by default.

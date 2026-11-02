@@ -2,6 +2,7 @@ package fr.luba.poc.obstacles
 
 import fr.luba.poc.diagnostics.MapNavFollower
 import fr.luba.poc.diagnostics.MapNavPlan
+import fr.luba.poc.diagnostics.TestResult
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.CoveragePlanner
 import fr.luba.poc.map.Geometry
@@ -11,6 +12,8 @@ import fr.luba.poc.map.RecordedBoundary
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
 import fr.luba.poc.map.kind
+import fr.luba.poc.planning.RoutePlanning
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -44,7 +47,7 @@ data class BorderFrontalPlan(
 ) {
     init {
         require(contact.x.isFinite() && contact.y.isFinite() && passEndM.isFinite() && passEndM > 0) { tr("Invalid frontal test", "Essai frontal invalide") }
-        require(kotlin.math.abs(sqrt(normalX * normalX + normalY * normalY) - 1.0) < 1e-6) { tr("Non-unit normal", "Normale non unitaire") }
+        require(abs(sqrt(normalX * normalX + normalY * normalY) - 1.0) < 1e-6) { tr("Non-unit normal", "Normale non unitaire") }
     }
 
     private fun along(distance: Double) = Point(contact.x + normalX * distance, contact.y + normalY * distance)
@@ -184,10 +187,10 @@ object BorderFrontal {
         lineFailure(map, plan, obstacles)?.let { error(it) }
         // Robot already at the entry point: direct straight line up to the start of the slow advance.
         if (start.distance(plan.entry) <= MapNavFollower.ARRIVAL_M) {
-            val direct = fr.luba.poc.planning.RoutePlanning.point(map, start, plan.approach, obstacles)
+            val direct = RoutePlanning.point(map, start, plan.approach, obstacles)
             return direct.copy(labels = direct.labels.dropLast(1) + APPROACH_LABEL)
         }
-        val base = fr.luba.poc.planning.RoutePlanning.point(map, start, plan.entry, obstacles)
+        val base = RoutePlanning.point(map, start, plan.entry, obstacles)
         val points = base.points + plan.approach
         val routes = requireNotNull(base.routes) { tr("Plan without physical surface", "Plan sans surface physique") }
         try { routes.requirePath(points) }
@@ -207,7 +210,7 @@ object BorderFrontal {
         val parts = mutableListOf<String>()
         passEndFrontGap?.let { parts += tr("end of pass: bumper %.0f cm from the outline (planned %.0f cm)", "bout de passe : pare-chocs à %.0f cm du contour (prévu %.0f cm)").format(it * 100, plan.plannedFrontGapM * 100) }
         edgeFrontGap?.let { edge ->
-            parts += tr("edge %.0f cm %s", "bord à %.0f cm %s").format(kotlin.math.abs(edge) * 100, if (edge >= 0) tr("before the outline", "avant le contour") else tr("beyond the outline", "au-delà du contour"))
+            parts += tr("edge %.0f cm %s", "bord à %.0f cm %s").format(abs(edge) * 100, if (edge >= 0) tr("before the outline", "avant le contour") else tr("beyond the outline", "au-delà du contour"))
             // Actual end-of-pass reserve: planned bumper distance to the outline minus the observed edge offset.
             val reserve = plan.plannedFrontGapM - edge
             val pivot = plan.plannedPivotGapM - edge
@@ -253,5 +256,5 @@ data class BorderFrontalUi(
     val edgeFrontGapM: Double? = null,
     /** Bumper to outline during the advance (published position, 1 Hz). */
     val liveFrontGapM: Double? = null,
-    val results: List<fr.luba.poc.diagnostics.TestResult> = emptyList(),
+    val results: List<TestResult> = emptyList(),
 )

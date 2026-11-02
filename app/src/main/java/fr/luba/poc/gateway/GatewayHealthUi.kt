@@ -8,8 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -44,9 +44,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.luba.poc.BuildConfig
+import fr.luba.poc.Clock
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.KeyValueRow
@@ -57,6 +61,9 @@ import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.EyebrowStyle
 import fr.luba.poc.ui.theme.MammotionColors
 import fr.luba.poc.ui.theme.NumericStyle
+import fr.luba.poc.update.UpdateCheck
+import java.util.Locale
+import kotlinx.coroutines.delay
 
 /** Wi-Fi signal actually measured: Android reports -127 dBm when it is unknown (no link, not yet measured). */
 val GatewayHealth.wifiKnown: Boolean get() = wifiRssiDbm in -126..-1
@@ -91,16 +98,16 @@ fun rememberPilotGatewayReach(pilot: Boolean): GatewayReach? {
 
 @Composable
 private fun rememberClock(): Long {
-    val now by produceState(System.currentTimeMillis()) { while (true) { kotlinx.coroutines.delay(2_000); value = System.currentTimeMillis() } }
+    val now by produceState(Clock.now()) { while (true) { delay(2_000); value = Clock.now() } }
     return now
 }
 
 /** Health of THIS phone, re-read every 5 s (display on the gateway itself). */
 @Composable
 fun rememberLocalGatewayHealth(): GatewayHealth {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val health by produceState(remember { GatewayHealthReader.read(context) }) {
-        while (true) { kotlinx.coroutines.delay(GatewayProtocol.HEALTH_MS); value = GatewayHealthReader.read(context) }
+        while (true) { delay(GatewayProtocol.HEALTH_MS); value = GatewayHealthReader.read(context) }
     }
     return health
 }
@@ -109,22 +116,22 @@ fun rememberLocalGatewayHealth(): GatewayHealth {
 @Composable
 fun GatewayHealthDetails(health: GatewayHealth?, title: String = tr("Gateway health", "Santé de la passerelle"), reach: GatewayReach? = null,
     version: String? = null) {
-    SettingsGroup(title) {
+    SettingsGroup(title = title) {
         version?.let { gateway ->
-            KeyValueRow(tr("Version", "Version"), tr("gateway $gateway · this phone ${fr.luba.poc.BuildConfig.VERSION_NAME}",
-                "passerelle $gateway · ce téléphone ${fr.luba.poc.BuildConfig.VERSION_NAME}"))
+            KeyValueRow(tr("Version", "Version"), tr("gateway $gateway · this phone ${BuildConfig.VERSION_NAME}",
+                "passerelle $gateway · ce téléphone ${BuildConfig.VERSION_NAME}"))
             versionNote(gateway)?.let { InfoNote(it) }
             // Gateway phone older than the latest GitHub release (last check of this phone, Me → About).
-            val update by fr.luba.poc.update.UpdateCheck.flow.collectAsState()
-            fr.luba.poc.update.UpdateCheck.gatewayNote(gateway, update.latest)?.let { InfoNote(it) }
+            val update by UpdateCheck.flow.collectAsState()
+            UpdateCheck.gatewayNote(gateway, update.latest)?.let { InfoNote(it) }
         }
         if (health == null) {
-            StatusNote(gatewayReachText(reach), if (reach?.reachable == false) NoteTone.WARNING else NoteTone.INFO)
+            StatusNote(gatewayReachText(reach), tone = if (reach?.reachable == false) NoteTone.WARNING else NoteTone.INFO)
             return@SettingsGroup
         }
         GatewayHealthTiles(health)
         GatewayStatePills(health)
-        health.warnings().forEach { StatusNote(it.replaceFirstChar(Char::uppercase), NoteTone.WARNING) }
+        health.warnings().forEach { StatusNote(it.replaceFirstChar(Char::uppercase), tone = NoteTone.WARNING) }
     }
 }
 
@@ -149,7 +156,7 @@ fun gatewayReachText(reach: GatewayReach?): String = when {
  * Different app versions on the two phones: they still work together (same protocol), but fixes on one side only.
  * Null when both run the same version.
  */
-fun versionNote(gateway: String, pilot: String = fr.luba.poc.BuildConfig.VERSION_NAME): String? = if (gateway == pilot) null else tr(
+fun versionNote(gateway: String, pilot: String = BuildConfig.VERSION_NAME): String? = if (gateway == pilot) null else tr(
     "Different app versions ($gateway on the gateway, $pilot here): compatible, but install the same version on both phones to get the same fixes.",
     "Versions différentes ($gateway sur la passerelle, $pilot ici) : compatibles, mais installez la même version sur les deux téléphones pour bénéficier des mêmes corrections.")
 
@@ -185,9 +192,10 @@ private fun SignalQuality.tone(): Color = when (this) {
 
 /** Four rising bars, [bars] of them lit in [color] (signal strength). */
 @Composable
-fun SignalBars(bars: Int, color: Color, modifier: Modifier = Modifier.size(width = 18.dp, height = 14.dp)) {
+fun SignalBars(bars: Int, color: Color, modifier: Modifier = Modifier) {
     val off = MammotionColors.Hairline
-    Canvas(modifier) {
+    // Default size: a size given by the caller comes first and wins.
+    Canvas(modifier.size(width = 18.dp, height = 14.dp)) {
         val gap = size.width * 0.12f
         val w = (size.width - gap * 3) / 4
         for (i in 0 until 4) {
@@ -248,7 +256,7 @@ object GatewayHealthText {
 
 /** One decimal in the interface language (decimal comma in French). */
 private object MowingNum {
-    fun one(v: Double): String = String.format(if (fr.luba.poc.i18n.I18n.french) java.util.Locale.FRANCE else java.util.Locale.ENGLISH, "%.1f", v)
+    fun one(v: Double): String = String.format(if (I18n.french) Locale.FRANCE else Locale.ENGLISH, "%.1f", v)
 }
 
 /** Compact measure: icon (or bars) and value on one line, label below. */

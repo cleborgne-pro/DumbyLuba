@@ -3,7 +3,10 @@ package fr.luba.poc.planning
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.RobotEnvelope
+import fr.luba.poc.simulation.MapBase
 import java.security.MessageDigest
+import kotlin.math.abs
+import kotlin.math.atan2
 
 /** Metric software contract, distinct from an authorisation to control the robot. */
 enum class PlannerStrategy { BASELINE, OPTIMIZED, EXPERIMENTAL_BCD, EXPERIMENTAL_JOINT, EXPERIMENTAL_LNS, ADVANCED }
@@ -29,15 +32,18 @@ data class PlanningConfig(val spacingM: Double = 0.25, val marginM: Double = 0.6
     /** Cell of the mowed-surface measurement; 0 = exact vector oracle (tests, ablations). */
     val coverageCellM: Double = 0.02,
     /** Margin between the robot side and the recorded outline (outer side of the chassis) for the outer loop. */
-    val outerOffsetM: Double = fr.luba.poc.map.CoveragePlanner.RECORDED_OUTER_OFFSET_M,
+    val outerOffsetM: Double = CoveragePlanner.RECORDED_OUTER_OFFSET_M,
     /** U-turns between the passes ([fr.luba.poc.map.TurnOptimizer]). */
-    val turnStyle: fr.luba.poc.map.TurnStyle = fr.luba.poc.map.TurnStyle.FAST,
+    val turnStyle: TurnStyle = TurnStyle.FAST,
     /** Direction of the passes of the straight-row modes ([fr.luba.poc.map.usesOrientation]). */
     val orientation: OrientationMode = OrientationMode.AUTOMATIC,
     /** Angle of [OrientationMode.MANUAL]: direction of the passes, counter-clockwise from the map's x axis. */
     val manualAngleDeg: Int = 0,
     /** Spiral mode: chains driven from the edge inwards or from the centre outwards ([fr.luba.poc.map.SpiralDirection]). */
-    val spiralDirection: fr.luba.poc.map.SpiralDirection = fr.luba.poc.map.SpiralDirection.FROM_EDGE) {
+    val spiralDirection: SpiralDirection = SpiralDirection.FROM_EDGE,
+    /** Zamboni: oblique U-turns along the slanted borders ([fr.luba.poc.map.TurnOptimizer.OBLIQUE_UNSWEPT_M]); off only for
+     * the fallback of [CoverageEngine.planPattern]. */
+    val zamboniObliqueTurns: Boolean = true) {
     init {
         require(listOf(spacingM,marginM,cutWidthM,speedMps,turnDegreesPerSecond).all { it.isFinite() && it > 0 })
         require(spacingM >= 0.05 && marginM >= 0.3 && cutWidthM <= 2)
@@ -45,7 +51,7 @@ data class PlanningConfig(val spacingM: Double = 0.25, val marginM: Double = 0.6
         require(stopSeconds.isFinite() && stopSeconds >= 0 && uncertaintyM.isFinite() && uncertaintyM >= 0)
         require(borderPasses in 0..20 && noGoPasses in 0..20 && candidateBudget in 1..64 && localSearchBudget in 0..256)
         require(coverageCellM.isFinite() && coverageCellM in 0.0..0.1)
-        require(outerOffsetM.isFinite() && outerOffsetM in 0.0..fr.luba.poc.map.CoveragePlanner.MAX_OUTER_OFFSET_M) { tr("Outer loop inset out of range 0–1 m", "Retrait du tour extérieur hors plage 0–1 m") }
+        require(outerOffsetM.isFinite() && outerOffsetM in 0.0..CoveragePlanner.MAX_OUTER_OFFSET_M) { tr("Outer loop inset out of range 0–1 m", "Retrait du tour extérieur hors plage 0–1 m") }
         require(verifiedMaxSlopeDegrees == null || verifiedMaxSlopeDegrees.isFinite() && verifiedMaxSlopeDegrees in 0.0..89.0)
         require(manualAngleDeg in 0..179) { tr("Manual angle out of range 0–179°", "Angle manuel hors plage 0–179°") }
     }
@@ -55,7 +61,7 @@ data class PlanningObstacle(val center: Point, val radiusM: Double)
 data class SlopeRegion(val polygon: List<Point>, val degrees: Double)
 /** Saved local accesses and station axis: same context for the score and the simulation. */
 data class PlanningNavigation(val accesses: List<List<Point>> = emptyList(),
-    val base: fr.luba.poc.simulation.MapBase? = null)
+    val base: MapBase? = null)
 data class PlanningRequest(val map: RobotMap, val zoneIds: List<Long>, val start: Point,
     val startHeading: Double? = null, val config: PlanningConfig = PlanningConfig(),
     val robot: RobotEnvelope = RobotEnvelope.LUBA2,
@@ -88,8 +94,8 @@ data class PlanningRequest(val map: RobotMap, val zoneIds: List<Long>, val start
 }
 internal fun stableHash(value: String): String = MessageDigest.getInstance("SHA-256")
     .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-internal fun heading(a: Point,b: Point) = Math.toDegrees(kotlin.math.atan2(b.y-a.y,b.x-a.x))
-internal fun angleDifference(a: Double,b: Double) = kotlin.math.abs(((b-a)%360+540)%360-180)
+internal fun heading(a: Point,b: Point) = Math.toDegrees(atan2(b.y-a.y,b.x-a.x))
+internal fun angleDifference(a: Double,b: Double) = abs(((b-a)%360+540)%360-180)
 internal fun length(path: List<Point>) = path.zipWithNext().sumOf { (a,b) -> a.distance(b) }
 data class MissionLeg(val path: List<Point>, val cutting: Boolean)
 data class MissionMetrics(val distanceM: Double, val transitM: Double, val uTurns: Int,

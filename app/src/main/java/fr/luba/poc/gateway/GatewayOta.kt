@@ -1,6 +1,7 @@
 package fr.luba.poc.gateway
 
 import android.content.Context
+import androidx.core.content.edit
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
@@ -26,7 +27,7 @@ object GatewayOta {
         context.getSharedPreferences(PREFS, 0).getBoolean(KEY, false).also { duringMowing = it }
 
     fun set(context: Context, value: Boolean) {
-        context.getSharedPreferences(PREFS, 0).edit().putBoolean(KEY, value).apply()
+        context.getSharedPreferences(PREFS, 0).edit { putBoolean(KEY, value) }
         update(value)
     }
 

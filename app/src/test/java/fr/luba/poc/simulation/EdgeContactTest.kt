@@ -1,14 +1,14 @@
 package fr.luba.poc.simulation
 
-import fr.luba.poc.map.Point
 import fr.luba.poc.map.MapShape
+import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.obstacles.RobotEnvelope
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import org.junit.Assert.*
+import org.junit.Test
 
 /**
  * Contact at the border of the task area ([EdgeContact]): limit (back-off and resume), object at the edge (tighter

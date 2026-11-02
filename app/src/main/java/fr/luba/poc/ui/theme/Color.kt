@@ -59,7 +59,6 @@ data class LubaColors(
     val RobotHalo: Color,
     val RobotMarker: Color,
 
-
     // Floating surfaces above the map (overlays, legend, progress).
     val Overlay: Color,
 

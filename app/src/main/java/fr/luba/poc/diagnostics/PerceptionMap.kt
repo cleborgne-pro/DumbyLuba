@@ -21,7 +21,7 @@ class PerceptionMapFrame(
 /** Format and size read from the image header, without decoding it (JVM-testable; the display decodes it). */
 object PerceptionImage {
     data class Info(val format: String, val width: Int?, val height: Int?, val bytes: Int) {
-        val label: String get() = if (width != null && height != null) "$format ${width}×$height · $bytes B" else "$format · $bytes B"
+        val label: String get() = if (width != null && height != null) "$format $width×$height · $bytes B" else "$format · $bytes B"
     }
 
     fun info(b: ByteArray): Info {

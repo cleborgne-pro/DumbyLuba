@@ -6,17 +6,20 @@ import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.*
 import androidx.lifecycle.ViewModelProvider
+import fr.luba.poc.Clock
 import fr.luba.poc.MainActivity
 import fr.luba.poc.ble.RobotBle
+import fr.luba.poc.commitNow
 import fr.luba.poc.i18n.tr
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import fr.luba.poc.simulation.BaseStore
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.io.File
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
  data class RelayStatus(val running: Boolean = false, val message: String = tr("Relay stopped", "Relais arrêté"), val lastSentAt: Long? = null, val serverUrl: String = "")
 
@@ -81,15 +84,15 @@ class RelayService : Service() {
                 if (pending == null) {
                     val state = robot.state.value
                     val sequence = prefs.getLong("sequence", 0) + 1
-                    check(prefs.edit().putLong("sequence", sequence).commit()) { tr("Counter not saved", "Compteur non sauvegardé") }
-                    pending = RelaySnapshot.capture(state, fr.luba.poc.simulation.BaseStore(this, state.robotMap).read(),
-                        config.id, sequence, System.currentTimeMillis()).toString()
+                    check(prefs.commitNow { putLong("sequence", sequence) }) { tr("Counter not saved", "Compteur non sauvegardé") }
+                    pending = RelaySnapshot.capture(state, BaseStore(this, state.robotMap).read(),
+                        config.id, sequence, Clock.now()).toString()
                     outbox.write(pending)
                 }
                 transmit(config, pending)
                 if (!scope.isActive || !accepting) break
                 outbox.acknowledge()
-                mutable.value = mutable.value.copy(message = tr("Information sent to the server", "Informations transmises au serveur"), lastSentAt = System.currentTimeMillis())
+                mutable.value = mutable.value.copy(message = tr("Information sent to the server", "Informations transmises au serveur"), lastSentAt = Clock.now())
                 pending = null
             } catch (error: Exception) {
                 if (!scope.isActive || !accepting) break

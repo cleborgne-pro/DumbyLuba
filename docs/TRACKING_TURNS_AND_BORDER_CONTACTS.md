@@ -80,7 +80,7 @@ Same building blocks as today, no new motion code:
    surface) **raised to at least 0.30 m** (`CollisionLatch.UNLOCK_BACK_OFF_M`) when the lock is up; if the trail is
    ahead of the robot (after a pivot, 19/10 case) the existing straight escape ahead / blind 30 cm back-off applies.
 3. `awaitCollisionLatchCleared` (existing), then the blades-OFF link of `DriftRecovery.plan` (same-spot skip
-   `driftStreak x 1.0 m`, `ENTRY_OFFSETS_M` up to 4 m).
+   `driftStreak x 1.0 m`, cheapest entry within `REJOIN_WINDOW_M` = 1 m, then `ENTRY_OFFSETS_M` up to 4 m).
 4. No `contactObstacle`, no `discovered`/`plannedObstacles`, no `bypassCount++` (separate counter
    `edgeContacts`, max **4** per mission, then stop kept), no photo hold, no teach proposal (`proposeRouteCollision`
    skipped when the heading test of 2.1 is met).

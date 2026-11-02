@@ -7,6 +7,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.SystemClock
 import fr.luba.poc.map.PhoneGravity
+import kotlin.math.exp
 
 /**
  * Accelerometer of the gateway phone lying on the robot, smoothed over about one second (vibrations, robot
@@ -41,7 +42,7 @@ class GravityFilter(private val tauMs: Double = 1000.0, private val maxAgeMs: Lo
         if (!ax.isFinite() || !ay.isFinite() || !az.isFinite()) return
         if (at == Long.MIN_VALUE || timeMs - at > maxAgeMs) { x = ax; y = ay; z = az }
         else {
-            val k = (1 - kotlin.math.exp(-(timeMs - at).coerceAtLeast(0) / tauMs))
+            val k = (1 - exp(-(timeMs - at).coerceAtLeast(0) / tauMs))
             x += k * (ax - x); y += k * (ay - y); z += k * (az - z)
         }
         at = timeMs

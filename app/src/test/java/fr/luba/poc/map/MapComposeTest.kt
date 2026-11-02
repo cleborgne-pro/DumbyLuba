@@ -9,30 +9,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.click
 import androidx.compose.ui.unit.dp
 import fr.luba.poc.difficulty.DifficultyEvent
 import fr.luba.poc.difficulty.DifficultyKind
 import fr.luba.poc.difficulty.DifficultyUi
 import fr.luba.poc.obstacles.ObstacleKind
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Map view logic exercised through the interface: route preview (estimated duration, start chosen with a tap, zoom),
@@ -41,11 +40,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w412dp-h915dp-xxhdpi")
 class MapComposeTest {
-    // The test activity (ui-test-manifest) only exists in debug.
     private val compose = createAndroidComposeRule<ComponentActivity>()
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { org.junit.Assume.assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private val zone = MapShape(1, 0, listOf(Point(0.0, 0.0), Point(20.0, 0.0), Point(20.0, 10.0), Point(0.0, 10.0)), "Pelouse")
     private val map = RobotMap(listOf(zone), true, "test")

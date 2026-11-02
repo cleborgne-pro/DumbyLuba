@@ -1,9 +1,9 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.protocol.Telemetry
+import java.nio.file.Files
 import org.junit.Assert.*
 import org.junit.Test
-import java.nio.file.Files
 
 class LastKnownPositionTest {
     /** [status]: `rtk.status` (4 = FIX); pos_level at 1 as on the real robot in FIX. */

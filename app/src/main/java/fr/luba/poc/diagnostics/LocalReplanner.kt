@@ -4,9 +4,9 @@ import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.*
 import fr.luba.poc.simulation.ShortestRoutes
+import kotlin.math.*
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
-import kotlin.math.*
 
 /** Repairs only the remaining prefix; no exit from the reserve, no reversing, no blind resume. */
 object LocalReplanner {

@@ -7,7 +7,7 @@ obstacles and signal surveys. Every mowing, every route and every survey starts 
 |---|---|
 | **Access** | Home → **MY MAP** tile, robot photo or **Start mowing** (**Follow mowing** while a task runs); Me → account map |
 | **Status** | Implemented: BLE and cloud reading, local cache, local corrections (0.60.0), DumbyLuba zones and passages recorded by driving (1.4.0) |
-| **Code** | `map/MapScreen.kt` (with `MapScreenState.kt`, `MapRouteCanvas.kt`, `MapPanels.kt`, `MapSheetsHost.kt`, `MowingTaskPages.kt`, `MapSignals.kt`), `MapSettingsSheet.kt`, `MapLayerBar.kt`, `MapDisplay.kt`, `MapFx.kt`, `MapFollow.kt`, `MapCompass.kt`, `MapOverlayLayout.kt`, `MapCorrections.kt`, `MapCorrectionEditor.kt`, `MapCorrectionTools.kt`, `MapCorrectionStore.kt`, `DrivenRecording.kt`, `MapTransfer.kt`, `MapCache.kt`, `StationReader.kt`, `LastKnownPosition.kt`, `MapObstacles.kt`, `MapLive.kt`, `MapRobot.kt`, `simulation/BaseStore.kt` |
+| **Code** | `map/MapScreen.kt` (with `MapScreenState.kt`, `MapRouteCanvas.kt`, `MapPanels.kt`, `MapSheetsHost.kt`, `MowingTaskPages.kt`, `MapSignals.kt`), `MapSettingsSheet.kt`, `MapLayerBar.kt`, `MapDisplay.kt`, `MapFx.kt`, `MapFollow.kt`, `MapCompass.kt`, `MapOverlayLayout.kt`, `MapCorrections.kt`, `MapCorrectionEditor.kt`, `MapCorrectionPanels.kt`, `MapCorrectionTools.kt`, `MapCorrectionStore.kt`, `DrivenRecording.kt`, `MapTransfer.kt` (driven by `ble/RobotMapReader.kt`), `MapCache.kt`, `StationReader.kt`, `LastKnownPosition.kt`, `MapObstacles.kt`, `MapLive.kt`, `MapRobot.kt`, `simulation/BaseStore.kt` |
 | **Reference** | [Map reading and test procedure](../MAP_PREVIEW_TEST.md) |
 
 <p align="center">
@@ -114,7 +114,8 @@ receiver only, at most 40 per reading), and the counts per kind in `map_hash_lis
   flagged "Simulated". Without a survey, the bar shows "No survey" and its icon opens the heatmap history
   ([signal surveys](signal-surveys-and-terrain.md)). At the head of the bar, two toggles independent of the signal:
   **Obstacles** (bumper contacts with a photo, presumed obstacles; tapping a contact opens its card, where you pick
-  the exclusion size before saving the obstacle; tapping a saved obstacle opens its exclusion size, which can be
+  the exclusion size before saving the obstacle; tapping a presumed obstacle opens its card, to save it with a size or
+  dismiss it, and the presumed obstacles avoided by routes stay drawn with the layer off, as in the mowing preview; tapping a saved obstacle opens its exclusion size, which can be
   edited, or deletes it), **Difficulties** (heatmap of blockages, wheel slips, lifts…) and **Real coverage** (area
   actually mowed, [below](#real-coverage-layer)), kept between launches
   ([encountered obstacles and difficulties](obstacles.md#encountered-obstacles-and-difficulties)).

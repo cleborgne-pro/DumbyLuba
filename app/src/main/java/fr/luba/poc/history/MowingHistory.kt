@@ -3,10 +3,13 @@ package fr.luba.poc.history
 import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.MowingEstimate
+import fr.luba.poc.map.PlannedRecharge
+import java.io.File
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.floor
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import kotlin.math.abs
 
 /** Outcome of a task recorded in the history. */
 enum class MowingOutcome(private val labelEn: String, private val labelFr: String) {
@@ -76,26 +79,42 @@ data class MowingRecord(
 
 /** Observed duration and recharges compared with the estimate, and actual parameters derived from the mowing. */
 data class MowingComparison(
-    /** Estimate scaled down to the part mowed (interrupted mowing); full estimate otherwise. */
+    /**
+     * Estimate up to the part mowed (interrupted mowing): run time of that part plus the charging of the recharges the
+     * estimate places before it; full estimate otherwise.
+     */
     val expectedSeconds: Double, val actualSeconds: Double,
+    /** Recharges the estimate places before the part mowed (all of them for a finished mowing). */
     val expectedRecharges: Int, val actualRecharges: Int,
     /** Time off charge / raw run time of the part mowed: pivots, links, returns, slowdowns. */
     val observedTimeFactor: Double?,
     /** Minutes per 100 % of battery off charge and on charge, if the mowing measured enough. */
     val observedAutonomyMinutes: Double?, val observedChargeMinutes: Double?,
+    /** Recharges of the whole estimate, and run time off charge expected / measured for the part mowed. */
+    val plannedRecharges: Int = expectedRecharges,
+    val expectedActiveSeconds: Double? = null, val actualActiveSeconds: Double? = null,
 ) {
     /** Relative duration deviation (+0.2 = 20 % longer than planned). */
     val durationDelta: Double? get() = if (expectedSeconds > 60) actualSeconds / expectedSeconds - 1 else null
+    /** Relative deviation of the run time off charge alone, recharges left out. */
+    val activeDelta: Double? get() = expectedActiveSeconds?.takeIf { it > 60 }?.let { e -> actualActiveSeconds?.let { it / e - 1 } }
     val rechargeDelta: Int get() = actualRecharges - expectedRecharges
+    /** More recharges than due at this progress, but not more than the whole estimate: the robot recharged sooner. */
+    val rechargedEarlier: Boolean get() = rechargeDelta > 0 && actualRecharges <= plannedRecharges
     val durationVerdict: String get() = durationDelta?.let { d ->
-        when {
+        val verdict = when {
             abs(d) <= MowingCalibration.TOLERANCE -> tr("As estimated", "Conforme à l'estimation")
             d > 0 -> tr("%d %% longer than planned", "Plus longue que prévu de %d %%").format(Math.round(d * 100))
             else -> tr("%d %% shorter than planned", "Plus courte que prévu de %d %%").format(Math.round(-d * 100))
         }
+        // A recharge sooner or later than planned moves a whole charge in or out: the run time says how the robot drove.
+        val active = activeDelta?.takeIf { rechargeDelta != 0 }
+            ?.let { a -> tr(" (driving %s%d %%)", " (roulage %s%d %%)").format(if (a >= 0) "+" else "−", Math.round(abs(a) * 100)) }
+        verdict + (active ?: "")
     } ?: tr("Too short to compare", "Trop courte pour comparer")
     val rechargeVerdict: String get() = when {
         rechargeDelta == 0 -> tr("As estimated", "Conforme à l'estimation")
+        rechargedEarlier -> tr("Recharged sooner than planned", "Recharge plus tôt que prévu")
         rechargeDelta > 0 -> tr("${Math.abs(rechargeDelta)} more recharge${if (rechargeDelta > 1) "s" else ""} than planned",
             "${Math.abs(rechargeDelta)} recharge${if (rechargeDelta > 1) "s" else ""} de plus que prévu")
         else -> tr("${Math.abs(rechargeDelta)} fewer recharge${if (rechargeDelta < -1) "s" else ""} than planned",
@@ -106,11 +125,26 @@ data class MowingComparison(
         fun of(record: MowingRecord): MowingComparison {
             val p = if (record.outcome == MowingOutcome.COMPLETE) 1.0 else record.progress
             val t = record.totals
-            // Recharges expected for the part mowed: rounded down (a recharge planned at 60 % of the route is not
-            // due at 50 %).
-            val expectedRecharges = if (p >= 1.0) record.forecast.recharges else kotlin.math.floor(record.forecast.recharges * p + 1e-9).toInt()
-            return MowingComparison(record.forecast.totalSeconds * p, t.totalSeconds, expectedRecharges, record.recharges,
-                MowingCalibration.timeFactor(record), MowingCalibration.autonomy(t), MowingCalibration.charge(t))
+            val f = record.forecast
+            val expectedActive = f.travelSeconds * f.timeFactor * p
+            // Only the recharges the estimate places before the part mowed are due, each with its whole charge (a
+            // recharge planned at 66 % of the route is not due at 57 %, and is not due by two thirds either).
+            val due = if (p >= 1.0) null else dueRecharges(record, expectedActive)
+            return MowingComparison(due?.let { d -> expectedActive + d.sumOf { it.chargeSeconds } } ?: (f.totalSeconds * p),
+                t.totalSeconds, due?.size ?: if (p >= 1.0) f.recharges else floor(f.recharges * p + 1e-9).toInt(), record.recharges,
+                MowingCalibration.timeFactor(record), MowingCalibration.autonomy(t), MowingCalibration.charge(t),
+                plannedRecharges = f.recharges, expectedActiveSeconds = expectedActive.takeIf { f.travelSeconds > 0 },
+                actualActiveSeconds = t.activeSeconds)
+        }
+
+        /** Recharges of the frozen estimate started before [activeSeconds] of run time; null if it cannot be rebuilt. */
+        private fun dueRecharges(record: MowingRecord, activeSeconds: Double): List<PlannedRecharge>? {
+            val f = record.forecast
+            if (f.travelSeconds <= 0 || record.speedMps <= 0) return null
+            return runCatching {
+                MowingEstimate.rechargeSchedule(f.travelSeconds * f.timeFactor * record.speedMps, record.speedMps, f.autonomyMinutes,
+                    f.chargeMinutes, f.battery.coerceIn(0.0, 100.0), record.returnPercent.toDouble(), record.resumePercent.toDouble())
+            }.getOrNull()?.filter { it.atSeconds < activeSeconds }
         }
     }
 }
@@ -203,7 +237,7 @@ object MowingForecaster {
             calibration.chargeMinutes?.let { tr("recharge ${Math.round(it)} min for 100 %", "recharge ${Math.round(it)} min pour 100 %") }).joinToString(" · ") + "."
 
     /** Number with [decimals] decimals, decimal comma in French and decimal point in English. */
-    internal fun num(value: Double, decimals: Int) = String.format(if (I18n.french) java.util.Locale.FRANCE else java.util.Locale.ENGLISH, "%.${decimals}f", value)
+    internal fun num(value: Double, decimals: Int) = String.format(if (I18n.french) Locale.FRANCE else Locale.ENGLISH, "%.${decimals}f", value)
 }
 
 /**
@@ -222,7 +256,8 @@ class MowingTracker(start: MowingTotals = MowingTotals()) {
         val previous = lastAt
         if (previous != null && atMs > previous && atMs - previous <= MAX_GAP_MS) {
             val dt = (atMs - previous) / 1000.0
-            val delta = if (battery != null && lastBattery != null) (battery - lastBattery!!).toDouble() else 0.0
+            val before = lastBattery
+            val delta = if (battery != null && before != null) (battery - before).toDouble() else 0.0
             totals = if (lastCharging) totals.copy(chargingSeconds = totals.chargingSeconds + dt, batteryCharged = totals.batteryCharged + delta.coerceAtLeast(0.0))
             else totals.copy(activeSeconds = totals.activeSeconds + dt, batteryUsed = totals.batteryUsed + (-delta).coerceAtLeast(0.0))
         }

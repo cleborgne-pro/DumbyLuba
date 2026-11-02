@@ -1,15 +1,15 @@
 package fr.luba.poc.ble
 
 import fr.luba.poc.difficulty.DifficultyKind
+import fr.luba.poc.history.MowingOutcome
 import fr.luba.poc.map.Point
+import fr.luba.poc.simulation.MissionCheckpointStore
 import fr.luba.poc.simulation.MowingSimulation
 import fr.luba.poc.simulation.RoutePhase
-import fr.luba.poc.simulation.MissionCheckpointStore
 import fr.luba.poc.simulation.SmartResume
-import fr.luba.poc.history.MowingOutcome
-import org.junit.Assert.assertNull
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith

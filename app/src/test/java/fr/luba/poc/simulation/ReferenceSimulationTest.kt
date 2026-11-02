@@ -59,10 +59,10 @@ class ReferenceSimulationTest {
     }
     @Test(timeout=120000) fun recentLoggedPoolBaseReturnsStayShort() {
         val a=JSONObject(javaClass.getResourceAsStream("/planner-reference-map.json")!!.bufferedReader().readText()).getJSONArray("shapes")
-        val shapes=(0 until a.length()).map { i -> val s=a.getJSONObject(i);val p=s.getJSONArray("points")
+        val shapes=(0 until a.length()).map { i -> val s=a.getJSONObject(i); val p=s.getJSONArray("points")
             MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until p.length()).map { k ->
-                val v=p.getJSONArray(k);Point(v.getDouble(0),v.getDouble(1)) },s.getString("name")) }
-        val map=RobotMap(shapes,true);val base=Point(-0.4563,1.0859);val heading=153.0312
+                val v=p.getJSONArray(k); Point(v.getDouble(0),v.getDouble(1)) },s.getString("name")) }
+        val map=RobotMap(shapes,true); val base=Point(-0.4563,1.0859); val heading=153.0312
         val holes=shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points }
         val preview=MultiZonePlanner.plan(shapes.filter { it.name=="Piscine" },holes,0.25,0.6,
             CoverageMode.LINES,true,recordedBoundary=true,basePoint=base,bordersFirst=true,nearbyNoGo=true)
@@ -71,7 +71,7 @@ class ReferenceSimulationTest {
         fun length(p:List<Point>)=p.zipWithNext().sumOf { (a,b)->a.distance(b) }
         val results=(1..99).mapNotNull { progress ->
             val s=engine.withConfig(engine.config.copy(initialProgress=progress.toDouble())).start()
-            val point=s.transit.last();val edge=engine.edges[s.edge]
+            val point=s.transit.last(); val edge=engine.edges[s.edge]
             val cap=Math.toDegrees(kotlin.math.atan2(edge.b.y-edge.a.y,edge.b.x-edge.a.x))
             val returning=engine.advance(s.copy(position=point,phase=SimPhase.MOWING,heading=cap,battery=20.0),1.0)
             assertEquals("Return at $progress %",SimPhase.RETURNING,returning.phase)

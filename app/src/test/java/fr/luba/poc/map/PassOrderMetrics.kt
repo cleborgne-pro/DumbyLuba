@@ -1,13 +1,13 @@
 package fr.luba.poc.map
 
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
-import org.locationtech.jts.geom.Polygon
-import org.locationtech.jts.operation.union.UnaryUnionOp
-import org.locationtech.jts.geom.Geometry as JtsGeometry
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
+import org.locationtech.jts.geom.GeometryFactory
+import org.locationtech.jts.geom.Polygon
+import org.locationtech.jts.operation.union.UnaryUnionOp
 
 /**
  * The "stop" metric of a pass order (docs/path-planning/PATTERNS.md, section 4.3), pure geometry on the swept union of

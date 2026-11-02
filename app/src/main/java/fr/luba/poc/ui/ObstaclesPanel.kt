@@ -1,29 +1,47 @@
 package fr.luba.poc.ui
 
+import android.graphics.BitmapFactory
+import android.os.SystemClock
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import fr.luba.poc.camera.near
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.foundation.clickable
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.Clock
+import fr.luba.poc.auth.AccountMode
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.camera.ObstaclePhoto
+import fr.luba.poc.camera.ObstaclePhotoCameraChoice
+import fr.luba.poc.camera.ObstaclePhotoUi
+import fr.luba.poc.camera.near
+import fr.luba.poc.difficulty.PresumedObstacles
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.MapLive
 import fr.luba.poc.map.Point
+import fr.luba.poc.map.RecordedBoundary
 import fr.luba.poc.obstacles.*
+import fr.luba.poc.protocol.BumperRest
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Tabs of Service → Obstacle tests: bumper, learning, real bypass, border (the list has its own page). */
 enum class ObstacleBench(private val labelEn: String, private val labelFr: String) {
@@ -119,7 +137,7 @@ private fun nearestObstacle(state: RobotUi): LocalObstacle? {
 @Composable
 private fun ObstacleLiveStatus(state: RobotUi) {
     val t = state.telemetry
-    SettingsGroup(tr("Live status", "État en direct")) {
+    SettingsGroup(title = tr("Live status", "État en direct")) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             val alert = t.sensorStatus?.let { it and 7 }
             // Resting value learnt on this connection (DumbyLuba#1): shown as such, ignored by the guards.
@@ -144,9 +162,9 @@ private fun ObstacleLiveStatus(state: RobotUi) {
 @Composable
 private fun TeachPreconditions(state: RobotUi) {
     val t = state.telemetry
-    SettingsGroup(tr("Preconditions", "Préconditions")) {
+    SettingsGroup(title = tr("Preconditions", "Préconditions")) {
         PreconditionList(TeachSafety.checks(state.selected?.name, state.ageMs, t.battery, if (state.teach.running) 11 else t.robotState,
-            fr.luba.poc.protocol.BumperRest.guard(state.selected?.name, t.sensorStatus, state.bumperRest, android.os.SystemClock.elapsedRealtime()), t.selfCheck,
+            BumperRest.guard(state.selected?.name, t.sensorStatus, state.bumperRest, SystemClock.elapsedRealtime()), t.selfCheck,
             state.campaign.running, state.bladeTestActive, state.navTest.running, state.mapLoading).map { (label, ok, _) -> label to ok })
     }
 }
@@ -155,9 +173,9 @@ private fun TeachPreconditions(state: RobotUi) {
 private fun TeachStatus(state: RobotUi, title: String) {
     val teach = state.teach
     if (!teach.running && teach.results.none { it.title == title }) return
-    SettingsGroup(tr("Tracking", "Suivi")) {
+    SettingsGroup(title = tr("Tracking", "Suivi")) {
         if (teach.running) LubaProgress(Modifier.fillMaxWidth())
-        if (teach.status.isNotBlank()) StatusNote(teach.status, when { teach.running -> NoteTone.WARNING
+        if (teach.status.isNotBlank()) StatusNote(teach.status, tone = when { teach.running -> NoteTone.WARNING
             teach.outcome == "CONTACT_DETECTED" || teach.outcome == "BLOCKED_AHEAD" -> NoteTone.SUCCESS; teach.outcome == "ABORTED" -> NoteTone.DANGER; else -> NoteTone.INFO })
         teach.results.filter { it.title == title }.asReversed().take(20).forEach {
             ResultRow(it.outcome, it.title, detail = it.detail, meta = Format.duration(it.durationMs))
@@ -170,7 +188,7 @@ private fun TeachStatus(state: RobotUi, title: String) {
 @Composable
 private fun ContactBench(robot: RobotBle, state: RobotUi, supervised: Boolean, onSupervised: (Boolean) -> Unit) {
     TeachPreconditions(state)
-    SettingsGroup(tr("Procedure", "Déroulé")) {
+    SettingsGroup(title = tr("Procedure", "Déroulé")) {
         StepLine(1, tr("Confirm supervision", "Confirmer la supervision"), tr("Next to the robot, to press the bumper.", "À côté du robot, pour appuyer sur le pare-chocs."))
         LubaCheckRow(tr("I am supervising on site", "Je supervise sur place"), supervised, onSupervised, enabled = !state.teach.running)
         StepLine(2, tr("Start listening (30 s)", "Lancer l'écoute (30 s)"), tr("Manual mode: manual mowing with blades OFF (20), where the LUBA 2 publishes the contact. Alternative: robot ready (11).", "Mode manuel : tonte manuelle lames OFF (20), où le LUBA 2 publie le contact. Variante : robot prêt (11)."))
@@ -196,7 +214,7 @@ private fun ColumnScope.ContactActions(robot: RobotBle, state: RobotUi, supervis
 
 @Composable
 private fun LearnBench(robot: RobotBle, state: RobotUi, supervised: Boolean, onSupervised: (Boolean) -> Unit) {
-    SettingsGroup(tr("Procedure", "Déroulé")) {
+    SettingsGroup(title = tr("Procedure", "Déroulé")) {
         CheckLine(tr("Bumper detection validated on this connection", "Détection pare-chocs validée sur cette connexion"), state.teach.contactValidated)
         if (!state.teach.contactValidated) InfoNote(tr("Not required: without a received contact, the approach still stops after 1 m, 30 s or 3 s without moving. A contact during the approach validates detection.",
             "Pas obligatoire : sans contact reçu, l'approche s'arrête quand même après 1 m, 30 s ou 3 s sans avancer. Un contact pendant l'approche valide la détection."))
@@ -205,7 +223,7 @@ private fun LearnBench(robot: RobotBle, state: RobotUi, supervised: Boolean, onS
         LubaCheckRow(tr("I am supervising on site", "Je supervise sur place"), supervised, onSupervised, enabled = !state.teach.running)
         StepLine(3, tr("Check the proposal", "Vérifier la proposition"), tr("Adjust type, radius and margin before saving.", "Ajuster type, rayon et marge avant d'enregistrer."))
     }
-    SettingsGroup(tr("Identify without contact", "Identifier sans contact")) {
+    SettingsGroup(title = tr("Identify without contact", "Identifier sans contact")) {
         StepLine(1, tr("Drive the robot facing the obstacle", "Amener le robot face à l'obstacle"), tr("With the joystick (manual control), blades stopped, bumper close to the obstacle.", "Au joystick (pilotage manuel), lames arrêtées, pare-chocs près de l'obstacle."))
         StepLine(2, tr("Place the obstacle", "Placer l'obstacle"), tr("Touching the bumper by default; distance, type, radius and margin adjustable before saving. No robot movement.", "Au contact du pare-chocs par défaut ; distance, type, rayon et marge réglables avant d'enregistrer. Aucun mouvement du robot."))
         SecondaryPillButton(tr("Obstacle in front of the robot", "Obstacle devant le robot"), robot::proposeObstacleAhead, Modifier.fillMaxWidth(),
@@ -229,7 +247,7 @@ private fun ProposalEditor(robot: RobotBle, state: RobotUi, proposal: TeachPropo
     fun resize(r: Float) { radius = r; if (proposal.aheadM != null && !aheadSet) ahead = ManualContact.defaultAheadM(r.toDouble()).toFloat() }
     val estimated = proposal.center(radius.toDouble(), proposal.aheadM?.let { ahead.toDouble() })
     val draft = LocalObstacle("proposal", kind, estimated.x, estimated.y, radius.toDouble(), margin.toDouble(), label = tr("Proposal", "Proposition"))
-    SettingsGroup(tr("Proposal to check", "Proposition à vérifier")) {
+    SettingsGroup(title = tr("Proposal to check", "Proposition à vérifier")) {
         ObstacleMap(state, state.obstacles + draft, planned = listOf(Point(proposal.contact.x, proposal.contact.y), estimated), height = 240)
         ChipChoice(ObstacleKind.entries.map { it to it.label }, kind, { kind = it; resize(it.defaultRadiusM.toFloat()) })
         SliderRow(tr("Obstacle radius", "Rayon de l'obstacle"), radius, { resize(it) }, 0.05f..2f, valueLabel = "${Format.num(radius.toDouble(), 2)} m", steps = 38)
@@ -242,7 +260,7 @@ private fun ProposalEditor(robot: RobotBle, state: RobotUi, proposal: TeachPropo
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             SecondaryPillButton(tr("Ignore", "Ignorer"), robot::dismissTeachProposal, Modifier.weight(1f))
             PrimaryPillButton(tr("Save", "Enregistrer"), {
-                val now = System.currentTimeMillis()
+                val now = Clock.now()
                 robot.saveObstacle(LocalObstacle(UUID.randomUUID().toString(), kind, estimated.x, estimated.y,
                     radiusM = radius.toDouble(), marginM = margin.toDouble(), createdAtMs = now, updatedAtMs = now, label = kind.label.lowercase()))
                 robot.dismissTeachProposal()
@@ -278,11 +296,11 @@ private fun ObstacleListBench(robot: RobotBle, state: RobotUi, openSimulation: (
     var editing by remember { mutableStateOf<LocalObstacle?>(null) }
     var deleting by remember { mutableStateOf<LocalObstacle?>(null) }
     var incidentFor by remember { mutableStateOf<LocalObstacle?>(null) }
-    SettingsGroup(tr("Map", "Carte")) {
+    SettingsGroup(title = tr("Map", "Carte")) {
         ObstacleMap(state, state.obstacles)
         InfoNote(tr("Avoided by all local routes at radius + margin + robot turning (${Format.num(RobotEnvelope.LUBA2.turnClearanceM, 2)} m).", "Évité par tous les trajets locaux à rayon + marge + rotation du robot (${Format.num(RobotEnvelope.LUBA2.turnClearanceM, 2)} m)."))
     }
-    SettingsGroup(tr("Saved obstacles (${state.obstacles.size})", "Obstacles enregistrés (${state.obstacles.size})")) {
+    SettingsGroup(title = tr("Saved obstacles (${state.obstacles.size})", "Obstacles enregistrés (${state.obstacles.size})")) {
         if (state.obstacles.isEmpty()) InfoNote(tr("No saved obstacle: learn one in Service → Obstacle tests, " +
             "or save an encountered obstacle below.", "Aucun obstacle enregistré : apprenez-en un dans Service → Essais d'obstacle, " +
             "ou enregistrez un obstacle rencontré ci-dessous."))
@@ -293,7 +311,7 @@ private fun ObstacleListBench(robot: RobotBle, state: RobotUi, openSimulation: (
     }
     DifficultiesGroup(robot, state)
     ObstaclePhotosGroup(robot, state)
-    SettingsGroup("Simulation") {
+    SettingsGroup(title = "Simulation") {
         NavRow(ServicePage.OBSTACLE_SIM.title, icon = Icons.Rounded.Science, subtitle = tr("Contact and back-off on the map, without the robot", "Contact et recul sur la carte, sans robot"), onClick = openSimulation)
     }
     InfoNote(tr("Obstacles saved on this phone only: never sent to the robot nor converted into Mammotion no-go zones.", "Obstacles enregistrés sur ce téléphone uniquement : jamais envoyés au robot ni convertis en zones interdites Mammotion."))
@@ -317,7 +335,7 @@ private fun ObstacleRow(state: RobotUi, obstacle: LocalObstacle, edit: () -> Uni
             style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
         Text(Format.plural(obstacle.incidents.size, "incident", "incidents") + (obstacle.incidents.lastOrNull()?.let { tr(" · last: ${incidentKindLabel(it.kind)}", " · dernier : ${incidentKindLabel(it.kind)}") } ?: ""),
             style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
-        if (obstacle.incidents.size >= 3) StatusNote(tr("Recurring incidents: adjust the position or the margin.", "Incidents récurrents : ajustez la position ou la marge."), NoteTone.WARNING)
+        if (obstacle.incidents.size >= 3) StatusNote(tr("Recurring incidents: adjust the position or the margin.", "Incidents récurrents : ajustez la position ou la marge."), tone = NoteTone.WARNING)
         // Row actions, offset so the button text lines up with the record text.
         Row(Modifier.fillMaxWidth().offset(x = (-12).dp)) {
             TextAction(tr("Edit", "Modifier"), edit, enabled = !state.obstacleBusy())
@@ -332,8 +350,8 @@ private fun ObstacleRow(state: RobotUi, obstacle: LocalObstacle, edit: () -> Uni
 private fun DeleteObstacleDialog(robot: RobotBle, state: RobotUi, obstacle: LocalObstacle, dismiss: () -> Unit) {
     LubaDialog(onDismissRequest = dismiss, title = tr("Delete this obstacle?", "Supprimer cet obstacle ?"), content = {
         Text(tr("${obstacle.kind.label} and its history will be deleted from this phone. It will no longer be avoided by future routes.", "${obstacle.kind.label} et son historique seront supprimés de ce téléphone. Il ne sera plus évité par les prochains trajets."))
-        val contacts = fr.luba.poc.difficulty.PresumedObstacles.hiddenContacts(state.difficulties.events, obstacle,
-            state.obstacles.filter { it.id != obstacle.id }, System.currentTimeMillis()).size
+        val contacts = PresumedObstacles.hiddenContacts(state.difficulties.events, obstacle,
+            state.obstacles.filter { it.id != obstacle.id }, Clock.now()).size
         if (contacts > 0) Text(tr("The $contacts bumper contacts recorded at this place will be dismissed too, so that it does not come back as a presumed obstacle.",
             "Les $contacts contacts pare-chocs consignés à cet endroit seront écartés aussi, pour qu'il ne revienne pas en obstacle présumé."))
     }, footer = {
@@ -352,7 +370,7 @@ private fun IncidentDialog(robot: RobotBle, state: RobotUi, obstacle: LocalObsta
         KeyValueRow(tr("Robot position", "Position du robot"), if (t.x != null && t.y != null) "${Format.num(t.x, 2)} / ${Format.num(t.y, 2)} m" else tr("unavailable", "indisponible"))
     }, footer = {
         PrimaryPillButton(tr("Save the incident", "Enregistrer l'incident"), {
-            robot.addObstacleIncident(obstacle.id, ObstacleIncident(atMs = System.currentTimeMillis(), kind = kind, note = note.trim(), x = t.x, y = t.y))
+            robot.addObstacleIncident(obstacle.id, ObstacleIncident(atMs = Clock.now(), kind = kind, note = note.trim(), x = t.x, y = t.y))
             dismiss()
         }, Modifier.fillMaxWidth())
     })
@@ -376,7 +394,7 @@ private fun ObstacleEditor(obstacle: LocalObstacle, onDismiss: () -> Unit, onSav
     }, footer = {
         PrimaryPillButton(tr("Save", "Enregistrer"), {
             onSave(obstacle.edited(x = obstacle.x + dx, y = obstacle.y + dy, radiusM = radius.toDouble(), marginM = margin.toDouble(),
-                kind = kind, atMs = System.currentTimeMillis()))
+                kind = kind, atMs = Clock.now()))
         }, Modifier.fillMaxWidth())
     })
 }
@@ -394,10 +412,10 @@ private fun CourseBench(robot: RobotBle, state: RobotUi, selected: LocalObstacle
         if (selected != null && state.ready && !robot.state.value.navTest.running) robot.previewObstacleCourse(selected.id)
     }
     if (selected == null) {
-        SettingsGroup(tr("Target obstacle", "Obstacle visé")) { InfoNote(tr("No saved obstacle: learn one in the Learn tab.", "Aucun obstacle enregistré : apprenez-en un dans l'onglet Apprendre.")) }
+        SettingsGroup(title = tr("Target obstacle", "Obstacle visé")) { InfoNote(tr("No saved obstacle: learn one in the Learn tab.", "Aucun obstacle enregistré : apprenez-en un dans l'onglet Apprendre.")) }
         return
     }
-    SettingsGroup(tr("Target obstacle", "Obstacle visé")) {
+    SettingsGroup(title = tr("Target obstacle", "Obstacle visé")) {
         ChipChoice(state.obstacles.map { o ->
             o.id to (o.label.ifBlank { o.kind.label }.replaceFirstChar { it.uppercase() } +
                 (if (t.x != null && t.y != null) " · ${Format.num(Point(o.x, o.y).distance(Point(t.x, t.y)), 1)} m" else ""))
@@ -405,16 +423,16 @@ private fun CourseBench(robot: RobotBle, state: RobotUi, selected: LocalObstacle
         KeyValueRow(tr("Clearance (radius + margin + turning)", "Réserve (rayon + marge + rotation)"), "${Format.num(ObstacleCourse.keepOutM(selected), 2)} m")
     }
     val trail = if (nav.courseObstacleId == selected.id) nav.trail.map { Point(it.x, it.y) } else emptyList()
-    SettingsGroup(tr("Planned course", "Parcours prévu")) {
+    SettingsGroup(title = tr("Planned course", "Parcours prévu")) {
         ObstacleMap(state, state.obstacles, planned = if (nav.courseObstacleId == selected.id) nav.planned else emptyList(), trail = trail)
         InfoNote(tr("Go to the opposite side and back: the straight line crosses the obstacle, the route must bypass it.", "Aller au côté opposé puis retour : la ligne droite traverse l'obstacle, le trajet doit le contourner."))
     }
-    SettingsGroup(tr("Tracking", "Suivi")) {
+    SettingsGroup(title = tr("Tracking", "Suivi")) {
         if (nav.courseObstacleId == selected.id) {
             if (nav.running || nav.status.startsWith(tr("Navigation refused", "Navigation refusée")) || nav.outcome != "Non démarrée")
-                StatusNote(nav.status, navTone(nav.outcome, nav.running, refused = nav.status.startsWith(tr("Navigation refused", "Navigation refusée"))))
+                StatusNote(nav.status, tone = navTone(nav.outcome, nav.running, refused = nav.status.startsWith(tr("Navigation refused", "Navigation refusée"))))
             if (!nav.running && nav.preview.isNotBlank()) {
-                if (nav.preview.startsWith(tr("Route unavailable", "Parcours indisponible"))) StatusNote(nav.preview, NoteTone.DANGER) else InfoNote(nav.preview)
+                if (nav.preview.startsWith(tr("Route unavailable", "Parcours indisponible"))) StatusNote(nav.preview, tone = NoteTone.DANGER) else InfoNote(nav.preview)
             }
         }
         val gapNow = if (t.x != null && t.y != null) Point(t.x, t.y).distance(Point(selected.x, selected.y)) - selected.radiusM else null
@@ -425,7 +443,7 @@ private fun CourseBench(robot: RobotBle, state: RobotUi, selected: LocalObstacle
         KeyValueRow("Point", if (running) "${nav.segmentIndex}/${nav.segmentCount}" else "—")
         KeyValueRow(tr("Distance traveled", "Distance parcourue"), "${Format.num(nav.observedMeters, 2)} m")
     }
-    SettingsGroup(tr("Test settings", "Réglages de l'essai")) {
+    SettingsGroup(title = tr("Test settings", "Réglages de l'essai")) {
         SliderRow(tr("Forward speed", "Vitesse d'avance"), state.trajectorySpeedPercent.toFloat(), { robot.setTrajectorySpeed(it.toInt()) }, 10f..100f,
             valueLabel = "${state.trajectorySpeedPercent} %", enabled = !running)
         SecondaryPillButton(tr("Refresh the planned course", "Actualiser le parcours prévu"), { robot.previewObstacleCourse(selected.id) }, Modifier.fillMaxWidth(), enabled = state.ready && !nav.running)
@@ -437,7 +455,7 @@ private fun CourseBench(robot: RobotBle, state: RobotUi, selected: LocalObstacle
         "Départ entre ${Format.num(ObstacleCourse.keepOutM(selected) + ObstacleCourse.MIN_START_GAP_M, 1)} et " +
         "${ObstacleCourse.MAX_START_DISTANCE_M.toInt()} m du centre. Réussi si le flanc du robot (${Format.num(RobotEnvelope.LUBA2.halfWidthM, 2)} m) " +
         "n'a jamais atteint la surface de l'obstacle. Écart au trajet, emprise hors surface sûre ou contact : STOP."))
-    if (nav.courseObstacleId != null && nav.results.isNotEmpty()) SettingsGroup(tr("Results", "Résultats")) {
+    if (nav.courseObstacleId != null && nav.results.isNotEmpty()) SettingsGroup(title = tr("Results", "Résultats")) {
         nav.results.asReversed().take(30).forEach { ResultRow(it.outcome, it.title, detail = it.detail, meta = Format.duration(it.durationMs)) }
     }
 }
@@ -454,7 +472,7 @@ private fun ColumnScope.CourseActions(robot: RobotBle, state: RobotUi, selected:
 private fun CourseInterruptionDialog(robot: RobotBle, state: RobotUi) {
     val reason = state.navTest.interruption?.takeIf { state.navTest.courseObstacleId != null } ?: return
     LubaDialog(onDismissRequest = robot::acknowledgeNavInterruption, title = tr("Bypass interrupted", "Contournement interrompu"), content = {
-        StatusNote(reason, NoteTone.DANGER)
+        StatusNote(reason, tone = NoteTone.DANGER)
         Text(tr("The robot received STOP. Distance traveled: ${Format.num(state.navTest.observedMeters, 2)} m.", "Le robot a reçu STOP. Distance parcourue : ${Format.num(state.navTest.observedMeters, 2)} m."),
             style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
     })
@@ -464,17 +482,17 @@ private fun CourseInterruptionDialog(robot: RobotBle, state: RobotUi) {
 @Composable
 private fun ObstaclePhotosGroup(robot: RobotBle, state: RobotUi) {
     val photo = state.obstaclePhoto
-    var shown by remember { mutableStateOf<fr.luba.poc.camera.ObstaclePhoto?>(null) }
-    SettingsGroup(tr("Photos after contact (${photo.photos.size})", "Photos après contact (${photo.photos.size})")) {
+    var shown by remember { mutableStateOf<ObstaclePhoto?>(null) }
+    SettingsGroup(title = tr("Photos after contact (${photo.photos.size})", "Photos après contact (${photo.photos.size})")) {
         // Local mode: no photo (the video only goes through the Mammotion cloud), the robot does not wait.
-        val localOnly = fr.luba.poc.auth.AccountMode.observe()
+        val localOnly = AccountMode.observe()
         ToggleRow(tr("Photograph the obstacle after the back-off", "Photographier l'obstacle après le recul"), photo.enabled && !localOnly, robot::setObstaclePhotoEnabled,
             enabled = !localOnly,
-            subtitle = if (localOnly) fr.luba.poc.auth.AccountMode.message else tr("After a contact, the robot backs off then waits stationary, blades stopped, up to " +
-                "${fr.luba.poc.camera.ObstaclePhotoUi.HOLD_MS / 1000} s for the photo from its camera. Requires a signed-in Mammotion account and the screen on.",
+            subtitle = if (localOnly) AccountMode.message else tr("After a contact, the robot backs off then waits stationary, blades stopped, up to " +
+                "${ObstaclePhotoUi.HOLD_MS / 1000} s for the photo from its camera. Requires a signed-in Mammotion account and the screen on.",
                 "Après un contact, le robot recule puis attend immobile, lames arrêtées, jusqu'à " +
-                "${fr.luba.poc.camera.ObstaclePhotoUi.HOLD_MS / 1000} s la photo de sa caméra. Compte Mammotion connecté et écran allumé nécessaires."))
-        fr.luba.poc.camera.ObstaclePhotoCameraChoice(robot, state)
+                "${ObstaclePhotoUi.HOLD_MS / 1000} s la photo de sa caméra. Compte Mammotion connecté et écran allumé nécessaires."))
+        ObstaclePhotoCameraChoice(robot, state)
         if (photo.status.isNotBlank()) KeyValueRow(tr("Last photo", "Dernière photo"), photo.status)
         if (photo.photos.isEmpty()) InfoNote(tr("No photo yet.", "Aucune photo pour l'instant."))
         photo.photos.take(12).forEach { p ->
@@ -483,7 +501,7 @@ private fun ObstaclePhotosGroup(robot: RobotBle, state: RobotUi) {
                 horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
                 PhotoImage(p, Modifier.width(96.dp).aspectRatio(4f / 3f), maxSide = 320)
                 Column(Modifier.weight(1f)) {
-                    Text(java.text.SimpleDateFormat("dd/MM HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(java.util.Date(p.takenAt)), style = MaterialTheme.typography.titleSmall)
+                    Text(SimpleDateFormat("dd/MM HH:mm:ss", I18n.locale).format(Date(p.takenAt)), style = MaterialTheme.typography.titleSmall)
                     Text(tr("Contact ${p.code ?: "?"} · photo ${p.delaySeconds} s after", "Contact ${p.code ?: "?"} · photo ${p.delaySeconds} s après") +
                         (if (p.x != null && p.y != null) " · ${Format.num(p.x, 1)} / ${Format.num(p.y, 1)} m" else ""),
                         style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
@@ -496,7 +514,7 @@ private fun ObstaclePhotosGroup(robot: RobotBle, state: RobotUi) {
     shown?.let { p ->
         LubaDialog(onDismissRequest = { shown = null }, title = tr("Photo after contact", "Photo après contact"), content = {
             PhotoImage(p, Modifier.fillMaxWidth().aspectRatio(4f / 3f), maxSide = 1280)
-            KeyValueRow(tr("Taken", "Prise"), java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(java.util.Date(p.takenAt)))
+            KeyValueRow(tr("Taken", "Prise"), SimpleDateFormat("dd/MM/yyyy HH:mm:ss", I18n.locale).format(Date(p.takenAt)))
             KeyValueRow(tr("Delay after the contact", "Délai après le contact"), "${p.delaySeconds} s")
             if (p.x != null && p.y != null) KeyValueRow(tr("Contact position", "Position du contact"), "${Format.num(p.x, 2)} / ${Format.num(p.y, 2)} m")
         })
@@ -505,21 +523,21 @@ private fun ObstaclePhotosGroup(robot: RobotBle, state: RobotUi) {
 
 /** JPEG image decoded off the main thread, downscaled to [maxSide] pixels. */
 @Composable
-internal fun PhotoImage(photo: fr.luba.poc.camera.ObstaclePhoto, modifier: Modifier, maxSide: Int) {
-    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, photo.file, maxSide) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+internal fun PhotoImage(photo: ObstaclePhoto, modifier: Modifier, maxSide: Int) {
+    val bitmap by produceState<ImageBitmap?>(null, photo.file, maxSide) {
+        value = withContext(Dispatchers.IO) {
             runCatching {
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                android.graphics.BitmapFactory.decodeFile(photo.file.path, bounds)
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(photo.file.path, bounds)
                 var sample = 1
                 while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
-                android.graphics.BitmapFactory.decodeFile(photo.file.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+                BitmapFactory.decodeFile(photo.file.path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
             }.getOrNull()
         }
     }
     Box(modifier.clip(MaterialTheme.shapes.small).background(androidx.compose.ui.graphics.Color.Black), contentAlignment = Alignment.Center) {
-        bitmap?.let { androidx.compose.foundation.Image(it, contentDescription = tr("Obstacle photo", "Photo de l'obstacle"), modifier = Modifier.fillMaxSize(),
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit) }
+        bitmap?.let { Image(it, contentDescription = tr("Obstacle photo", "Photo de l'obstacle"), modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit) }
             ?: Text("…", color = androidx.compose.ui.graphics.Color.White)
     }
 }
@@ -545,19 +563,19 @@ private fun BorderBench(robot: RobotBle, state: RobotUi, selectedId: Long?, onSe
         if (chosen != null && !robot.state.value.borderFrontal.running) robot.previewBorderFrontal(chosen.shapeId)
     }
     if (chosen == null) {
-        SettingsGroup(tr("Target outline", "Contour visé")) { InfoNote(if (state.robotMap.complete) tr("No zone or no-go zone on the map.", "Aucune zone ni zone interdite sur la carte.") else tr("Read the robot map first.", "Lire la carte du robot d'abord.")) }
+        SettingsGroup(title = tr("Target outline", "Contour visé")) { InfoNote(if (state.robotMap.complete) tr("No zone or no-go zone on the map.", "Aucune zone ni zone interdite sur la carte.") else tr("Read the robot map first.", "Lire la carte du robot d'abord.")) }
         return
     }
-    SettingsGroup(tr("Target outline", "Contour visé")) {
+    SettingsGroup(title = tr("Target outline", "Contour visé")) {
         ChipChoice(choices.map { it.shapeId to "${it.label} · ${it.kind.label.lowercase()}" }, chosen.shapeId, onSelect, enabled = !border.running)
         InfoNote(tr("The target point is the point of this outline closest to the robot: first bring the robot near the spot to test.", "Le point visé est le plus proche du robot sur ce contour : approchez d'abord le robot de l'endroit à tester."))
     }
     val plan = border.plan?.takeIf { it.shapeId == chosen.shapeId }
-    SettingsGroup(tr("Planned by the planner", "Prévu par le planificateur")) {
+    SettingsGroup(title = tr("Planned by the planner", "Prévu par le planificateur")) {
         val trail = if (border.running || border.outcome != "Non démarré") state.navTest.trail.map { Point(it.x, it.y) } else emptyList()
         ObstacleMap(state, state.obstacles, planned = plan?.let { listOf(it.entry, it.approach, it.passEnd, it.contact) } ?: emptyList(), trail = trail, height = 240)
         if (border.preview.isNotBlank() && !border.running) {
-            if (border.previewRefused) StatusNote(border.preview, NoteTone.DANGER) else InfoNote(border.preview)
+            if (border.previewRefused) StatusNote(border.preview, tone = NoteTone.DANGER) else InfoNote(border.preview)
         }
         if (plan != null) {
             KeyValueRow(tr("Outer lap margin setting", "Marge du tour extérieur réglée"), cm(border.outerOffsetM))
@@ -567,10 +585,10 @@ private fun BorderBench(robot: RobotBle, state: RobotUi, selectedId: Long?, onSe
             KeyValueRow(tr("Front corners at the pivot", "Coins avant au pivot"), cm(plan.plannedPivotGapM))
         }
     }
-    SettingsGroup(tr("Tracking", "Suivi")) {
+    SettingsGroup(title = tr("Tracking", "Suivi")) {
         if (border.running) LubaProgress(Modifier.fillMaxWidth())
         if (border.running || border.outcome != "Non démarré")
-            StatusNote(border.status, when {
+            StatusNote(border.status, tone = when {
                 border.running -> NoteTone.WARNING
                 border.outcome == "PASS" -> NoteTone.SUCCESS
                 border.outcome in setOf("ABORTED", "FAILED", "CONTACT_BEFORE_PASS_END") -> NoteTone.DANGER
@@ -583,16 +601,16 @@ private fun BorderBench(robot: RobotBle, state: RobotUi, selectedId: Long?, onSe
         KeyValueRow(tr("Overshoot of the pass end point", "Dépassement du point de bout de passe"), cm(border.passEndOvershootM))
         KeyValueRow(tr("Bumper at the observed edge", "Pare-chocs au bord constaté"), cm(border.edgeFrontGapM))
     }
-    SettingsGroup(tr("Procedure", "Déroulé")) {
+    SettingsGroup(title = tr("Procedure", "Déroulé")) {
         StepLine(1, tr("Positioning", "Positionnement"), tr("Go-to-point move, blades stopped, up to ${Format.num(BorderFrontal.SLOW_RUN_M * 100, 0)} cm before the end of the pass, facing the outline.", "Déplacement au point, lames arrêtées, jusqu'à ${Format.num(BorderFrontal.SLOW_RUN_M * 100, 0)} cm avant le bout de passe, face au contour."))
         StepLine(2, tr("Slow advance to the end of the pass", "Avance lente jusqu'au bout de passe"), tr("Stops where mowing passes end facing this outline. Visual check: does the front pass the real border?", "Arrêt là où les passes de tonte s'arrêtent face à ce contour. Contrôle visuel : l'avant dépasse-t-il la bordure réelle ?"))
         StepLine(3, tr("Advance to the edge (optional)", "Avance jusqu'au bord (facultatif)"), tr("Very slow, until bumper contact, the edge reported with “Edge reached”, or the bumper " +
-            "${Format.num(fr.luba.poc.map.RecordedBoundary.PHYSICAL_TOLERANCE_M * 100, 0)} cm beyond the outline.", "Très lente, jusqu'au contact pare-chocs, au bord signalé par « Bord atteint », ou au pare-chocs " +
-            "${Format.num(fr.luba.poc.map.RecordedBoundary.PHYSICAL_TOLERANCE_M * 100, 0)} cm au-delà du contour."))
+            "${Format.num(RecordedBoundary.PHYSICAL_TOLERANCE_M * 100, 0)} cm beyond the outline.", "Très lente, jusqu'au contact pare-chocs, au bord signalé par « Bord atteint », ou au pare-chocs " +
+            "${Format.num(RecordedBoundary.PHYSICAL_TOLERANCE_M * 100, 0)} cm au-delà du contour."))
         InfoNote(tr("Distances measured along the normal to the outline, from the center of rotation (published point + 8 cm). Positions at 1 Hz: a few centimetres of uncertainty.", "Distances mesurées sur la normale au contour, depuis le centre de rotation (point publié + 8 cm). Positions à 1 Hz : quelques centimètres d'incertitude."))
         LubaCheckRow(tr("I am supervising on site, in front of the border", "Je supervise sur place, devant la bordure"), supervised, onSupervised, enabled = !border.running)
     }
-    if (border.results.isNotEmpty()) SettingsGroup(tr("Results", "Résultats")) {
+    if (border.results.isNotEmpty()) SettingsGroup(title = tr("Results", "Résultats")) {
         border.results.asReversed().take(20).forEach { ResultRow(it.outcome, it.title, detail = it.detail, meta = Format.duration(it.durationMs)) }
     }
 }

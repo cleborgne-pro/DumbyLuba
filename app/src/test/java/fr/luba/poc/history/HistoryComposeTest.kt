@@ -13,25 +13,22 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import fr.luba.poc.map.Point
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.util.concurrent.CopyOnWriteArrayList
 
 /** Task history through the UI: list, end-of-mowing report, exclusion from estimates, detail. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w412dp-h915dp-xxhdpi")
 class HistoryComposeTest {
     private val compose = createAndroidComposeRule<ComponentActivity>()
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { org.junit.Assume.assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private val forecast = MowingForecaster.forecast(1080.0, 0.3, 60.0, 30.0, 100.0, 20.0, 90.0, null)
     private fun record(id: String, kind: TaskKind = TaskKind.MOW, outcome: MowingOutcome = MowingOutcome.COMPLETE, startedAt: Long = 1_760_000_000_000L,

@@ -4,6 +4,9 @@ import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.ObstacleDisc
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.simulation.*
+import java.util.concurrent.CancellationException
+import kotlin.math.abs
+import kotlin.math.atan2
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
@@ -11,9 +14,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
-import java.util.concurrent.CancellationException
-import kotlin.math.abs
-import kotlin.math.atan2
 
 /**
  * QA of the Zamboni mode (step 2) on the reference map and on synthetic zones, through the production entry points:
@@ -118,23 +118,23 @@ class ZamboniQaSpacingTest : ZamboniQaFixture() {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
-    @Test(timeout = 3_600_000) fun everyZoneAt5Cm() = everyZoneAt(0.05)
-    @Test(timeout = 3_600_000) fun everyZoneAt10Cm() = everyZoneAt(0.10)
-    @Test(timeout = 3_600_000) fun everyZoneAt25Cm() = everyZoneAt(0.25)
-    @Test(timeout = 3_600_000) fun everyZoneAt35Cm() = everyZoneAt(0.35)
+    @Test(timeout = 900_000) fun everyZoneAt5Cm() = everyZoneAt(0.05)
+    @Test(timeout = 900_000) fun everyZoneAt10Cm() = everyZoneAt(0.10)
+    @Test(timeout = 900_000) fun everyZoneAt25Cm() = everyZoneAt(0.25)
+    @Test(timeout = 900_000) fun everyZoneAt35Cm() = everyZoneAt(0.35)
 
-    @Test(timeout = 3_600_000) fun sevenZonesInOneTask() {
+    @Test(timeout = 900_000) fun sevenZonesInOneTask() {
         val req = request(zones.map { it.id })
         val zigzag = RoutePlanning.calculate(req, CoverageMode.LINES).selected
         val (a, ta) = timed { RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected }
         val b = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
         val f = check("ALL", req, zigzag, a, b, 0.25, false)
-        println("QA2 ZAMBONI ALL: ${a.status}, coverage %.3f %% (zigzag %.3f %%), computation %.1f s ${f}".format(
+        println("QA2 ZAMBONI ALL: ${a.status}, coverage %.3f %% (zigzag %.3f %%), computation %.1f s $f".format(
             100 * (a.metrics?.coverage ?: 0.0), 100 * (zigzag.metrics?.coverage ?: 0.0), ta))
         assertTrue(f.joinToString("\n"), f.isEmpty())
     }
 
-    @Test(timeout = 3_600_000) fun sevenZonesAt35CmAndFromInsideAZone() {
+    @Test(timeout = 900_000) fun sevenZonesAt35CmAndFromInsideAZone() {
         val failures = mutableListOf<String>()
         val piscine = zones.single { it.name.trim() == "Piscine" }
         for ((label, req) in listOf("ALL 0.35" to request(zones.map { it.id }, 0.35),
@@ -155,9 +155,8 @@ class ZamboniQaSpacingTest : ZamboniQaFixture() {
 
 /** Edge cases, orientation, height passes, cancellation and persistence of the Zamboni mode. */
 class ZamboniQaTest : ZamboniQaFixture() {
-
     /** The app always sends Lawn friendly with Zamboni (the toggle is disabled): the toggle must not change the plan. */
-    @Test(timeout = 1_800_000) fun lawnFriendlyToggleDoesNotChangeAZamboniPlan() {
+    @Test(timeout = 900_000) fun lawnFriendlyToggleDoesNotChangeAZamboniPlan() {
         for (zone in zones.filter { it.name.trim() in listOf("Potager", "Figuier", "Jardin d’Eden") }) {
             val fast = RoutePlanning.calculate(request(listOf(zone.id)), CoverageMode.ZAMBONI).selected
             val lawn = RoutePlanning.calculate(request(listOf(zone.id), style = TurnStyle.LAWN), CoverageMode.ZAMBONI).selected
@@ -167,7 +166,7 @@ class ZamboniQaTest : ZamboniQaFixture() {
 
     /** A point inside [zone], away from its holes. */
 
-    @Test(timeout = 1_800_000) fun holesObstaclesAndARobotStartInsideTheZone() {
+    @Test(timeout = 900_000) fun holesObstaclesAndARobotStartInsideTheZone() {
         val failures = mutableListOf<String>()
         for (zone in zones.filter { it.name.trim() in listOf("Potager", "Piscine", "Fosse") }) {
             val obstacle = PlanningObstacle(inside(zone, 2.0), 0.4)
@@ -225,7 +224,7 @@ class ZamboniQaTest : ZamboniQaFixture() {
     }
 
     /** Fine spacings: 7 cm still runs the search (window 12 = m + 2), 6.5 cm and below keep the zigzag. */
-    @Test(timeout = 1_800_000) fun fineSpacings() {
+    @Test(timeout = 900_000) fun fineSpacings() {
         val zone = rectangle(12.0, 9.0); val env = envelope(zone)
         for (spacing in listOf(0.05, 0.06, 0.065, 0.07, 0.08)) {
             val m = TurnOrder.step(spacing, radius); val w = ZamboniOrder.window(spacing, radius)
@@ -261,7 +260,7 @@ class ZamboniQaTest : ZamboniQaFixture() {
         println("QA2 ZAMBONI holes+obstacle: runs ${zigzag.runs.size} → ${zamboni.runs.size}, ${order.regularCells} regular cells, ${order.rolling} of ${order.turns} rolling, front ${order.frontWidth}, obstacle %.2f m (zigzag %.2f m)".format(minDist, zigDist))
     }
 
-    @Test(timeout = 1_800_000) fun manualAngleAndChangeEverySessionOnEveryZone() {
+    @Test(timeout = 900_000) fun manualAngleAndChangeEverySessionOnEveryZone() {
         val failures = mutableListOf<String>()
         for (zone in zones) {
             val name = zone.name.trim()
@@ -303,7 +302,7 @@ class ZamboniQaTest : ZamboniQaFixture() {
         return zone to RoutePlanning.coverage(request(listOf(zone.id), style = TurnStyle.LAWN), CoverageMode.ZAMBONI)
     }
 
-    @Test(timeout = 1_800_000) fun heightPassesRepeatAZamboniRouteThatStaysInsideTheEnvelope() {
+    @Test(timeout = 900_000) fun heightPassesRepeatAZamboniRouteThatStaysInsideTheEnvelope() {
         val (zone, plan) = zamboniPlan("Potager")
         assertFalse(plan.preview.localOnly)
         val expanded = CutPasses.expand(plan.preview, listOf(70, 55, 40))
@@ -323,7 +322,7 @@ class ZamboniQaTest : ZamboniQaFixture() {
     }
 
     /** Cancellation thrown from inside the order search: it stops the computation, nothing swallows it, nothing stays cached wrong. */
-    @Test(timeout = 1_800_000) fun cancellationDuringTheOrderSearchStopsTheComputation() {
+    @Test(timeout = 900_000) fun cancellationDuringTheOrderSearchStopsTheComputation() {
         val zone = zones.single { it.name.trim() == "Piscine" }
         val req = request(listOf(zone.id))
         val reference = RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected
@@ -354,7 +353,7 @@ class ZamboniQaTest : ZamboniQaFixture() {
         assertEquals(reference.planHash, RoutePlanning.calculate(req, CoverageMode.ZAMBONI).selected.planHash)
     }
 
-    @Test(timeout = 1_800_000) fun checkpointStoreKeepsAZamboniPreviewAndResumesInTheMiddleOfAnArc() {
+    @Test(timeout = 900_000) fun checkpointStoreKeepsAZamboniPreviewAndResumesInTheMiddleOfAnArc() {
         val (zone, plan) = zamboniPlan("Potager")
         val routes = RoutePlanning.navigation(map, RobotEnvelope.LUBA2.halfWidthM + 0.05,
             map.shapes.filter { it.kind == ShapeKind.NO_GO }.map { it.points }, emptyList(), base = base, recordedBoundary = true)

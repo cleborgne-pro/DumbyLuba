@@ -3,12 +3,16 @@ package fr.luba.poc.autonomy
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.SignalSample
 import fr.luba.poc.simulation.SimEdge
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.withTimeout
-import org.locationtech.jts.geom.Geometry
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import org.locationtech.jts.geom.Geometry
 
 /** Sends a frame to the gateway; false if the link is closed. */
 fun interface LegTransport { fun send(type: Int, payload: ByteArray): Boolean }
@@ -53,25 +57,68 @@ class RemoteLegs(private val transport: LegTransport, private val uploadTimeoutM
     private val waiters = ConcurrentHashMap<Int, CompletableDeferred<String?>>()
     private val routeCache = ArrayList<Pair<List<SimEdge>, Int>>()
     private val guardCache = ArrayList<Pair<Geometry, Int>>()
+    // Uploads in progress by content, and the number of times the gateway forgot them (see [ensure]).
+    private val inflight = HashMap<Any, CompletableDeferred<Int>>()
+    private var uploadGeneration = 0
     @Volatile var current: Leg? = null; private set
 
     fun nextLegId(): Int = ids.incrementAndGet()
 
     /** Forgets the uploads already made (gateway restarted: it no longer has them). */
-    fun forgetUploads() { synchronized(this) { routeCache.clear(); guardCache.clear() } }
+    fun forgetUploads() { synchronized(this) { routeCache.clear(); guardCache.clear(); uploadGeneration++ } }
 
-    suspend fun ensureRoute(edges: List<SimEdge>): Int {
-        synchronized(this) { routeCache.firstOrNull { it.first === edges }?.second }?.let { return it }
-        val id = upload(LegBlobs.KIND_ROUTE, LegBlobs.encodeRoute(edges))
-        synchronized(this) { routeCache.add(edges to id); while (routeCache.size > KEPT) routeCache.removeAt(0) }
-        return id
+    suspend fun ensureRoute(edges: List<SimEdge>): Int = ensure(routeCache, edges, LegBlobs.KIND_ROUTE) { LegBlobs.encodeRoute(edges) }
+
+    suspend fun ensureGuard(surface: Geometry): Int = ensure(guardCache, surface, LegBlobs.KIND_GUARD) { LegBlobs.encodeSurface(surface) }
+
+    /**
+     * Sends [routes] and [guards] ahead, in [scope], so that the next trackings find them on the gateway (Fold test of
+     * 2026-11-02: 2.1 to 2.6 s of upload, robot standing still, before each tracking handed over). A failed sending is
+     * not reported here: the tracking that needs the upload sends it again and reports its own failure.
+     */
+    fun prefetch(scope: CoroutineScope, routes: List<List<SimEdge>>, guards: List<Geometry>) {
+        scope.launch {
+            guards.forEach { runCatching { ensureGuard(it) } }
+            routes.forEach { runCatching { ensureRoute(it) } }
+        }
     }
 
-    suspend fun ensureGuard(surface: Geometry): Int {
-        synchronized(this) { guardCache.firstOrNull { it.first === surface }?.second }?.let { return it }
-        val id = upload(LegBlobs.KIND_GUARD, LegBlobs.encodeSurface(surface))
-        synchronized(this) { guardCache.add(surface to id); while (guardCache.size > KEPT) guardCache.removeAt(0) }
-        return id
+    /**
+     * Id of [key] on the gateway: from [cache] (same object or equal content: a sub-list of the route is a new object),
+     * from an upload of it already in progress (sending ahead), or uploaded now.
+     */
+    private suspend fun <K : Any> ensure(cache: MutableList<Pair<K, Int>>, key: K, kind: Int, encode: () -> ByteArray): Int {
+        while (true) {
+            val running: CompletableDeferred<Int>
+            val mine = CompletableDeferred<Int>()
+            val generation: Int
+            synchronized(this) {
+                cache.firstOrNull { it.first === key || it.first == key }?.let { return it.second }
+                running = inflight.entries.firstOrNull { it.key === key || it.key == key }?.value ?: mine.also { inflight[key] = it }
+                generation = uploadGeneration
+            }
+            // Upload of the same content by another caller: its id once it is confirmed; if it failed, try ourselves.
+            if (running !== mine) {
+                val shared = runCatching { running.await() }
+                currentCoroutineContext().ensureActive()
+                shared.getOrNull()?.let { return it }
+                continue
+            }
+            try {
+                val id = upload(kind, encode())
+                synchronized(this) {
+                    // Gateway restarted during the upload ([forgetUploads]): not kept, the next tracking sends it again.
+                    if (generation == uploadGeneration) { cache.add(key to id); while (cache.size > KEPT) cache.removeAt(0) }
+                    inflight.remove(key)
+                }
+                mine.complete(id)
+                return id
+            } catch (error: Throwable) {
+                synchronized(this) { inflight.remove(key) }
+                mine.completeExceptionally(error)
+                throw error
+            }
+        }
     }
 
     private suspend fun upload(kind: Int, data: ByteArray): Int {

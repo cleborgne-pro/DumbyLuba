@@ -2,10 +2,10 @@ package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.protocol.Telemetry
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** A point is only kept with a recent FIX solution ([Telemetry.rtkFix]). */
 data class KnownPoint(val x: Double, val y: Double, val heading: Double?, val at: Long,
@@ -15,10 +15,12 @@ data class LastKnownPosition(val robotId: String, val robotName: String, val poi
     val last get() = points.lastOrNull()
     fun accept(t: Telemetry): LastKnownPosition {
         val at = t.lastPositionAt
-        val valid = at != null && at > (last?.at ?: 0L) && t.x?.isFinite() == true && t.y?.isFinite() == true &&
+        val x = t.x
+        val y = t.y
+        val valid = at != null && at > (last?.at ?: 0L) && x?.isFinite() == true && y?.isFinite() == true &&
             t.heading?.isFinite() == true && t.rtkFix && t.lastRtkAt?.let { at - it in 0..5000 } == true
         val next = if (valid) {
-            val point = KnownPoint(t.x!!, t.y!!, t.heading, at!!, t.battery, t.robotState, t.positionType, t.rtkStatus, 0)
+            val point = KnownPoint(x, y, t.heading, at, t.battery, t.robotState, t.positionType, t.rtkStatus, 0)
             (points.filter { at - it.at <= 5 * 60_000 }.let { if (it.isNotEmpty() && at / 1000 == it.last().at / 1000) it.dropLast(1) else it } + point).takeLast(301)
         } else points
         return copy(points = next, communicationAt = t.lastReportAt ?: communicationAt,

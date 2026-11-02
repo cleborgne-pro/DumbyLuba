@@ -11,12 +11,14 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.PlanarYUVLuminanceSource
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.*
@@ -39,15 +41,15 @@ fun QrScanDialog(onPairing: (GatewayPairing) -> Unit, onDismiss: () -> Unit) {
         InfoNote(tr("On the gateway phone, open the app: its home screen shows the QR code. Aim at it with this phone.",
             "Sur le téléphone passerelle, ouvrez l'application : son écran d'accueil affiche le QR code. Visez-le avec ce téléphone."))
         when {
-            granted -> CameraQrReader(Modifier.fillMaxWidth().aspectRatio(1f).clip(androidx.compose.material3.MaterialTheme.shapes.medium)) { text ->
+            granted -> CameraQrReader(Modifier.fillMaxWidth().aspectRatio(1f).clip(MaterialTheme.shapes.medium)) { text ->
                 val pairing = GatewayPairing.parse(text)
                 if (pairing != null) { onPairing(pairing); true } else { other = true; false }
             }
             refused -> StatusNote(tr("Camera refused: allow it in the Android settings, or enter the code by hand.",
-                "Caméra refusée : autorisez-la dans les paramètres Android, ou saisissez le code à la main."), NoteTone.WARNING)
+                "Caméra refusée : autorisez-la dans les paramètres Android, ou saisissez le code à la main."), tone = NoteTone.WARNING)
             else -> LubaProgress(Modifier.fillMaxWidth())
         }
-        if (other) StatusNote(tr("This QR code is not a DumbyLuba gateway pairing.", "Ce QR code n'est pas un appairage de passerelle DumbyLuba."), NoteTone.WARNING)
+        if (other) StatusNote(tr("This QR code is not a DumbyLuba gateway pairing.", "Ce QR code n'est pas un appairage de passerelle DumbyLuba."), tone = NoteTone.WARNING)
     }, footer = {
         SecondaryPillButton(tr("Enter the code by hand", "Saisir le code à la main"), onDismiss, Modifier.fillMaxWidth())
     })
@@ -60,7 +62,7 @@ fun QrScanDialog(onPairing: (GatewayPairing) -> Unit, onDismiss: () -> Unit) {
 @Composable
 private fun CameraQrReader(modifier: Modifier, onText: (String) -> Boolean) {
     val context = LocalContext.current
-    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val owner = LocalLifecycleOwner.current
     val latest by rememberUpdatedState(onText)
     val done = remember { AtomicBoolean(false) }
     val executor = remember { Executors.newSingleThreadExecutor() }

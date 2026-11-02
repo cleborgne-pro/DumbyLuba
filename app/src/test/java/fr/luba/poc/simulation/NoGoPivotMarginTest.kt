@@ -3,14 +3,14 @@ package fr.luba.poc.simulation
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.planning.*
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
  * Mowing pivots facing no-go zones: the set margin (robot side → outline) also applies during the pivot.

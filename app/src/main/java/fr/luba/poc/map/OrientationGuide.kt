@@ -1,16 +1,16 @@
 package fr.luba.poc.map
 
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.Geometry as JtsGeometry
-import org.locationtech.jts.geom.GeometryFactory
-import org.locationtech.jts.geom.LineString
 import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
+import org.locationtech.jts.geom.GeometryFactory
+import org.locationtech.jts.geom.LineString
 
 /**
  * Guide lines of the manual direction of the passes ([OrientationMode.MANUAL]), drawn on the map while the angle is

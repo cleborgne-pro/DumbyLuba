@@ -19,6 +19,10 @@ class CutHeightTest {
         assertNull(standard.refusal(70))
         assertEquals("Hauteur hors plage 25–70 mm", standard.refusal(80))
 
+        standard.requireHeight(25)
+        val refused = assertThrows(IllegalArgumentException::class.java) { standard.requireHeight(80) }
+        assertEquals("Hauteur hors plage 25–70 mm", refused.message)
+
         val high = CutHeightRange.HIGH
         assertEquals(55..100, high.intRange())
         assertTrue(high.high)

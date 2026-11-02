@@ -58,6 +58,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
 import fr.luba.poc.i18n.tr
@@ -76,6 +78,7 @@ import fr.luba.poc.ui.components.PrimaryPillButton
 import fr.luba.poc.ui.components.SecondaryPillButton
 import fr.luba.poc.ui.components.StatusNote
 import fr.luba.poc.ui.components.TextAction
+import fr.luba.poc.ui.theme.LubaColors
 import fr.luba.poc.ui.theme.MammotionColors
 import kotlin.math.ceil
 import kotlin.math.max
@@ -92,8 +95,8 @@ object MapSyncScreen {
 @Composable
 fun MapSyncHost(robot: RobotBle, state: RobotUi) {
     if (!MapSyncScreen.open) return
-    androidx.compose.ui.window.Dialog(onDismissRequest = { MapSyncScreen.open = false },
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
+    Dialog(onDismissRequest = { MapSyncScreen.open = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
             dismissOnBackPress = false, dismissOnClickOutside = false)) {
         MapSyncPage(robot, state, onClose = { MapSyncScreen.open = false })
     }
@@ -157,19 +160,19 @@ fun MapSyncContent(map: RobotMap, items: List<SyncItem>?, error: String?, run: M
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     Text(tr("Comparing the two maps…", "Comparaison des deux cartes…"), style = MaterialTheme.typography.bodyMedium)
                 }
-                error != null -> StatusNote(tr("Comparison impossible: $error", "Comparaison impossible : $error"), NoteTone.DANGER)
+                error != null -> StatusNote(tr("Comparison impossible: $error", "Comparaison impossible : $error"), tone = NoteTone.DANGER)
                 shown.isEmpty() -> StatusNote(if (map.complete) tr("No difference: the Mammotion map already holds your corrections.",
                     "Aucune différence : la carte Mammotion contient déjà vos corrections.")
-                    else tr("Read the robot map first (Map sheet → Read the robot map).", "Lisez d'abord la carte du robot (feuille Carte → Lire la carte du robot)."), NoteTone.INFO)
+                    else tr("Read the robot map first (Map sheet → Read the robot map).", "Lisez d'abord la carte du robot (feuille Carte → Lire la carte du robot)."), tone = NoteTone.INFO)
                 else -> DifferenceList(shown, run, speedMps)
             }
             if (run.phase == SyncPhase.IDLE && items.orEmpty().isNotEmpty()) {
                 val meters = chosen.sumOf { it.traceM }
                 val minutes = ceil(chosen.sumOf { MapSyncPlanner.durationS(it, speedMps) } / 60.0).toInt()
-                refusal?.let { StatusNote(it, NoteTone.WARNING) }
+                refusal?.let { StatusNote(it, tone = NoteTone.WARNING) }
                 chosen.firstOrNull { MapSyncPlanner.durationS(it, speedMps) > MapSyncPlanner.MAX_DRIVE_S }?.let {
                     StatusNote(tr("${it.title}: outline too long for one drive at this speed, raise the route speed (Map → mowing settings)",
-                        "${it.title} : contour trop long pour un seul parcours à cette vitesse, augmentez la vitesse des trajets (Carte → réglages de tonte)"), NoteTone.WARNING)
+                        "${it.title} : contour trop long pour un seul parcours à cette vitesse, augmentez la vitesse des trajets (Carte → réglages de tonte)"), tone = NoteTone.WARNING)
                 }
                 PrimaryPillButton(if (chosen.isEmpty()) tr("Nothing selected", "Rien de sélectionné")
                     else tr("Start the sync · ${chosen.size} element(s) · ${MapCorrections.meters(meters)} m · ≈ $minutes min",
@@ -357,7 +360,7 @@ private fun SyncMap(map: RobotMap, items: List<SyncItem>, run: MapSyncRun, focus
     }
 }
 
-private fun DrawScope.drawShape(shape: MapShape, path: (List<Point>, Boolean) -> Path, stroke: Stroke, colors: fr.luba.poc.ui.theme.LubaColors) {
+private fun DrawScope.drawShape(shape: MapShape, path: (List<Point>, Boolean) -> Path, stroke: Stroke, colors: LubaColors) {
     when (shape.kind) {
         ShapeKind.ZONE -> { val p = path(shape.points, true); drawPath(p, colors.ZoneFill); drawPath(p, colors.ZoneStroke, style = stroke) }
         ShapeKind.NO_GO, ShapeKind.NO_GO_RECT, ShapeKind.NO_GO_VARIANT, ShapeKind.VISION_ZONE -> { val p = path(shape.points, shape.points.size >= 3); drawPath(p, colors.NoGoFill); drawPath(p, colors.NoGoStroke, style = stroke) }

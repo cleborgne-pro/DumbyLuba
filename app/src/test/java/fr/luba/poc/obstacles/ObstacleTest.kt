@@ -1,12 +1,11 @@
 package fr.luba.poc.obstacles
 
 import fr.luba.poc.map.Point
+import kotlin.math.hypot
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.hypot
 
 class ObstacleTest {
-
     private val robot = RobotEnvelope.LUBA2
 
     @Test fun `known kinds with suggested radius and fallback to other`() {

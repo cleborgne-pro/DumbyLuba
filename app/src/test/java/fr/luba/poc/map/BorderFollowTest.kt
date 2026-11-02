@@ -79,7 +79,7 @@ class BorderFollowTest {
         val from = RoutePlanning.missionStart(near.engine.routes, start, docked = false, base = base.point)!!
         val entry = near.loops.first().first()
         val closest = near.loops.first().minOf { it.distance(from) }
-        assertTrue("Entry at ${entry.distance(from)} m (nearest ${closest} m)", entry.distance(from) <= closest + 3.0)
+        assertTrue("Entry at ${entry.distance(from)} m (nearest $closest m)", entry.distance(from) <= closest + 3.0)
     }
 
     @Test(timeout = 180_000) fun noGoBorderIsFollowedOutsideTheExclusion() {

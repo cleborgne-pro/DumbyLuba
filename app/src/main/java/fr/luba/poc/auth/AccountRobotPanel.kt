@@ -8,6 +8,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.Clock
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.Format
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
@@ -15,19 +17,18 @@ import fr.luba.poc.ui.theme.MammotionColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import fr.luba.poc.i18n.tr
 
 /**
  * Everything the Mammotion account can read about the robot, without any command: state,
  * current task, positioning, network, maintenance, versions and mowing history.
  */
 @Composable
-fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = System.currentTimeMillis(),
+fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = Clock.now(),
                       onStartFirmwareUpdate: () -> Unit = {}, onFollowFirmwareUpdate: () -> Unit = {}, onStopFirmwareFollow: () -> Unit = {}) {
     val d = state.details
     val colors = MammotionColors
     Column(verticalArrangement = Arrangement.spacedBy(Dimens.Md)) {
-        SettingsGroup(tr("Robot state (account)", "État du robot (compte)")) {
+        SettingsGroup(title = tr("Robot state (account)", "État du robot (compte)")) {
             KeyValueRow(tr("State", "État"), RobotStates.label(d.sysStatus, d.chargeState))
             KeyValueRow(tr("Battery", "Batterie"), d.battery?.let { "$it %" + if (d.chargeState in setOf(1, 2)) tr(" · charging", " · en charge") else "" } ?: "—")
             if (d.lockState != null && d.lockState != 0) KeyValueRow(tr("Lock", "Verrouillage"), tr("locked (${d.lockState})", "verrouillé (${d.lockState})"), valueColor = colors.Warning)
@@ -38,7 +39,7 @@ fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = System.
         }
 
         d.task?.takeIf { it.active }?.let { t ->
-            SettingsGroup(tr("Current task", "Tâche en cours")) {
+            SettingsGroup(title = tr("Current task", "Tâche en cours")) {
                 KeyValueRow(tr("Progress", "Avancement"), "${t.percent} %")
                 LubaProgress(t.percent / 100f, Modifier.fillMaxWidth())
                 KeyValueRow(tr("Task area", "Surface de la tâche"), "${t.areaM2} m²")
@@ -48,7 +49,7 @@ fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = System.
             }
         }
 
-        if (d.rtk != null || d.network != null) SettingsGroup(tr("Positioning and network", "Positionnement et réseau")) {
+        if (d.rtk != null || d.network != null) SettingsGroup(title = tr("Positioning and network", "Positionnement et réseau")) {
             d.rtk?.let { k ->
                 KeyValueRow(tr("RTK solution", "Solution RTK"), RobotStates.rtk(k.status))
                 KeyValueRow("Satellites", tr("L1 ${k.l1} · L2 ${k.l2} · common view ${k.coViewL1}/${k.coViewL2}", "L1 ${k.l1} · L2 ${k.l2} · en vue commune ${k.coViewL1}/${k.coViewL2}"))
@@ -64,7 +65,7 @@ fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = System.
         }
 
         d.maintenance?.let { m ->
-            SettingsGroup(tr("Maintenance", "Entretien")) {
+            SettingsGroup(title = tr("Maintenance", "Entretien")) {
                 KeyValueRow(tr("Distance traveled", "Distance parcourue"), "${Format.num(m.mileageMeters / 1000.0, 1)} km")
                 KeyValueRow(tr("Working time", "Temps de travail"), "${Format.num(m.workSeconds / 3600.0, 1)} h")
                 KeyValueRow(tr("Battery cycles", "Cycles de batterie"), "${m.batteryCycles}")
@@ -75,7 +76,7 @@ fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = System.
             }
         }
 
-        if (d.firmware != null || state.firmwareCheck != null || d.base != null || state.firmwareUpdate.active) SettingsGroup(tr("Software", "Logiciel")) {
+        if (d.firmware != null || state.firmwareCheck != null || d.base != null || state.firmwareUpdate.active) SettingsGroup(title = tr("Software", "Logiciel")) {
             val f = state.firmwareCheck
             KeyValueRow("Firmware", f?.current ?: d.firmware ?: "—")
             // Update: confirmed start and live progress (FirmwareUpdateUi.kt).
@@ -85,7 +86,7 @@ fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = System.
             d.modules.take(12).forEach { KeyValueRow(it.identify.ifBlank { "module ${it.type}" }, it.version) }
         }
 
-        if (state.workRecords.isNotEmpty()) SettingsGroup(tr("Latest mowings", "Dernières tontes")) {
+        if (state.workRecords.isNotEmpty()) SettingsGroup(title = tr("Latest mowings", "Dernières tontes")) {
             state.workRecords.take(10).forEach { w ->
                 Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                     Text("${w.start?.let(::date) ?: tr("unknown date", "date inconnue")} · ${w.typeLabel} · ${w.resultLabel}",
@@ -98,7 +99,7 @@ fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = System.
         }
 
         // Failed account reads: reported, the other data stay displayed.
-        if (state.accountReadErrors.isNotEmpty()) StatusNote(state.accountReadErrors.joinToString("\n"), NoteTone.WARNING)
+        if (state.accountReadErrors.isNotEmpty()) StatusNote(state.accountReadErrors.joinToString("\n"), tone = NoteTone.WARNING)
     }
 }
 

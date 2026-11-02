@@ -1,11 +1,12 @@
 package fr.luba.poc.map
 
+import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.nativeCanvas
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
 
@@ -20,11 +21,11 @@ fun DrawScope.drawZoneOrder(map: RobotMap, order: List<Long>, screen: (Point) ->
         // "Ink" badge circled in white: distinct from the yellow no-go zones.
         drawCircle(Color.White,19f*unit,at)
         drawCircle(Color(0xFF212226),16.5f*unit,at)
-        val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color=android.graphics.Color.WHITE
             textSize=17f*unit
             typeface=Typeface.DEFAULT_BOLD
-            textAlign=android.graphics.Paint.Align.CENTER
+            textAlign=Paint.Align.CENTER
         }
         rotate(-mapRotation, at) {
             drawContext.canvas.nativeCanvas.drawText((index+1).toString(),at.x,at.y-(paint.ascent()+paint.descent())/2,paint)

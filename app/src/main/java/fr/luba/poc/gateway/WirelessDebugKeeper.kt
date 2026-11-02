@@ -1,6 +1,7 @@
 package fr.luba.poc.gateway
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.database.ContentObserver
@@ -10,8 +11,15 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
+import androidx.core.content.edit
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
+import java.text.SimpleDateFormat
+import java.util.Date
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * Pure decision: turn wireless debugging back on only if the user wants it, the app has the system
@@ -74,7 +82,7 @@ class WirelessDebugKeeper(private val context: Context, private val report: (Str
     }
 
     private fun evaluate() {
-        val now = android.os.SystemClock.elapsedRealtime()
+        val now = SystemClock.elapsedRealtime()
         val wifi = wifiConnected(); val on = enabled(context)
         if (!WirelessDebugPolicy.shouldEnable(keep(context), canWrite(context), wifi, on, now, lastAttemptMs)) return
         lastAttemptMs = now
@@ -95,8 +103,10 @@ class WirelessDebugKeeper(private val context: Context, private val report: (Str
         private const val SETTLE_MS = 3_000L
         private const val PERIOD_MS = 60_000L
 
+        // Holds the application context only (install), never an activity.
+        @SuppressLint("StaticFieldLeak")
         private var installed: WirelessDebugKeeper? = null
-        private val events = kotlinx.coroutines.flow.MutableStateFlow<List<String>>(emptyList())
+        private val events = MutableStateFlow<List<String>>(emptyList())
         /** Latest reactivations, shown in Service → Gateway. */
         val lastEvents = events
 
@@ -104,9 +114,9 @@ class WirelessDebugKeeper(private val context: Context, private val report: (Str
         fun install(context: Context) {
             if (installed != null || !canWrite(context)) return
             installed = WirelessDebugKeeper(context.applicationContext) { text ->
-                val stamp = java.text.SimpleDateFormat("HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(java.util.Date())
+                val stamp = SimpleDateFormat("HH:mm:ss", I18n.locale).format(Date())
                 events.value = (events.value + "$stamp $text").takeLast(5)
-                android.util.Log.i("DumbyLubaAdbWifi", text)
+                Log.i("DumbyLubaAdbWifi", text)
             }.also { it.start() }
         }
 
@@ -114,6 +124,6 @@ class WirelessDebugKeeper(private val context: Context, private val report: (Str
             context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
         fun enabled(context: Context) = runCatching { Settings.Global.getInt(context.contentResolver, SETTING, 0) == 1 }.getOrDefault(false)
         fun keep(context: Context) = context.getSharedPreferences(PREFS, 0).getBoolean(KEY, true)
-        fun setKeep(context: Context, value: Boolean) { context.getSharedPreferences(PREFS, 0).edit().putBoolean(KEY, value).apply() }
+        fun setKeep(context: Context, value: Boolean) { context.getSharedPreferences(PREFS, 0).edit { putBoolean(KEY, value) } }
     }
 }

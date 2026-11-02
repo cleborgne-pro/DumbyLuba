@@ -120,7 +120,9 @@ class GatewayConfigTest {
     @Test fun `relay, invalid address or code refused without saving anything`() {
         val first = RelayConfig.read(context)
         for (bad in listOf(first.copy(url = "ftp://serveur"), first.copy(url = "http://serveur/chemin"), first.copy(url = "http://u:p@serveur"),
-                first.copy(url = "https://serveur?code=1"), first.copy(url = "serveur:8765"), first.copy(url = "http://serveur", code = "12 456"))) {
+                first.copy(url = "https://serveur?code=1"), first.copy(url = "serveur:8765"), first.copy(url = "http://serveur", code = "12 456"),
+                // Plain HTTP leaves the local network: the code would cross the Internet in clear (audit of 2026-10-30).
+                first.copy(url = "http://8.8.8.8:8765"), first.copy(url = "http://maison.example:8765"))) {
             assertThrows(bad.url, IllegalArgumentException::class.java) { RelayConfig.save(context, bad) }
         }
         assertEquals(first, RelayConfig.read(context))

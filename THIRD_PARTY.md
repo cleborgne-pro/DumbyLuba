@@ -10,7 +10,7 @@ Error code table: `pymammotion/data/error_codes.csv` (PyMammotion, GPL-3.0, comm
 
 Mammotion-HA and Mammo are inspected references; none of their files are incorporated. The Android/Compose, Kotlin, protobuf and JUnit dependencies are resolved through Gradle and keep their respective licenses.
 
-- Eclipse Paho Java MQTT client 1.2.5: https://github.com/eclipse-paho/paho.mqtt.java — EPL 1.0 / EDL 1.0. MQTT transport of the cloud POC.
+- Older Aliyun cloud (`auth/AliyunCloud.kt`, `AliyunBroker.kt`, `AliyunSignature.kt`): port of PyMammotion `aliyun/cloud_gateway.py`, `aliyun/client.py` and `transport/aliyun_mqtt.py` (GPL-3.0, commit `963209b53ffe9b20a50488bd1cc53584ca1c0c20`) with its upstream Aliyun app key; API gateway signature following `alibabacloud_apigateway_util` 0.0.2 (`get_signature`, Apache-2.0). Root certificates `app/src/main/resources/fr/luba/poc/auth/aliyun_ca.pem` (Aliyun IoT Root CA and GlobalSign roots, public certificates) copied from PyMammotion `pymammotion/resources/ca.pem`.
 - Auth v2 and client constants: PyMammotion 0.10.8 distributed on PyPI, under the upstream project's license (GPL-3.0), port faithful to `http.py`. No personal credentials are embedded. Account reading and cloud action encodings: PyMammotion 0.10.10 and Mammotion-HA 0.6.17 ([details](docs/MAMMOTION_ACCOUNT.md)).
 
 - LocationTech JTS Core 1.20.0: https://github.com/locationtech/jts — EPL 2.0 / EDL 1.0. Metric buffers and coverage intersections.
@@ -25,13 +25,13 @@ Mammotion-HA and Mammo are inspected references; none of their files are incorpo
 
 ## Robot camera (Agora)
 
-No video SDK is incorporated in the APK. The camera (Service → **Camera**, and the thumbnails on the map and in manual control) loads Agora Web SDK 4.24.3 at runtime (`https://download.agora.io/sdk/release/AgoraRTC_N-4.24.3.js`, Agora.io, proprietary Agora license) in a WebView, like the Mammotion-HA Lovelace card (`ha-mammotion-assets/dist/agora-client.js`, inspected, not incorporated). Token sequence and video command: PyMammotion `http.py` (`get_stream_subscription`) and `commands/messages/video.py`.
+The Agora Web SDK 4.24.3 (Agora.io, proprietary Agora license) is vendored in the APK: `app/src/main/assets/camera/AgoraRTC_N-4.24.3.js` (SHA-256 `9f0d8d799ad278d1f1f40460997c83b7fc3225f96ce16cadf181d1fb846db3d169aa3b9ccfe07e41fe64c64c5f5c2266`, downloaded from `https://download.agora.io/sdk/release/AgoraRTC_N-4.24.3.js`). It is loaded by the camera WebView (Service → **Camera**, and the thumbnails on the map and in manual control) under a Content Security Policy that refuses every remote script, like the Mammotion-HA Lovelace card (`ha-mammotion-assets/dist/agora-client.js`, inspected, not incorporated). Token sequence and video command: PyMammotion `http.py` (`get_stream_subscription`) and `commands/messages/video.py`.
 
 ## Robot image
 
 `app/src/main/res/drawable/robot_illustration.xml`: original vector drawing by the project (GPL-3.0), shown when the model is unknown.
 
-`app/src/main/res/drawable/robot_photo_*.webp`: Mammotion product photos (official stores us/de/fr.mammotion.com; 1st-generation LUBA AWD: product page of the reseller heyupnow.com), cut out and downscaled for the home screen. These images remain the property of Mammotion and are not covered by the project's GPL-3.0; they are included only to show the detected model, and will be removed on request of the rights holder. The app looks them up by name (`RobotModel.image`) and shows the project's illustration when they are missing; the detected model is still named. Table of model prefixes and product keys: `pymammotion/utility/device_type.py` (PyMammotion, GPL-3.0). "Mammotion" and "LUBA" are trademarks of their respective owners, mentioned only to indicate compatibility; this project is neither affiliated with nor endorsed by Mammotion.
+`app/src/main/res/drawable-mdpi/robot_photo_*.webp`: Mammotion product photos (official stores us/de/fr.mammotion.com; 1st-generation LUBA AWD: product page of the reseller heyupnow.com), cut out and downscaled for the home screen. These images remain the property of Mammotion and are not covered by the project's GPL-3.0; they are included only to show the detected model, and will be removed on request of the rights holder. The app looks them up by name (`RobotModel.image`) and shows the project's illustration when they are missing; the detected model is still named. Table of model prefixes and product keys: `pymammotion/utility/device_type.py` (PyMammotion, GPL-3.0). "Mammotion" and "LUBA" are trademarks of their respective owners, mentioned only to indicate compatibility; this project is neither affiliated with nor endorsed by Mammotion.
 
 ## Weather data (rain check)
 

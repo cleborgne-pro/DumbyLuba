@@ -90,7 +90,8 @@ meantime, the view kept loading until it was hidden.
 
 ## Limitations
 
-- The player loads the **Agora Web SDK** (proprietary license, not included in the APK) at runtime from the Agora
-  CDN.
+- The player runs the **Agora Web SDK** 4.24.3 (proprietary license) vendored in the APK (`assets/camera`), served to
+  the page by the WebView itself; its Content Security Policy refuses every remote script and only lets the page reach
+  the Agora servers (`*.agora.io`, `*.sd-rtn.com`, any port).
 - The WebView must be on screen to decode: with the screen off, no photo is taken.
 - Code `50504` means the cloud cannot reach the robot.

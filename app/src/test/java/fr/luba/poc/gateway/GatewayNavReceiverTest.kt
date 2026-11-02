@@ -1,23 +1,26 @@
 package fr.luba.poc.gateway
 
+import fr.luba.poc.ConcurrentMethods
 import fr.luba.poc.map.Point
-import fr.luba.poc.protocol.Commands
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.LubaMsgProto.MsgCmdType
 import fr.luba.poc.proto.LubaMsgProto.MsgDevice
+import fr.luba.poc.protocol.Commands
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
+import org.junit.runner.RunWith
 
 /**
  * Android gateway docking without a pilot ([GatewayRobot] `dockAlone`, the only navigation message the gateway builds
  * itself): official return addressed to the navigation receiver of the kept robot's model (DumbyLuba#3). LUBA 2: the
  * same frames as before the change (`Commands()`), byte for byte once the clock timestamp is fixed.
  */
+@RunWith(ConcurrentMethods::class)
 class GatewayNavReceiverTest {
     private val address = "AA:BB:CC:DD:EE:FF"
     private val links = LinkedBlockingQueue<FakeRobotLink>()

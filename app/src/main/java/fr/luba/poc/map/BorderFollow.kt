@@ -10,12 +10,12 @@ import fr.luba.poc.simulation.MapBase
 import fr.luba.poc.simulation.MowingSimulation
 import fr.luba.poc.simulation.SimConfig
 import fr.luba.poc.simulation.TrajectoryPlanner
+import kotlin.math.atan2
 import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.LineString
 import org.locationtech.jts.geom.Polygon
-import kotlin.math.atan2
-import org.locationtech.jts.geom.Geometry as JtsGeometry
 
 /** Border offered by the "Border" debug mode: outer boundary of a zone or loop around a no-go zone. */
 data class BorderChoice(val shape: MapShape, val noGo: Boolean, val label: String)

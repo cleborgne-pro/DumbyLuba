@@ -88,6 +88,8 @@ class SimulatedRobotEnv : public LegEnv {
   std::vector<std::string> events;
   std::vector<frames::Fields> eventFields;
   int maxLinearSeen = 0;
+  // RTK solution published (rtk.status): 4 FIX, 5 float.
+  int rtkStatus = 4;
   Opt<double> confirmed;
 
   Point position() const { return Point(x_, y_); }
@@ -123,7 +125,7 @@ class SimulatedRobotEnv : public LegEnv {
     t.bleRssi = -50;
     t.mobileRssi = -90;
     t.lastRtkAt = positionWall_;
-    t.rtkStatus = 4;
+    t.rtkStatus = rtkStatus;
     t.positioningLevel = 1;
     t.gpsStars = 24;
     v.devicePrevious = devicePrevious_;

@@ -24,7 +24,7 @@ SEL = {
  'heatmap-wifi': ('atout-heatmap-wifi', 'trim'), 'heatmap-mobile': ('atout-heatmap-mobile', 'trim'),
  'heatmap-rtk': ('atout-heatmap-rtk', 'trim'), 'terrain-3d': ('relief-3d', ''), 'terrain-shading': ('relief-heatmap', ''),
  'manual-control': ('manual', ''), 'record-by-driving': ('service-pilotage-enregistrement', ''), 'service': ('service-hub', 'top'), 'blades': ('blades-height', 'top'),
- 'painted-zone': ('atout-zone-peinte', 'trim'), 'debug-mowing-paint': ('mowdebug-paint', 'top'),
+ 'painted-zone': ('carte-zones-peinture', ''),
  'border': ('mowdebug-border', 'top'), 'obstacles': ('obstacles-list', 'top'), 'obstacle-simulation': ('obstacle-sim', 'top'),
  'command-cutoff': ('service-coupure', 'top'), 'notifications': ('notifications', ''), 'notification-settings': ('notifications-settings', ''), 'weather': ('weather-service', ''),
  'garden-location': ('garden-location', ''), 'account': ('account-robot', ''), 'gateway-pilot': ('service-passerelle-pilote', 'top'),

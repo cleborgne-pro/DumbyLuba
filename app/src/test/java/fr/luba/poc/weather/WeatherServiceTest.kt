@@ -3,6 +3,10 @@ package fr.luba.poc.weather
 import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -18,10 +22,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.Executor
 
 /**
  * End-to-end weather service without Internet: RainViewer index, real PNG radar tiles (native decoding), simulated

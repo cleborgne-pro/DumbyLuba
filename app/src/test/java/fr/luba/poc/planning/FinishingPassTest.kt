@@ -10,13 +10,13 @@ import fr.luba.poc.map.PaintedZone
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.simulation.MapBase
+import kotlin.math.ceil
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.Envelope
 import org.locationtech.jts.geom.GeometryFactory
-import kotlin.math.ceil
 
 /** Finishing phase on the real gaps: offer, dedicated target, envelope and length checks, coverage after the pass. */
 class FinishingPassTest {

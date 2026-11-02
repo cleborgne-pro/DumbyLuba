@@ -1,9 +1,9 @@
 package fr.luba.poc.map
 
-import fr.luba.poc.protocol.Telemetry
-import fr.luba.poc.protocol.TelemetryReducer
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlSysProto.*
+import fr.luba.poc.protocol.Telemetry
+import fr.luba.poc.protocol.TelemetryReducer
 import fr.luba.poc.simulation.RobotRoute
 import org.junit.Assert.*
 import org.junit.Test

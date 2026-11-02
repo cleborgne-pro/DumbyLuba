@@ -15,8 +15,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.Clock
 import fr.luba.poc.difficulty.DifficultyEvent
+import fr.luba.poc.difficulty.DifficultyUi
 import fr.luba.poc.difficulty.PresumedObstacles
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.ObstacleKind
@@ -30,12 +33,16 @@ import fr.luba.poc.ui.components.PrimaryPillButton
 import fr.luba.poc.ui.components.SecondaryPillButton
 import fr.luba.poc.ui.components.SliderRow
 import fr.luba.poc.ui.theme.MammotionColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.UUID
 import kotlin.math.roundToInt
 
-/** Map item chosen with a tap: bumper contact (detail sheet) or saved obstacle (exclusion size). */
+/** Map item chosen with a tap: bumper contact (detail sheet), saved obstacle or presumed obstacle (exclusion size). */
 sealed interface MapPick {
     data class Encounter(val event: DifficultyEvent) : MapPick
     data class Obstacle(val obstacle: LocalObstacle) : MapPick
+    data class Presumed(val obstacle: LocalObstacle) : MapPick
 }
 
 /**
@@ -50,27 +57,29 @@ object ObstacleSelection {
     const val STEP_M = 0.05
 
     /**
-     * Item tapped at [p] (meters) at scale [scale] (pixels per meter): the nearest among the contacts (and presumed
-     * obstacles, opened on their nearest contact) if [encountersVisible], and the saved obstacles, tapped inside their
-     * exclusion zone or within finger reach.
+     * Item tapped at [p] (meters) at scale [scale] (pixels per meter): the nearest among the contacts if
+     * [encountersVisible], the presumed obstacles if [presumedVisible] and the saved obstacles, obstacles being tapped
+     * inside their exclusion zone or within finger reach.
      */
     fun pick(p: Point, scale: Double, encounters: List<DifficultyEvent>, presumed: List<LocalObstacle>,
-             obstacles: List<LocalObstacle>, encountersVisible: Boolean): MapPick? {
+             obstacles: List<LocalObstacle>, encountersVisible: Boolean, presumedVisible: Boolean = encountersVisible): MapPick? {
         val reach = maxOf(0.6, 28.0 / scale.coerceAtLeast(1e-6))
         val candidates = mutableListOf<Pair<Double, MapPick>>()
-        if (encountersVisible) {
-            encounters.forEach { e -> val d = e.point.distance(p); if (d <= reach) candidates += d to MapPick.Encounter(e) }
-            presumed.forEach { o ->
-                val center = Point(o.x, o.y)
-                val d = center.distance(p)
-                if (d <= maxOf(reach, o.exclusionRadiusM)) encounters.minByOrNull { it.point.distance(center) }
-                    ?.takeIf { it.point.distance(center) <= PresumedObstacles.CLUSTER_M + o.radiusM }
-                    ?.let { candidates += d to MapPick.Encounter(it) }
-            }
-        }
-        obstacles.forEach { o -> val d = Point(o.x, o.y).distance(p); if (d <= maxOf(reach, o.exclusionRadiusM)) candidates += d to MapPick.Obstacle(o) }
+        fun reached(o: LocalObstacle): Double? = Point(o.x, o.y).distance(p).takeIf { it <= maxOf(reach, o.exclusionRadiusM) }
+        if (encountersVisible) encounters.forEach { e -> val d = e.point.distance(p); if (d <= reach) candidates += d to MapPick.Encounter(e) }
+        if (presumedVisible) presumed.forEach { o -> reached(o)?.let { candidates += it to MapPick.Presumed(o) } }
+        obstacles.forEach { o -> reached(o)?.let { candidates += it to MapPick.Obstacle(o) } }
         return candidates.minByOrNull { it.first }?.second
     }
+
+    /**
+     * Obstacle saved from a presumed obstacle: its center, with the type and size chosen in its sheet. Once saved, it
+     * hides the presumed obstacle ([PresumedObstacles.covers]) and is edited like any saved obstacle.
+     */
+    fun fromPresumed(presumed: LocalObstacle, kind: ObstacleKind, radiusM: Double, marginM: Double, id: String, now: Long,
+                     date: String): LocalObstacle =
+        LocalObstacle(id, kind, presumed.x, presumed.y, clampRadius(radiusM), clampMargin(marginM),
+            createdAtMs = now, updatedAtMs = now, label = tr("Obstacle encountered on $date", "Obstacle rencontré le $date"))
 
     /** Presumed obstacle grouping this contact (same place), if any. */
     fun presumedFor(event: DifficultyEvent, presumed: List<LocalObstacle>): LocalObstacle? =
@@ -136,7 +145,7 @@ fun ObstacleEditSheet(obstacles: List<LocalObstacle>) {
         if (obstacle.incidents.isNotEmpty()) KeyValueRow("Incidents", "${obstacle.incidents.size}")
         if (confirmDelete) {
             val contacts = PresumedObstacles.hiddenContacts(MapExtraLayers.latest.events, obstacle, obstacles.filter { it.id != obstacle.id },
-                System.currentTimeMillis()).size
+                Clock.now()).size
             if (contacts > 0) Text(tr("The $contacts bumper contacts recorded at this place will be dismissed too, so that it does not come back as a presumed obstacle.",
                 "Les $contacts contacts pare-chocs consignés à cet endroit seront écartés aussi, pour qu'il ne revienne pas en obstacle présumé."),
                 style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
@@ -153,7 +162,50 @@ fun ObstacleEditSheet(obstacles: List<LocalObstacle>) {
             PrimaryPillButton(tr("Save", "Enregistrer"), {
                 MapExtraLayers.actions?.invoke(DifficultyAction.Register(obstacle.edited(
                     radiusM = ObstacleSelection.clampRadius(radius.toDouble()), marginM = ObstacleSelection.clampMargin(margin.toDouble()),
-                    kind = kind, atMs = System.currentTimeMillis())))
+                    kind = kind, atMs = Clock.now())))
+                MapExtraLayers.close()
+            }, Modifier.weight(1f))
+        }
+    })
+}
+
+/**
+ * Sheet of a presumed obstacle tapped on the map (repeated or recent bumper contacts, avoided by route preparation):
+ * save it as an obstacle with the chosen exclusion size (then edited like any saved obstacle), or dismiss it with all
+ * its contacts (object removed, false contacts).
+ */
+@Composable
+fun PresumedObstacleSheet(ui: DifficultyUi) {
+    val openedId by MapExtraLayers.openedPresumed.collectAsState()
+    val presumed = ui.presumed.firstOrNull { it.id == openedId } ?: return
+    var kind by remember(presumed.id) { mutableStateOf(presumed.kind) }
+    var radius by remember(presumed.id) { mutableFloatStateOf(ObstacleSelection.clampRadius(presumed.radiusM).toFloat()) }
+    var margin by remember(presumed.id) { mutableFloatStateOf(ObstacleSelection.clampMargin(presumed.marginM).toFloat()) }
+    val contacts = PresumedObstacles.contactsOf(ui.events, presumed.id, Clock.now())
+    val dateFormat = SimpleDateFormat(tr("yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm"), I18n.locale)
+    val lastContact = dateFormat.format(Date(presumed.updatedAtMs))
+    LubaDialog(onDismissRequest = { MapExtraLayers.close() }, title = presumed.label.ifBlank { tr("Presumed obstacle", "Obstacle présumé") }, content = {
+        KeyValueRow("Position", "${Format.num(presumed.x, 2)} / ${Format.num(presumed.y, 2)} m")
+        KeyValueRow(tr("Contacts at this place", "Contacts à cet endroit"), "${contacts.size}")
+        KeyValueRow(tr("Last contact", "Dernier contact"), lastContact)
+        Text(if (ui.avoidPresumed) tr("Not saved: routes avoid it while its contacts are recent or repeated. Save it to keep it and set its size, or dismiss it if the object is gone.",
+                "Non enregistré : les trajets l'évitent tant que ses contacts sont récents ou répétés. Enregistrez-le pour le garder et régler sa taille, ou écartez-le si l'objet n'est plus là.")
+            else tr("Not saved, and presumed obstacles are not avoided (Service → Obstacles). Save it so that routes avoid it.",
+                "Non enregistré, et les obstacles présumés ne sont pas évités (Service → Obstacles). Enregistrez-le pour que les trajets l'évitent."),
+            style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
+        // The latest contact keeps its photo and details.
+        contacts.maxByOrNull { it.atMs }?.let { latest ->
+            SecondaryPillButton(tr("Open the latest contact", "Ouvrir le dernier contact"), { MapExtraLayers.open(latest) }, Modifier.fillMaxWidth())
+        }
+        ObstacleSizeEditor(kind, { kind = it }, radius, { radius = it }, margin, { margin = it })
+    }, footer = {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryPillButton(tr("Dismiss", "Écarter"), {
+                MapExtraLayers.actions?.invoke(DifficultyAction.DismissPresumed(presumed.id)); MapExtraLayers.close()
+            }, Modifier.weight(1f))
+            PrimaryPillButton(tr("Save the obstacle", "Enregistrer l'obstacle"), {
+                MapExtraLayers.actions?.invoke(DifficultyAction.Register(ObstacleSelection.fromPresumed(presumed, kind,
+                    radius.toDouble(), margin.toDouble(), UUID.randomUUID().toString(), Clock.now(), lastContact)))
                 MapExtraLayers.close()
             }, Modifier.weight(1f))
         }

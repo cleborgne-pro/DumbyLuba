@@ -3,10 +3,10 @@ package fr.luba.poc.history
 import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.atan2
 import kotlin.math.ceil
+import org.junit.Assert.*
+import org.junit.Test
 
 /** Mowing Score: contributions measured on the track, the task journal and the real coverage. */
 class MowingScoreTest {

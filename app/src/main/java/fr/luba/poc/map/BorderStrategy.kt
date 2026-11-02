@@ -1,13 +1,14 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.simulation.TrajectoryPlanner
 import fr.luba.poc.ui.Format
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
-import org.locationtech.jts.geom.Polygon
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.GeometryFactory
+import org.locationtech.jts.geom.Polygon
 
 /**
  * Border strategy per border type ([BorderType]): margin between the side of the chassis and the recorded outline for
@@ -45,8 +46,8 @@ object BorderStrategy {
             BorderType.OPEN -> tr("lap at $cm cm, as close as possible", "tour à $cm cm, au plus près")
             BorderType.CURB -> tr("lap at $cm cm (set margin)", "tour à $cm cm (marge réglée)")
             BorderType.WALL -> tr("lap at $cm cm, chassis off the wall", "tour à $cm cm, châssis écarté du mur")
-            BorderType.DANGER -> tr("lap at $cm cm, passes ≥ ${Format.num(DANGER_MARGIN_M * 100, 0)} cm away, transits ≥ ${Format.num(fr.luba.poc.simulation.TrajectoryPlanner.DANGER_TRANSIT_MARGIN_M * 100, 0)} cm",
-                "tour à $cm cm, passes à ${Format.num(DANGER_MARGIN_M * 100, 0)} cm au moins, transits à ${Format.num(fr.luba.poc.simulation.TrajectoryPlanner.DANGER_TRANSIT_MARGIN_M * 100, 0)} cm")
+            BorderType.DANGER -> tr("lap at $cm cm, passes ≥ ${Format.num(DANGER_MARGIN_M * 100, 0)} cm away, transits ≥ ${Format.num(TrajectoryPlanner.DANGER_TRANSIT_MARGIN_M * 100, 0)} cm",
+                "tour à $cm cm, passes à ${Format.num(DANGER_MARGIN_M * 100, 0)} cm au moins, transits à ${Format.num(TrajectoryPlanner.DANGER_TRANSIT_MARGIN_M * 100, 0)} cm")
         }
     }
 

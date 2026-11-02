@@ -24,15 +24,13 @@ import fr.luba.poc.map.RobotMap
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.SimulationSession
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -47,10 +45,7 @@ import org.robolectric.annotation.GraphicsMode
 class MapOrientationPickerTest {
     private val out: String? = System.getProperty("uiShots")
     val compose = createComposeRule()
-    // The test activity (ui-test-manifest) only exists in debug.
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private val zone = MapShape(1, 0, listOf(Point(0.0, 0.0), Point(12.0, 0.0), Point(12.0, 8.0), Point(0.0, 8.0)), "Pelouse")
     private val state = RobotUi(robotMap = RobotMap(listOf(zone), true, "test"), connection = ConnectionState.Receiving, ready = true,
@@ -84,8 +79,8 @@ class MapOrientationPickerTest {
         // Angle on the map and on the slider.
         assertTrue(compose.onAllNodesWithText("45°").fetchSemanticsNodes().size >= 2)
         compose.onNodeWithText("Aperçu du trajet").performClick()
-        // Reading the screen in the condition lets the computation's main-thread steps run; a refusal is shown in the message below.
-        runCatching { compose.waitUntil(60_000) { compose.onAllNodesWithText("Démarrer").fetchSemanticsNodes(); preview != null } }
+        // A refusal is shown in the message below.
+        compose.awaitCurrentRoute(60_000) { preview }
         val texts = compose.onAllNodes(androidx.compose.ui.test.hasText("", substring = true), useUnmergedTree = true).fetchSemanticsNodes()
             .flatMap { it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() } }.map { it.text }
         assertEquals(texts.joinToString(" | "), listOf(45), preview?.zoneAngles)

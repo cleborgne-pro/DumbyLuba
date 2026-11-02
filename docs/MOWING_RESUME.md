@@ -11,7 +11,7 @@ mowing; before 0.61.0, only mowing with blades running), the app saves in its pr
 - the SHA-256 fingerprint (to the millimeter) of the prepared mowing edges and a stable map key;
 - the height, the recharge thresholds, the edge reached and the position projected onto that edge, the cutting meters traveled, recharges and resumes;
 - the reason for the interruption;
-- the **continuous-blade zones** of the preparation (`bladeZones`, 0.61.0): the painted zone of a trial mowing;
+- the **continuous-blade zones** of the preparation (`bladeZones`, 0.61.0): the painted zones of a mowing chosen by painting (Map → Mow → Paint a zone), or the gaps of a finishing;
   absent (null) for a preparation from the map, which takes the preview's zones. The task (`MissionTask`: mowing,
   blades stopped, survey, border, trial) is deduced from the preview, the blades and these zones;
 - the **height passes** (0.45.0): `Preview.cutHeights` and the height of each cutting path (`pathHeights`),
@@ -37,7 +37,7 @@ During tracking, progress only moves forward (a transient back-off does not move
 ## Resume
 
 The map shows the task title and its progress (`MissionTask`: **Mowing interrupted**, **Route with blades stopped
-interrupted**, **Signal survey interrupted**, **Border following interrupted**, **Trial mowing interrupted**, e.g.
+interrupted**, **Signal survey interrupted**, **Border following interrupted**, **Partial mowing interrupted**, e.g.
 "Mowing interrupted · 42 %"), with the time, the cause (`InterruptionSummary`), the height and the zones, then
 **Resume**, a **Discard** link (with confirmation) and a **⋯** menu (**Unblock**, **Resume further on**, **Stop
 details**). User-facing behavior: [resume feature page](features/mowing-resume.md).

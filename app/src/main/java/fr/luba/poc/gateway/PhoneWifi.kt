@@ -6,10 +6,11 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
+import fr.luba.poc.Clock
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -44,7 +45,7 @@ object PhoneWifi {
 
     private fun changed(now: Boolean) {
         if (connected == now) return
-        connected = now; changedAt = System.currentTimeMillis()
+        connected = now; changedAt = Clock.now()
         val text = describe()
         listeners.forEach { runCatching { it(text) } }
     }
@@ -55,7 +56,7 @@ object PhoneWifi {
     fun describe(): String = describe(enabled(), connected, changedAt)
 
     internal fun describe(enabled: Boolean?, connected: Boolean?, changedAt: Long): String {
-        val since = if (changedAt > 0) tr(" since ", " depuis ") + SimpleDateFormat("HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(Date(changedAt)) else ""
+        val since = if (changedAt > 0) tr(" since ", " depuis ") + SimpleDateFormat("HH:mm:ss", I18n.locale).format(Date(changedAt)) else ""
         return when {
             enabled == false -> tr("Phone Wi-Fi disabled$since: turn it back on to reach the gateway",
                 "Wi-Fi du téléphone désactivé$since : le réactiver pour joindre la passerelle")

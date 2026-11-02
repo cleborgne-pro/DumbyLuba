@@ -1,9 +1,9 @@
 package fr.luba.poc.i18n
 
+import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.util.Locale
 
 class I18nTest {
     private val locale = Locale.getDefault()

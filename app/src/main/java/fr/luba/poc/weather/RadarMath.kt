@@ -1,14 +1,15 @@
 package fr.luba.poc.weather
 
+import fr.luba.poc.i18n.tr
 import kotlin.math.PI
 import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.ln
+import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.tan
-import fr.luba.poc.i18n.tr
 
 /**
  * "Universal Blue" palette (scheme 2) of the RainViewer tiles, the only one available for free since 2026.
@@ -59,7 +60,7 @@ object RadarPalette {
 /** Reflectivity conversions, Marshall-Palmer relation (Z = 200·R^1.6): order of magnitude, not a measurement. */
 object Reflectivity {
     fun rainRateMmH(dbz: Double): Double = (10.0.pow(dbz / 10.0) / 200.0).pow(1.0 / 1.6)
-    fun dbzFor(rateMmH: Double): Double = 10.0 * kotlin.math.log10(200.0 * rateMmH.pow(1.6))
+    fun dbzFor(rateMmH: Double): Double = 10.0 * log10(200.0 * rateMmH.pow(1.6))
 
     fun label(dbz: Int?): String = when {
         dbz == null || dbz < RadarPalette.PRECIP_DBZ -> tr("no rain", "aucune pluie")

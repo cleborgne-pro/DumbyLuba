@@ -1,8 +1,12 @@
 package fr.luba.poc.camera
 
+import fr.luba.poc.i18n.tr
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 import org.json.JSONArray
 import org.json.JSONObject
-import fr.luba.poc.i18n.tr
 
 /**
  * Agora credentials returned by `POST /device-server/v1/stream/token` (PyMammotion `get_stream_subscription`,
@@ -58,13 +62,16 @@ data class CameraCredentials(
         }
 
         /** Readable reason for a token request failure ([cloudCode]: code returned by the cloud). */
-        fun failureReason(error: Throwable, cloudCode: Int?): String = when {
-            cloudCode != null -> failure(cloudCode)
-            error is java.net.UnknownHostException -> tr("no Internet access on the phone (cloud address not found)", "pas d'accès Internet sur le téléphone (adresse du cloud introuvable)")
-            error is java.net.SocketTimeoutException -> tr("network timeout (phone Internet?)", "délai réseau dépassé (Internet du téléphone ?)")
-            error is java.net.ConnectException || error is javax.net.ssl.SSLException -> tr("cannot connect to the Mammotion cloud (${error.javaClass.simpleName})", "connexion au cloud Mammotion impossible (${error.javaClass.simpleName})")
-            error.message?.let { m -> listOf("Mammotion", tr("Sign in", "Connectez"), tr("No LUBA", "Aucun"), "1/2", "2/2").any(m::startsWith) } == true -> error.message!!
-            else -> error.javaClass.simpleName
+        fun failureReason(error: Throwable, cloudCode: Int?): String {
+            val readable = error.message?.takeIf { m -> listOf("Mammotion", tr("Sign in", "Connectez"), tr("No LUBA", "Aucun"), "1/2", "2/2").any(m::startsWith) }
+            return when {
+                cloudCode != null -> failure(cloudCode)
+                error is UnknownHostException -> tr("no Internet access on the phone (cloud address not found)", "pas d'accès Internet sur le téléphone (adresse du cloud introuvable)")
+                error is SocketTimeoutException -> tr("network timeout (phone Internet?)", "délai réseau dépassé (Internet du téléphone ?)")
+                error is ConnectException || error is SSLException -> tr("cannot connect to the Mammotion cloud (${error.javaClass.simpleName})", "connexion au cloud Mammotion impossible (${error.javaClass.simpleName})")
+                readable != null -> readable
+                else -> error.javaClass.simpleName
+            }
         }
     }
 }

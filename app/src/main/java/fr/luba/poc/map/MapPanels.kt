@@ -1,10 +1,14 @@
 package fr.luba.poc.map
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,19 +38,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.auth.AccountMode
 import fr.luba.poc.ble.ConnectionState
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.diagnostics.MapNavPlan
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.planning.*
+import fr.luba.poc.protocol.BumperRest
+import fr.luba.poc.protocol.CollisionLatch
+import fr.luba.poc.protocol.OffMapLatch
+import fr.luba.poc.protocol.SelfCheck
+import fr.luba.poc.protocol.StopUnlock
+import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.*
 import fr.luba.poc.ui.Format
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
 import fr.luba.poc.weather.WeatherPillSegment
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /*
  * Header, side bar and panels laid on the map ([MapScreen]): named composables reading the map state holders
@@ -55,12 +68,12 @@ import kotlin.math.roundToInt
 /** Mammotion header: back, status pill (Bluetooth or gateway link, positioning, batteries, weather). */
 @Composable
 internal fun MapHeader(
-    state: RobotUi, telemetry: fr.luba.poc.protocol.Telemetry, demo: Boolean, cloud: Boolean,
-    apiPosition: fr.luba.poc.protocol.Telemetry?, apiKnown: LastKnownPosition?, known: LastKnownPosition?,
+    state: RobotUi, telemetry: Telemetry, demo: Boolean, cloud: Boolean,
+    apiPosition: Telemetry?, apiKnown: LastKnownPosition?, known: LastKnownPosition?,
     form: MowingTaskForm, sheets: MapSheets, onBack: (() -> Unit)?, modifier: Modifier = Modifier,
 ) {
     val fresh = state.connection == ConnectionState.Receiving && (state.ageMs ?: Long.MAX_VALUE) < 5000
-    val shownTelemetry = if (cloud) apiPosition ?: fr.luba.poc.protocol.Telemetry.EMPTY else telemetry
+    val shownTelemetry = if (cloud) apiPosition ?: Telemetry.EMPTY else telemetry
     // Charge: Mammotion account (API), or active BLE if it is more recent.
     val charge = if (demo) null else rememberChargeStatus(apiPosition, telemetry.takeIf { state.ready })
     Row(modifier.fillMaxWidth().padding(Dimens.Md), verticalAlignment = Alignment.CenterVertically) {
@@ -118,21 +131,21 @@ internal fun MapSideBar(
 /** Robot protections read from its self-check: STOP lock, collision, forbidden time range, beyond the mapped zones. */
 internal class RobotProtection(state: RobotUi, demo: Boolean, cloud: Boolean) {
     val selfCheck = state.telemetry.selfCheck
-    val stopLock = fr.luba.poc.protocol.StopUnlock.locked(selfCheck)
+    val stopLock = StopUnlock.locked(selfCheck)
     // Self-check 25 beyond the mapped zones or at a no-go zone, bumper clear: not a lock for the joystick (2026-10-20 and
     // 2026-10-25, [fr.luba.poc.protocol.OffMapLatch]); a note replaces the "Robot stuck" panel.
     val offMapLatch = state.ready && !demo && !cloud && !state.mowing.active && !state.robotRoute.running &&
-        fr.luba.poc.protocol.OffMapLatch.ignored(selfCheck,
-            fr.luba.poc.protocol.BumperRest.guard(state.selected?.name, state.telemetry.sensorStatus, state.bumperRest, android.os.SystemClock.elapsedRealtime()),
-            fr.luba.poc.protocol.OffMapLatch.atEdge(state.robotMap, state.telemetry.x?.let { x -> state.telemetry.y?.let { y -> Point(x, y) } }))
+        OffMapLatch.ignored(selfCheck,
+            BumperRest.guard(state.selected?.name, state.telemetry.sensorStatus, state.bumperRest, SystemClock.elapsedRealtime()),
+            OffMapLatch.atEdge(state.robotMap, state.telemetry.x?.let { x -> state.telemetry.y?.let { y -> Point(x, y) } }))
     /** At a no-go zone only: the move to a point keeps its stop on 25 there, only the joystick ignores it. */
     val exclusionLatch = offMapLatch &&
         !PointPlanner.beyondMapped(state.robotMap, state.telemetry.x?.let { x -> state.telemetry.y?.let { y -> Point(x, y) } })
-    val robotBlocked = state.ready && !demo && !cloud && ((fr.luba.poc.protocol.StopUnlock.blocked(selfCheck) && !offMapLatch) || state.unlockPending)
+    val robotBlocked = state.ready && !demo && !cloud && ((StopUnlock.blocked(selfCheck) && !offMapLatch) || state.unlockPending)
     /** Forbidden time range of the Mammotion app (self-check 23): nothing to unlock. */
-    val forbiddenTime = fr.luba.poc.protocol.SelfCheck.forbiddenTime(selfCheck)
+    val forbiddenTime = SelfCheck.forbiddenTime(selfCheck)
     /** Positioning condition (41 weak satellite signal…): nothing to unlock, joystick allowed. */
-    val positioning = fr.luba.poc.protocol.SelfCheck.positioning(selfCheck)
+    val positioning = SelfCheck.positioning(selfCheck)
     /** Condition explained by a note, without the "Robot stuck" panel and its unlock. */
     val noteOnly = forbiddenTime || positioning
 }
@@ -166,11 +179,11 @@ internal fun RobotProtectionPanel(
             "et reprise au point interrompu."), NoteTone.WARNING) { forbiddenHidden = true }
     }
     else if (robotBlocked && protection.positioning && !state.unlockPending) {
-        if (!positioningHidden) MapFloatingNote(tr("Positioning lost: ${fr.luba.poc.protocol.SelfCheck.name(selfCheck)} (self-check $selfCheck). " +
+        if (!positioningHidden) MapFloatingNote(tr("Positioning lost: ${SelfCheck.name(selfCheck)} (self-check $selfCheck). " +
             "Nothing to unlock: the robot refuses to work until its positioning comes back. Wait a few minutes, or drive it " +
             "under open sky with the joystick (blades stopped)." +
             (blockedCheckpoint?.let { " ${it.task.title} at ${(it.progress * 100).toInt()} %: resume possible once the signal is back." } ?: ""),
-            "Positionnement perdu : ${fr.luba.poc.protocol.SelfCheck.name(selfCheck)} (self-check $selfCheck). " +
+            "Positionnement perdu : ${SelfCheck.name(selfCheck)} (self-check $selfCheck). " +
             "Rien à déverrouiller : le robot refuse de travailler tant que son positionnement n'est pas revenu. Attendre quelques " +
             "minutes, ou l'amener à découvert au joystick (lames arrêtées)." +
             (blockedCheckpoint?.let { " ${it.task.title} à ${(it.progress * 100).toInt()} % : reprise possible dès le retour du signal." } ?: "")),
@@ -183,7 +196,7 @@ internal fun RobotProtectionPanel(
                 "Hors des zones cartographiées (self-check 25) : ignoré, joystick et déplacement au point restent possibles, lames arrêtées."),
             NoteTone.INFO) { offMapHidden = true }
     else if (robotBlocked) {
-        val collision = fr.luba.poc.protocol.CollisionLatch.latched(selfCheck)
+        val collision = CollisionLatch.latched(selfCheck)
         var details by remember { mutableStateOf(false) }
         MapPanel(when { stopLock -> tr("Robot locked after STOP", "Robot verrouillé après STOP"); collision -> tr("Robot stuck against an obstacle", "Robot bloqué contre un obstacle"); else -> tr("Robot protection active", "Protection du robot active") },
             subtitle = blockedCheckpoint?.let { tr("${it.task.title} at ${(it.progress * 100).toInt()} % · resume possible once the robot is cleared", "${it.task.title} à ${(it.progress * 100).toInt()} % · reprise possible une fois le robot dégagé") }) {
@@ -194,7 +207,7 @@ internal fun RobotProtectionPanel(
             } }, style = MaterialTheme.typography.bodyMedium, color = colors.TextSecondary)
             if (details) InfoNote((if (collision) tr("30 cm straight back-off, blades stopped, then wait for the lock to be released (self-check $selfCheck).", "Recul de 30 cm en ligne droite, lames arrêtées, puis attente de la levée du verrou (self-check $selfCheck).")
                 else tr("Unlock without movement: stop, cancel any Mammotion task, read the errors again (self-check $selfCheck).", "Déverrouillage sans mouvement : arrêt, annulation de la tâche Mammotion éventuelle, relecture des erreurs (self-check $selfCheck).")) +
-                tr(" If the robot refuses: ${fr.luba.poc.protocol.StopUnlock.physical(selfCheck)}.", " Si le robot le refuse : ${fr.luba.poc.protocol.StopUnlock.physical(selfCheck)}.") +
+                tr(" If the robot refuses: ${StopUnlock.physical(selfCheck)}.", " Si le robot le refuse : ${StopUnlock.physical(selfCheck)}.") +
                 (blockedCheckpoint?.interruption?.let { tr("\nStop: ${InterruptionSummary.of(it).detail ?: it}", "\nArrêt : ${InterruptionSummary.of(it).detail ?: it}") } ?: ""))
             TextAction(if (details) tr("Hide the details", "Masquer les détails") else tr("Details", "Détails"), { details = !details })
             Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
@@ -272,8 +285,8 @@ internal fun SimulationBar(s: SimState, total: Double, sim: SimulationUi, simula
                 IconButton(onClick = { sheets.simulationDialog = true }) { Icon(Icons.Rounded.MoreHoriz, contentDescription = tr("Simulation details and speed", "Détails et vitesse de simulation")) }
             }
             LubaProgress(coverage, Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(4.dp))
-            if (s.phase == SimPhase.BLOCKED) StatusNote(s.log.lastOrNull().orEmpty(), NoteTone.DANGER,
-                Modifier.padding(horizontal = Dimens.Md, vertical = Dimens.Xs))
+            if (s.phase == SimPhase.BLOCKED) StatusNote(s.log.lastOrNull().orEmpty(), tone = NoteTone.DANGER,
+                modifier = Modifier.padding(horizontal = Dimens.Md, vertical = Dimens.Xs))
         }
     }
 }
@@ -287,19 +300,35 @@ internal fun RouteComputationPanels(prep: RoutePreparationState, sheets: MapShee
     if (prep.error.isNotBlank() && !sheets.mowingDialog) MapFloatingNote(prep.error, NoteTone.DANGER, onDismiss = { prep.error = "" })
 }
 
-/** Zone choice on the map, in mowing order (numbers on the map). */
+/**
+ * Zone choice on the map, in mowing order (numbers on the map), or by painting the part to mow ([ZonePaintState], mowing
+ * only): the painted zones are then the selection.
+ */
 @Composable
 internal fun ZoneChoicePanel(sheets: MapSheets, form: MowingTaskForm, prep: RoutePreparationState, map: RobotMap,
-                             selected: Set<Long>, onSelected: (Set<Long>) -> Unit) {
+                             selected: Set<Long>, paint: ZonePaintState, onSelected: (Set<Long>) -> Unit) {
+    // Survey routes follow whole zones: a painting chosen for a mowing is left.
+    LaunchedEffect(sheets.surveyTask) { if (sheets.surveyTask && paint.active) { paint.active = false; onSelected(emptySet()) } }
+    val painting = paint.active && !sheets.surveyTask
     MapPanel(if (sheets.surveyTask) tr("Survey zones", "Zones du relevé") else tr("Mowing zones", "Zones de tonte"),
         subtitle = if (!map.complete) tr("Load a complete map first (Map button).", "Chargez d'abord une carte complète (bouton Carte).")
             else if (sheets.surveyTask) tr("Tap the zones to drive through, blades stopped: they will be surveyed in this order.", "Touchez les zones à parcourir, lames arrêtées : elles seront relevées dans cet ordre.")
+            else if (painting) tr("Paint the part to mow with one finger; two fingers move the view.", "Peignez au doigt la partie à tondre ; deux doigts déplacent la vue.")
             else tr("Tap the zones in mowing order: they will be mowed in this order.", "Touchez les zones dans l'ordre de tonte : elles seront tondues dans cet ordre."),
         onClose = { sheets.selectingZones = false }, closeDescription = tr("Close the zone choice", "Fermer le choix des zones")) {
-        ZoneOrderChips(map, selected.toList(), onRemove = { id -> onSelected(selected - id) })
+        if (!sheets.surveyTask) Segmented(listOf(false to tr("Whole zones", "Zones entières"), true to tr("Paint a zone", "Peindre une zone")), painting,
+            { chosen -> paint.active = chosen; onSelected(if (chosen) paint.zoneIds else emptySet()) }, enabled = map.complete && !prep.computing)
+        if (painting) ZonePaintTools(paint, map, enabled = map.complete && !prep.computing)
+        else ZoneOrderChips(map, selected.toList(), onRemove = { id -> onSelected(selected - id) })
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.Xs)) {
-            TextAction(tr("Add all", "Tout ajouter"), { onSelected(selected + map.shapes.filter { it.kind == ShapeKind.ZONE }.map { it.id }) }, enabled = map.complete)
-            TextAction(tr("Clear", "Effacer"), { onSelected(emptySet()) }, enabled = selected.isNotEmpty())
+            if (painting) {
+                val strokes = PaintDraft.strokes(map)
+                TextAction(tr("Undo", "Annuler"), { PaintDraft.update(map) { it.dropLast(1) } }, enabled = strokes.isNotEmpty() && !prep.computing)
+                TextAction(tr("Clear all", "Tout effacer"), { PaintDraft.update(map) { emptyList() } }, enabled = strokes.isNotEmpty() && !prep.computing)
+            } else {
+                TextAction(tr("Add all", "Tout ajouter"), { onSelected(selected + map.shapes.filter { it.kind == ShapeKind.ZONE }.map { it.id }) }, enabled = map.complete)
+                TextAction(tr("Clear", "Effacer"), { onSelected(emptySet()) }, enabled = selected.isNotEmpty())
+            }
             Spacer(Modifier.weight(1f))
             PrimaryPillButton(tr("Next", "Suivant"), { sheets.selectingZones = false; form.mowingStep = 1; sheets.mowingDialog = true },
                 enabled = selected.isNotEmpty() && map.complete && !prep.computing)
@@ -337,12 +366,12 @@ internal fun MapActions(
 }
 
 /** Chosen zones in mowing order: numbered badge, tap to remove. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ZoneOrderChips(map: RobotMap, order: List<Long>, onRemove: (Long) -> Unit) {
     val colors = MammotionColors
     if (order.isEmpty()) return
-    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
         order.forEachIndexed { index, id ->
             val name = map.shapes.firstOrNull { it.id == id }?.let { MapCorrections.zoneTitle(it, "Zone ${index + 1}") } ?: "Zone ${index + 1}"
             Surface(onClick = { onRemove(id) }, shape = CircleShape, color = colors.GreenSoft) {
@@ -365,7 +394,7 @@ internal fun ZoneOrderChips(map: RobotMap, order: List<Long>, onRemove: (Long) -
  */
 @Composable
 internal fun PointMovePanel(
-    state: RobotUi, destination: Point?, plan: fr.luba.poc.diagnostics.MapNavPlan?, computing: Boolean, error: String,
+    state: RobotUi, destination: Point?, plan: MapNavPlan?, computing: Boolean, error: String,
     attempted: Boolean, confirmed: Boolean, onConfirmed: (Boolean) -> Unit, idle: Boolean, onTrajectorySpeed: (Int) -> Unit,
     onStop: () -> Unit, onStart: () -> Unit, onClose: () -> Unit,
 ) {
@@ -384,12 +413,12 @@ internal fun PointMovePanel(
         onClose = onClose) {
         plan?.departure?.takeIf { !state.navTest.running }?.let { exit ->
             StatusNote(tr("Robot on its base: it first leaves in a straight line, slowly, to the link point (${Format.num(exit.meters,1)} m), then follows the path.",
-                "Robot sur sa base : il sort d’abord en ligne droite, lentement, jusqu’au point de liaison (${Format.num(exit.meters,1)} m), puis suit le chemin."), NoteTone.INFO)
+                "Robot sur sa base : il sort d’abord en ligne droite, lentement, jusqu’au point de liaison (${Format.num(exit.meters,1)} m), puis suit le chemin."), tone = NoteTone.INFO)
         }
         if (offMap && !state.navTest.running) StatusNote(tr("Beyond the mapped zones (orange dots): ${Format.num(offMeters,1)} m driven in a straight line without border check. Only the no-go zones and the saved obstacles are avoided: a wall, a pool or a slope are not known there.",
-            "Au-delà des zones cartographiées (pointillés orange) : ${Format.num(offMeters,1)} m parcourus en ligne droite sans contrôle des bords. Seules les zones interdites et les obstacles enregistrés sont évités : un mur, une piscine ou une pente n’y sont pas connus."), NoteTone.WARNING)
+            "Au-delà des zones cartographiées (pointillés orange) : ${Format.num(offMeters,1)} m parcourus en ligne droite sans contrôle des bords. Seules les zones interdites et les obstacles enregistrés sont évités : un mur, une piscine ou une pente n’y sont pas connus."), tone = NoteTone.WARNING)
         if (offMap && state.navTest.running) StatusNote(tr("Section beyond the map: stay next to the robot, STOP within reach.",
-            "Tronçon hors carte : rester près du robot, STOP à portée de main."), NoteTone.WARNING)
+            "Tronçon hors carte : rester près du robot, STOP à portée de main."), tone = NoteTone.WARNING)
         if (!state.navTest.running) LubaCheckRow(tr("I am supervising the move, area clear and stop within reach", "Je supervise le déplacement, zone dégagée et arrêt accessible"),
             confirmed, onConfirmed)
         if (offMap && !state.navTest.running) LubaCheckRow(tr("I have checked that the dotted section is clear and safe", "J’ai vérifié que le tronçon en pointillé est dégagé et sans danger"),
@@ -412,7 +441,7 @@ internal fun MapPanel(
     subtitle: String? = null,
     onClose: (() -> Unit)? = null,
     closeDescription: String = tr("Close", "Fermer"),
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = MammotionColors
     Surface(shape = MaterialTheme.shapes.large, color = colors.Surface, shadowElevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
@@ -437,7 +466,7 @@ internal fun MapFloatingNote(text: String, tone: NoteTone, onDismiss: (() -> Uni
     val colors = MammotionColors
     Surface(shape = MaterialTheme.shapes.medium, color = colors.Surface, shadowElevation = 4.dp, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(Dimens.Xs), verticalAlignment = Alignment.CenterVertically) {
-            StatusNote(text, tone, Modifier.weight(1f))
+            StatusNote(text, tone = tone, modifier = Modifier.weight(1f))
             if (onDismiss != null) TextAction("OK", onDismiss)
         }
     }
@@ -464,7 +493,7 @@ internal fun mapReadAction(loading: Boolean, failed: Boolean, gateway: Boolean):
 @Composable
 internal fun NoMapPanel(state: RobotUi, cloud: Boolean, fetchEnabled: Boolean, onFetch: () -> Unit, onAccount: () -> Unit) {
     val gateway = state.viaGateway && !cloud
-    val localOnly = fr.luba.poc.auth.AccountMode.observe()
+    val localOnly = AccountMode.observe()
     val subtitle = when {
         state.mapLoading -> (if (gateway) tr("Reading the robot map over Bluetooth through the gateway…", "Lecture de la carte du robot en Bluetooth par la passerelle…")
             else tr("Reading the robot map over Bluetooth…", "Lecture de la carte du robot en Bluetooth…")) + " " + state.mammotionMap.source
@@ -476,7 +505,7 @@ internal fun NoMapPanel(state: RobotUi, cloud: Boolean, fetchEnabled: Boolean, o
     val failure = mapReadFailureShown(state, cloud)
     MapPanel(tr("No map on this phone", "Aucune carte sur ce téléphone"), subtitle = subtitle) {
         // Failed reading: the reason stays here until the next reading (DumbyLuba#3: only "Reading…" was seen).
-        if (failure != null) StatusNote(failure, NoteTone.WARNING)
+        if (failure != null) StatusNote(failure, tone = NoteTone.WARNING)
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm), verticalAlignment = Alignment.CenterVertically) {
             if (!localOnly) SecondaryPillButton(tr("Account map", "Carte du compte"), onAccount, Modifier.weight(1f))
             PrimaryPillButton(mapReadAction(state.mapLoading, failure != null, gateway),
@@ -497,7 +526,7 @@ internal fun InterruptedPointPanel(resume: PointResume, state: RobotUi, enabled:
             ?: tr("Destination kept: route recomputed from the robot's position.", "Destination conservée : trajet recalculé depuis la position du robot."),
             style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary)
         if (summary.detail != null) InfoNote(summary.detail)
-        if (state.motorWatchdog?.demonstrated != true) StatusNote(tr("Stay nearby during the resume.", "Restez à proximité pendant la reprise."), NoteTone.WARNING)
+        if (state.motorWatchdog?.demonstrated != true) StatusNote(tr("Stay nearby during the resume.", "Restez à proximité pendant la reprise."), tone = NoteTone.WARNING)
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             SecondaryPillButton(tr("Discard", "Abandonner"), onDiscard, Modifier.weight(1f))
             PrimaryPillButton(tr("Resume", "Reprendre"), onResume, Modifier.weight(1.3f), enabled = enabled)
@@ -562,10 +591,10 @@ internal fun InterruptedMowingPanel(
                     (if (checkpoint.skippedMeters >= 0.05) tr(" · ${Format.num(checkpoint.skippedMeters, 1)} m skipped", " · ${Format.num(checkpoint.skippedMeters, 1)} m sautés") else ""),
                     style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (details && summary.detail != null) InfoNote(summary.detail)
-                if (state.autoResumeStatus.isNotBlank()) StatusNote(state.autoResumeStatus, NoteTone.INFO)
-                if (resumeError.isNotBlank()) StatusNote(resumeError, NoteTone.DANGER)
-                if (state.checkpointSaveError) StatusNote(tr("Failed to write the progress on the phone.", "Échec d'écriture de l'avancement sur le téléphone."), NoteTone.DANGER)
-                if (state.backOffStatus.isNotBlank()) StatusNote(state.backOffStatus, when {
+                if (state.autoResumeStatus.isNotBlank()) StatusNote(state.autoResumeStatus, tone = NoteTone.INFO)
+                if (resumeError.isNotBlank()) StatusNote(resumeError, tone = NoteTone.DANGER)
+                if (state.checkpointSaveError) StatusNote(tr("Failed to write the progress on the phone.", "Échec d'écriture de l'avancement sur le téléphone."), tone = NoteTone.DANGER)
+                if (state.backOffStatus.isNotBlank()) StatusNote(state.backOffStatus, tone = when {
                     state.backOffPending -> NoteTone.INFO
                     state.backOffStatus.startsWith(tr("Robot backed off", "Robot reculé")) -> NoteTone.SUCCESS
                     else -> NoteTone.DANGER })

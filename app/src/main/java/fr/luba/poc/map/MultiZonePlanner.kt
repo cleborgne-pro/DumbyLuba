@@ -1,6 +1,8 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.obstacles.ObstacleDisc
+import fr.luba.poc.obstacles.RobotEnvelope
 
 /** Zones stay independent: no unvalidated shortcut between zones. */
 object MultiZonePlanner {
@@ -34,8 +36,8 @@ object MultiZonePlanner {
     }
     fun plan(zones: List<MapShape>, holes: List<List<Point>>, spacing: Double, margin: Double,
              mode: CoverageMode, borders: Boolean, borderPasses: Int = 1, noGoPasses: Int = 1,
-             obstacles: List<fr.luba.poc.obstacles.ObstacleDisc> = emptyList(),
-             robot: fr.luba.poc.obstacles.RobotEnvelope = fr.luba.poc.obstacles.RobotEnvelope.LUBA2,
+             obstacles: List<ObstacleDisc> = emptyList(),
+             robot: RobotEnvelope = RobotEnvelope.LUBA2,
              recordedBoundary: Boolean = false, basePoint: Point? = null, bordersFirst: Boolean? = null, nearbyNoGo: Boolean = false, progress: (Int,Int,String)->Unit = { _,_,_-> }, onLive: (Preview)->Unit = {},
              outerOffsetM: Double = CoveragePlanner.RECORDED_OUTER_OFFSET_M,
              turnStyle: TurnStyle = TurnStyle.FAST, speedMps: Double = 0.3, cutWidthM: Double = spacing): Preview {

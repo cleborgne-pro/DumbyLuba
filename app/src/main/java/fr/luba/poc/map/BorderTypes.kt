@@ -1,14 +1,15 @@
 package fr.luba.poc.map
 
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import fr.luba.poc.i18n.tr
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import kotlin.math.floor
 import kotlin.math.roundToLong
+import org.json.JSONArray
+import org.json.JSONObject
 
 /*
  * Border types: each portion of a zone or no-go boundary can be marked OPEN, CURB, WALL or DANGER. This is the base of
@@ -341,7 +342,7 @@ object BorderTypeRepository {
     /** Editor requested from the Map sheet, shown by [BorderTypeEditorHost]. */
     var editorOpen by mutableStateOf(false)
 
-    fun init(context: android.content.Context) {
+    fun init(context: Context) {
         if (dir != null) return
         val d = context.applicationContext.filesDir
         dir = d

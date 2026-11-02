@@ -2,12 +2,13 @@ package fr.luba.poc.gateway
 
 import android.Manifest
 import android.app.Application
-import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Looper
 import android.provider.Settings
 import androidx.test.core.app.ApplicationProvider
+import java.time.Duration
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
@@ -16,8 +17,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowNetworkCapabilities
-import java.time.Duration
-import java.util.concurrent.CopyOnWriteArrayList
 
 /** Wireless debugging turned back on when Android turns it off: permission, Wi-Fi connected, user choice, pace. */
 @RunWith(RobolectricTestRunner::class)

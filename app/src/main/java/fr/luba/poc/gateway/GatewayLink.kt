@@ -1,10 +1,12 @@
 package fr.luba.poc.gateway
 
+import fr.luba.poc.Clock
 import fr.luba.poc.autonomy.LegFrames
 import fr.luba.poc.autonomy.LegTransport
 import fr.luba.poc.ble.RobotLink
 import fr.luba.poc.gateway.GatewayProtocol.Frame
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.RobotTilt
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
@@ -40,6 +42,8 @@ class GatewayChannel private constructor(val socket: Socket, val input: DataInpu
 
         fun open(host: String, port: Int, code: String, connectTimeoutMs: Int = 3000, silenceMs: Long = GatewayProtocol.SILENCE_MS): GatewayChannel {
             require(host.isNotBlank()) { tr("gateway address unknown", "adresse de la passerelle inconnue") }
+            // Unencrypted protocol: never send the pairing code to an address outside the local network.
+            require(LocalNetwork.allows(host)) { LocalNetwork.refusal(host) }
             val socket = Socket()
             val began = System.nanoTime()
             try {
@@ -48,9 +52,9 @@ class GatewayChannel private constructor(val socket: Socket, val input: DataInpu
                 socket.soTimeout = silenceMs.toInt()
                 val channel = GatewayChannel(socket, DataInputStream(BufferedInputStream(socket.getInputStream())),
                     DataOutputStream(BufferedOutputStream(socket.getOutputStream())))
-                val deadline = System.currentTimeMillis() + ADMISSION_MS
+                val deadline = Clock.now() + ADMISSION_MS
                 var challenge = channel.read()
-                while (challenge.type == GatewayProtocol.PING && System.currentTimeMillis() < deadline) challenge = channel.read()
+                while (challenge.type == GatewayProtocol.PING && Clock.now() < deadline) challenge = channel.read()
                 if (challenge.type == GatewayProtocol.DENIED) throw GatewayDenied(challenge.text())
                 check(challenge.type == GatewayProtocol.CHALLENGE && challenge.payload.isNotEmpty()) { tr("unexpected answer", "réponse inattendue") }
                 check(challenge.payload[0].toInt() == GatewayProtocol.VERSION) { GatewayProtocol.versionMismatch(challenge.payload[0].toInt()) }
@@ -104,7 +108,7 @@ class GatewayLink private constructor(private val host: String, private val port
      * the stop order still gets through.
      */
     @Volatile var holdUntil = 0L
-    private fun holding() = holdUntil > System.currentTimeMillis()
+    private fun holding() = holdUntil > Clock.now()
 
     /** Autonomous tracking frame to the gateway. */
     val legTransport = LegTransport { type, payload -> !closed && outbox.offer(Frame(type, payload)) }
@@ -177,8 +181,8 @@ class GatewayLink private constructor(private val host: String, private val port
                 GatewayProtocol.PING -> Unit
                 GatewayProtocol.HEALTH -> {
                     GatewayHealth.decode(frame.payload)?.let { received ->
-                        val now = System.currentTimeMillis()
-                        received.gravity?.let { fr.luba.poc.map.RobotTilt.update(it, now - received.gravityAgeMs) }
+                        val now = Clock.now()
+                        received.gravity?.let { RobotTilt.update(it, now - received.gravityAgeMs) }
                         // Tilt sent every 500 ms: log and health only when the state changes.
                         val health = received.copy(gravity = null, gravityAgeMs = 0)
                         if (health == lastHealth && now - lastHealthAt < GatewayProtocol.HEALTH_MS) return@let
@@ -224,19 +228,19 @@ class GatewayLink private constructor(private val host: String, private val port
     private fun reconnect(): GatewayChannel? {
         outbox.removeAll { it.type != LegFrames.LEG_ABORT && it.type != GatewayProtocol.WRITE }
         // Ceiling: beyond it, the gateway stopped tracking by itself (20 min without pilot) or is gone; the pilot gives up.
-        val began = System.currentTimeMillis()
+        val began = Clock.now()
         val giveUpAt = began + OUTAGE_LIMIT_MS
         var attempts = 0
         var reportedAt = began
         var lastError = ""
-        while (!closed && holding() && System.currentTimeMillis() < giveUpAt) {
+        while (!closed && holding() && Clock.now() < giveUpAt) {
             attempts++
             try { return GatewayChannel.open(host, port, code, connectTimeoutMs = 2000) }
             // Busy refusal: the wire text stays French ("Passerelle occupée par un autre pilote"), also from the ESP32.
             catch (denied: GatewayDenied) { if (!denied.wire.contains("occupée")) throw denied; lastError = tr("gateway busy", "passerelle occupée") }
             catch (error: Exception) { lastError = "${error.javaClass.simpleName}: ${error.message ?: ""}".trim().take(160) }
             // On 2026-10-14, 25 min of retries without a single log line: a status line every 30 s, with the phone Wi-Fi state.
-            val now = System.currentTimeMillis()
+            val now = Clock.now()
             if (now - reportedAt >= RECONNECT_REPORT_MS) {
                 reportedAt = now
                 val seconds = (now - began) / 1000
@@ -244,7 +248,7 @@ class GatewayLink private constructor(private val host: String, private val port
                     "${PhoneWifi.describe()} · last error: $lastError",
                     "Passerelle toujours injoignable après $attempts essai(s) en $seconds s · ${PhoneWifi.describe()} · dernière erreur : $lastError"))
             }
-            try { Thread.sleep(1000) } catch (_: InterruptedException) { }
+            try { Thread.sleep(1000) } catch (_: InterruptedException) { /* woken up early: retry now */ }
         }
         return null
     }
@@ -272,7 +276,7 @@ class GatewayLink private constructor(private val host: String, private val port
     }
 
     private fun writeLoop(opened: GatewayChannel) {
-        var lastSent = System.currentTimeMillis()
+        var lastSent = Clock.now()
         var inHand: Frame? = null
         try {
             while (true) {
@@ -280,7 +284,7 @@ class GatewayLink private constructor(private val host: String, private val port
                 if (frame?.type == -1) return
                 // Link resumed on another channel while waiting: this frame is for the new writer.
                 if (frame != null && channel !== opened) { outbox.offerFirst(frame); return }
-                val now = System.currentTimeMillis()
+                val now = Clock.now()
                 if (frame != null) {
                     inHand = frame
                     opened.send(frame.type, frame.payload); lastSent = now

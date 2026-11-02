@@ -1,25 +1,26 @@
 package fr.luba.poc.map
 import android.content.Context
+import fr.luba.poc.Clock
 import fr.luba.poc.i18n.tr
-import org.json.JSONObject
-import org.json.JSONArray
 import java.io.File
 import java.security.MessageDigest
+import org.json.JSONArray
+import org.json.JSONObject
 class MapCache(private val context:Context) {
-    private fun file(id:String):File {val name=MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString(""){"%02x".format(it.toInt() and 255)};return File(context.filesDir,"map-$name.json")}
+    private fun file(id:String):File {val name=MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString(""){"%02x".format(it.toInt() and 255)}; return File(context.filesDir,"map-$name.json")}
     fun save(id:String,map:RobotMap) {
         if(!map.complete)return
-        val shapes=JSONArray();map.shapes.forEach { s -> val pts=JSONArray();s.points.forEach{pts.put(JSONArray().put(it.x).put(it.y))};shapes.put(JSONObject().put("id",s.id.toString()).put("type",s.type).put("name",s.name).put("points",pts)) }
-        val json=JSONObject().put("savedAt",System.currentTimeMillis()).put("source",map.source).put("shapes",shapes)
+        val shapes=JSONArray(); map.shapes.forEach { s -> val pts=JSONArray(); s.points.forEach{pts.put(JSONArray().put(it.x).put(it.y))}; shapes.put(JSONObject().put("id",s.id.toString()).put("type",s.type).put("name",s.name).put("points",pts)) }
+        val json=JSONObject().put("savedAt",Clock.now()).put("source",map.source).put("shapes",shapes)
         if(map.drawings.isNotEmpty()) json.put("drawings",JSONArray().apply { map.drawings.forEach { put(drawingJson(it)) } })
         map.station?.let { station -> json.put("station", JSONObject().put("x",station.point.x).put("y",station.point.y)
             .put("headingFrame",2).put("heading",station.entryHeadingDegrees ?: JSONObject.NULL).put("origin",station.origin)) }
-        val f=file(id);val tmp=File(f.path+".tmp");tmp.outputStream().use{it.write(json.toString().toByteArray());it.fd.sync()};check(tmp.renameTo(f))
+        val f=file(id); val tmp=File(f.path+".tmp"); tmp.outputStream().use{it.write(json.toString().toByteArray()); it.fd.sync()}; check(tmp.renameTo(f))
     }
     fun read(id:String):RobotMap? = try {
-        val f=file(id);if(!f.exists() || f.length()>16*1024*1024)null else {
-            val json=JSONObject(f.readText());val shapes=json.getJSONArray("shapes");require(shapes.length()<=1024)
-            val items=(0 until shapes.length()).map {val s=shapes.getJSONObject(it);val pts=s.getJSONArray("points");require(pts.length()<=100000);MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until pts.length()).map{ i ->val p=pts.getJSONArray(i);Point(p.getDouble(0),p.getDouble(1))},s.optString("name"))}
+        val f=file(id); if(!f.exists() || f.length()>16*1024*1024)null else {
+            val json=JSONObject(f.readText()); val shapes=json.getJSONArray("shapes"); require(shapes.length()<=1024)
+            val items=(0 until shapes.length()).map {val s=shapes.getJSONObject(it); val pts=s.getJSONArray("points"); require(pts.length()<=100000); MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until pts.length()).map{ i ->val p=pts.getJSONArray(i); Point(p.getDouble(0),p.getDouble(1))},s.optString("name"))}
             // Any element type is kept (ShapeKind.UNKNOWN for the unknown ones): only the coordinates are checked.
             require(items.all { it.points.all{p->p.x.isFinite()&&p.y.isFinite()} })
             val station=json.optJSONObject("station")?.let { s ->

@@ -2,10 +2,11 @@ package fr.luba.poc.planning
 
 import fr.luba.poc.map.Point
 import fr.luba.poc.obstacles.RobotEnvelope
+import java.util.Arrays
+import kotlin.math.hypot
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.Geometry
 import org.locationtech.jts.geom.GeometryFactory
-import kotlin.math.hypot
 
 /**
  * Slanted entry and exit of a no-go loop. The loop runs half a width plus the set margin from the outline: a pivot on
@@ -47,7 +48,7 @@ internal class NoGoLoopLeads(holes: List<List<Point>>, private val robot: RobotE
         if (clearance(loop.first()) >= pivotClearanceM) return null
         fun at(arc: Double): Point {
             val s = ((arc % total) + total) % total
-            var i = java.util.Arrays.binarySearch(cumulative, s).let { if (it >= 0) it else -it - 2 }.coerceIn(0, loop.size - 2)
+            var i = Arrays.binarySearch(cumulative, s).let { if (it >= 0) it else -it - 2 }.coerceIn(0, loop.size - 2)
             while (i < loop.size - 2 && cumulative[i + 1] - cumulative[i] < 1e-12) i++
             val length = cumulative[i + 1] - cumulative[i]
             val t = if (length < 1e-12) 0.0 else (s - cumulative[i]) / length

@@ -16,7 +16,7 @@ class PipelineProfileTest {
         assumeTrue(System.getProperty("pipelineProfile")=="true")
         val json=JSONObject(javaClass.getResourceAsStream("/planner-reference-map.json")!!.bufferedReader().use { it.readText() })
         val shapes=json.getJSONArray("shapes").let { a -> (0 until a.length()).map { i ->
-            val s=a.getJSONObject(i);val p=s.getJSONArray("points")
+            val s=a.getJSONObject(i); val p=s.getJSONArray("points")
             MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until p.length()).map { j ->
                 Point(p.getJSONArray(j).getDouble(0),p.getJSONArray(j).getDouble(1)) },s.getString("name"))
         } }
@@ -49,12 +49,12 @@ class PipelineProfileTest {
                 val routes=measured("navigation") { RoutePlanning.navigation(map,RobotEnvelope.LUBA2.halfWidthM+0.05,
                     shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points },emptyList(),base=base,recordedBoundary=true) }
                 val stages=linkedMapOf<String,Double>()
-                var previous="Assemblage";var began=System.nanoTime()
+                var previous="Assemblage"; var began=System.nanoTime()
                 val sim=measured("preparation") { MowingSimulation(routes,base.point,plan.preview,map,
                     SimConfig(baseEntryHeadingDegrees=base.entryHeadingDegrees,baseApproachMeters=base.approachDistanceM,
                         instantCharging=true)) { value ->
                     val key=value.substringBefore(" · ")
-                    if(key!=previous) { val now=System.nanoTime();stages[previous]=(stages[previous] ?: 0.0)+(now-began)/1e6;previous=key;began=now }
+                    if(key!=previous) { val now=System.nanoTime(); stages[previous]=(stages[previous] ?: 0.0)+(now-began)/1e6; previous=key; began=now }
                 } }
                 stages[previous]=(stages[previous] ?: 0.0)+(System.nanoTime()-began)/1e6
                 row.put("stagesMs",JSONObject(stages)).put("edges",sim.edges.size).put("cuttingM",sim.total)

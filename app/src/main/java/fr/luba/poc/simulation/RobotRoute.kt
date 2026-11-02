@@ -1,7 +1,11 @@
 package fr.luba.poc.simulation
 
+import fr.luba.poc.diagnostics.MapNavFollower
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** [RETURN_TO_BASE]: local route up to the approach point in front of the base, then docking handed over to the
  * official Mammotion return (the only use of native navigation, as for every docking of a route). */
@@ -38,13 +42,19 @@ object RobotRoute {
         require(!preview.localOnly) { tr("Experimental plan reserved for simulation", "Plan expérimental réservé à la simulation") }
     }
     fun cuttingAllowed(preview: Preview, requested: Boolean): Boolean = requested && !preview.mode.isSurvey
+    /** [lanes]: history of the approach lanes of the returns ([ReturnLanes]); null: direct return. */
     fun actionEdges(engine: MowingSimulation, start: Point, heading: Double, intent: RouteIntent,
-                    physical: TrajectoryPlanner? = null): List<SimEdge> = when(intent) {
+                    physical: TrajectoryPlanner? = null, lanes: ReturnLaneHistory? = null): List<SimEdge> = when(intent) {
         RouteIntent.FOLLOW -> edges(engine,start,heading,physical)
         RouteIntent.LEAVE_BASE -> emptyList()
-        RouteIntent.RETURN_TO_BASE -> departure(engine.routes,physical,start,heading,engine.baseApproach,(engine.dockEntryHeading+180)%360)
+        RouteIntent.RETURN_TO_BASE -> returning(engine,engine.routes,start,heading,lanes) { s,h,t,th -> departure(engine.routes,physical,s,h,t,th) }
             .also { requireOutsideBaseZone(engine.routes, it) }
     }
+
+    /** Return from [start] to the approach point in front of the base, by the lane [lanes] chooses ([ReturnLanes]). */
+    fun returning(engine: MowingSimulation, routes: TrajectoryPlanner, start: Point, heading: Double, lanes: ReturnLaneHistory?,
+                  link: (Point, Double, Point, Double?) -> List<SimEdge>): List<SimEdge> =
+        ReturnLanes.returning(routes, start, heading, engine.base, engine.baseApproach, (engine.dockEntryHeading + 180) % 360, lanes, link).edges
 
     /**
      * Link from the actual robot pose, computed at launch. If the robot stopped inside the reserve of an obstacle
@@ -72,7 +82,7 @@ object RobotRoute {
             return transit(path)
         } catch (e: IllegalArgumentException) { e }
         val escape = physical?.let { escapePoint(routes,it,start,heading) } ?: throw failure
-        val direction = Math.toDegrees(kotlin.math.atan2(escape.y-start.y,escape.x-start.x))
+        val direction = Math.toDegrees(atan2(escape.y-start.y,escape.x-start.x))
         val rest = routes.alignedArrival(routes.between(escape,target,direction,targetHeading),direction,targetHeading)
         routes.requirePath(rest,direction,targetHeading)
         return listOf(SimEdge(start,escape,false,escape=true)) + transit(rest)
@@ -86,7 +96,7 @@ object RobotRoute {
         if (heading != null && heading.isFinite()) {
             val rad = Math.toRadians(heading)
             for (distance in listOf(0.3,0.5,0.75,1.0,1.5,2.0)) {
-                val p = Point(start.x+distance*kotlin.math.cos(rad),start.y+distance*kotlin.math.sin(rad))
+                val p = Point(start.x+distance*cos(rad),start.y+distance*sin(rad))
                 if (!routes.safe(p,p) || !routes.supportsPivot(p)) continue
                 // The chassis may already overlap the edge: allowed if the translation only moves it away ([TrajectoryPlanner.leavesStraight]).
                 if (!physical.leavesStraight(start,p,heading)) break
@@ -97,9 +107,9 @@ object RobotRoute {
         for (distance in listOf(0.3,0.5,0.75,1.0,1.5,2.0)) for (step in 0 until 24) {
             val direction = step*15.0
             val rad = Math.toRadians(direction)
-            val p = Point(start.x+distance*kotlin.math.cos(rad),start.y+distance*kotlin.math.sin(rad))
+            val p = Point(start.x+distance*cos(rad),start.y+distance*sin(rad))
             if (!routes.safe(p,p) || !routes.supportsPivot(p) || !physical.safe(start,p)) continue
-            if (physical.motionCollision(fr.luba.poc.map.RobotPose(start,direction),fr.luba.poc.map.RobotPose(p,direction)) != null) continue
+            if (physical.motionCollision(RobotPose(start,direction),RobotPose(p,direction)) != null) continue
             return p
         }
         return null
@@ -117,10 +127,14 @@ object RobotRoute {
         return end to height
     }
 
+    /** Edges up to the end of the height range starting at [from] ([heightRange]): what one tracking follows. */
+    fun heightSegment(path: List<SimEdge>, from: Int, current: Int, cutting: Boolean): List<SimEdge> =
+        heightRange(path, from, current, cutting).first.let { end -> if (end == path.size) path else path.subList(0, end) }
+
     /** A return triggered at the end of a segment must not restart its blades. */
     fun resumeIndex(edges: List<SimEdge>, index: Int, position: Point, approach: Point): Int {
         require(index in edges.indices)
-        val arrival = if (edges[index].b == approach) 0.05 else fr.luba.poc.diagnostics.MapNavFollower.ARRIVAL_M
+        val arrival = if (edges[index].b == approach) 0.05 else MapNavFollower.ARRIVAL_M
         return if (position.distance(edges[index].b) <= arrival) index + 1 else index
     }
     fun edges(engine: MowingSimulation, start: Point, heading: Double, physical: TrajectoryPlanner? = null): List<SimEdge> =
@@ -131,12 +145,12 @@ object RobotRoute {
      * The resume truncates the interrupted edge with an overlap ([MissionProgress.OVERLAP_M]).
      */
     fun missionEdges(engine: MowingSimulation, start: Point, heading: Double, physical: TrajectoryPlanner? = null,
-                     resume: MissionResume? = null): MissionEdges {
+                     resume: MissionResume? = null, lanes: ReturnLaneHistory? = null): MissionEdges {
         requireExecutable(engine.preview)
         require(start.x.isFinite() && start.y.isFinite() && heading.isFinite())
         fun transit(points: List<Point>) = points.zipWithNext().filter { (a,b) -> a.distance(b)>1e-8 }
             .map { (a,b) -> SimEdge(a,b,false) }
-        fun headingOf(edge: SimEdge) = Math.toDegrees(kotlin.math.atan2(edge.b.y-edge.a.y,edge.b.x-edge.a.x))
+        fun headingOf(edge: SimEdge) = Math.toDegrees(atan2(edge.b.y-edge.a.y,edge.b.x-edge.a.x))
         val dockHeading=(engine.dockEntryHeading+180)%360
         // Reordered remainder ([SmartResume]): portions in their order, joined by blades-OFF links on the navigation.
         val reordered = resume?.takeUnless { it.linear }?.let { r -> spanRoute(engine, r) }
@@ -145,7 +159,7 @@ object RobotRoute {
         require(mowing.isNotEmpty()) { tr("Empty route", "Trajet vide") }
         val engineFrom = if (resume == null) 0 else reordered?.second?.firstOrNull { it >= 0 } ?: (engine.edges.size - mowing.size)
         val leaving = departure(engine.routes,physical,start,heading,mowing.first().a,headingOf(mowing.first()))
-        val back = transit(engine.routes.between(mowing.last().b,engine.baseApproach,headingOf(mowing.last()),dockHeading))
+        val back = returning(engine,engine.routes,mowing.last().b,headingOf(mowing.last()),lanes) { s,h,t,th -> transit(engine.routes.between(s,t,h,th)) }
         val rest = mowing + back
         // Link already validated (optional escape included); the rest with the margins, from the end of the link.
         val joined = leaving.filterNot { it.escape }
@@ -161,7 +175,7 @@ object RobotRoute {
      * portions, blades OFF, computed on the mission navigation like the departure and return links).
      */
     fun spanRoute(engine: MowingSimulation, resume: MissionResume): Pair<List<SimEdge>, List<Int>> {
-        fun headingOf(edge: SimEdge) = Math.toDegrees(kotlin.math.atan2(edge.b.y-edge.a.y,edge.b.x-edge.a.x))
+        fun headingOf(edge: SimEdge) = Math.toDegrees(atan2(edge.b.y-edge.a.y,edge.b.x-edge.a.x))
         val edges = mutableListOf<SimEdge>(); val index = mutableListOf<Int>()
         resume.spans(engine.edges.size).forEachIndexed { k, span ->
             val piece = SmartResume.spanEdges(engine.edges, span, overlap = resume.overlap || k > 0)

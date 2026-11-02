@@ -1,10 +1,10 @@
 package fr.luba.poc.planning
 
 import fr.luba.poc.map.*
+import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import java.io.File
 
 /** Opt-in campaign: no duration is used as a CI performance assertion. */
 class PlannerBenchmarkTest {
@@ -122,7 +122,7 @@ class PlannerBenchmarkTest {
                         if(run<0) null else preview.runCellIds.getOrNull(run) ?: run
                     }
                     fun returns(values: List<Int?>): Int {
-                        val seen=mutableSetOf<Int>();var previous: Int?=null;var count=0
+                        val seen=mutableSetOf<Int>(); var previous: Int?=null; var count=0
                         values.forEach { cell ->
                             if(cell!=null && cell!=previous && !seen.add(cell)) count++
                             previous=cell
@@ -188,7 +188,7 @@ class PlannerBenchmarkTest {
     internal fun stationCases(): Map<String,PlanningRequest> {
         val json=JSONObject(javaClass.getResourceAsStream("/planner-reference-map.json")!!.bufferedReader().use { it.readText() })
         val shapes=json.getJSONArray("shapes").let { a -> (0 until a.length()).map { i ->
-            val s=a.getJSONObject(i);val p=s.getJSONArray("points")
+            val s=a.getJSONObject(i); val p=s.getJSONArray("points")
             MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until p.length()).map { j ->
                 Point(p.getJSONArray(j).getDouble(0),p.getJSONArray(j).getDouble(1)) },s.getString("name"))
         } }

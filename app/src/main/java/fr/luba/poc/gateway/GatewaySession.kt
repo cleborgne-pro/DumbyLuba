@@ -1,9 +1,11 @@
 package fr.luba.poc.gateway
 
+import fr.luba.poc.Clock
 import fr.luba.poc.autonomy.LegFrames
 import fr.luba.poc.ble.RobotLink
 import fr.luba.poc.gateway.GatewayProtocol.Frame
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.PhoneGravity
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
@@ -13,6 +15,7 @@ import java.net.SocketTimeoutException
 import java.security.SecureRandom
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Blocking BLE search: calls [onResult] for each LUBA seen during [durationMs]. */
 fun interface GatewayScanner { fun scan(durationMs: Long, onResult: (name: String, address: String, rssi: Int) -> Unit) }
@@ -41,7 +44,7 @@ class GatewaySession(
     private val health: (() -> GatewayHealth?)? = null,
     private val healthMs: Long = GatewayProtocol.HEALTH_MS,
     /** Tilt of the gateway phone and its age in ms (null: no sensor); sent with the health every [tiltMs]. */
-    private val tilt: (() -> Pair<fr.luba.poc.map.PhoneGravity, Int>?)? = null,
+    private val tilt: (() -> Pair<PhoneGravity, Int>?)? = null,
     private val tiltMs: Long = GatewayProtocol.TILT_MS,
 ) {
     private val outbox = LinkedBlockingQueue<Frame>()
@@ -57,7 +60,7 @@ class GatewaySession(
         private set
 
     private fun send(type: Int, payload: ByteArray = ByteArray(0)) { if (!finished) outbox.offer(Frame(type, payload)) }
-    private val scanning = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val scanning = AtomicBoolean(false)
 
     /** Closes the session after sending the pending frames (gateway stopped: the pilot was already told). */
     fun close() { outbox.offer(Frame(CLOSE_AFTER_FLUSH)) }
@@ -89,7 +92,7 @@ class GatewaySession(
             val nonce = ByteArray(GatewayProtocol.NONCE_BYTES).also { SecureRandom().nextBytes(it) }
             GatewayProtocol.write(output, GatewayProtocol.CHALLENGE, byteArrayOf(GatewayProtocol.VERSION.toByte()) + nonce)
             val hello = GatewayProtocol.read(input)
-            val now = System.currentTimeMillis()
+            val now = Clock.now()
             if (limiter.blocked(now)) { refuse(output, "Trop d'essais : attendre une minute"); return }
             val proof = hello.payload.drop(1).toByteArray()
             if (hello.type != GatewayProtocol.HELLO || hello.payload.isEmpty() || hello.payload[0].toInt() != GatewayProtocol.VERSION) {
@@ -148,7 +151,7 @@ class GatewaySession(
     }
 
     private fun writeLoop(out: DataOutputStream) {
-        var lastSent = System.currentTimeMillis()
+        var lastSent = Clock.now()
         var lastHealth = 0L
         var lastTilt = 0L
         var cached: GatewayHealth? = null
@@ -162,7 +165,7 @@ class GatewaySession(
                 val frame = outbox.poll(GatewayProtocol.PING_MS, TimeUnit.MILLISECONDS)
                 if (frame?.type == -1) return
                 if (frame?.type == CLOSE_AFTER_FLUSH) { runCatching { socket.close() }; return }
-                val now = System.currentTimeMillis()
+                val now = Clock.now()
                 if (health != null && now - lastHealth >= healthMs) {
                     val read = health
                     lastHealth = now
@@ -221,10 +224,10 @@ class GatewayAdmission(private val report: (String) -> Unit, private val waitMs:
         var busy = claim(session) ?: return true
         if (busy.peer == session.peer) {
             report(tr("Reconnection of ${session.peer}: waiting for its previous session to end", "Reconnexion de ${session.peer} : attente de la fin de sa session précédente"))
-            val deadline = System.currentTimeMillis() + waitMs
+            val deadline = Clock.now() + waitMs
             try {
                 val out = DataOutputStream(client.getOutputStream())
-                while (System.currentTimeMillis() < deadline) {
+                while (Clock.now() < deadline) {
                     GatewayProtocol.write(out, GatewayProtocol.PING)
                     Thread.sleep(GatewayProtocol.PING_MS)
                     busy = claim(session) ?: return true

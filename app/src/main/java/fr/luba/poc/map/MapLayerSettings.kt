@@ -1,6 +1,7 @@
 package fr.luba.poc.map
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * Map layer choice: heatmap layer (Wi-Fi, RTK, Slope, Terrain…), heatmap shown or hidden, layer bar open or folded,
@@ -38,6 +39,6 @@ object MapLayerSettings {
     /** Writes only a choice different from the saved one. */
     fun save(context: Context, choice: MapLayerChoice) {
         val p = prefs(context)
-        if (p.getString(KEY, null) != choice.encode()) p.edit().putString(KEY, choice.encode()).apply()
+        if (p.getString(KEY, null) != choice.encode()) p.edit { putString(KEY, choice.encode()) }
     }
 }

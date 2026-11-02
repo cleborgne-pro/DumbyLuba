@@ -2,11 +2,11 @@ package fr.luba.poc.simulation
 
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.RobotEnvelope
+import kotlin.math.abs
+import kotlin.math.atan2
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.abs
-import kotlin.math.atan2
 
 /**
  * Border mowing of 2026-10-25 (Aire de jeux, Fold log): after a bumper contact near the swing poles at 15:42:16 and a

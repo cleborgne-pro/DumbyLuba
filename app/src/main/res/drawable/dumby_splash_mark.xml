@@ -1,4 +1,5 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 288 dp: size of the Android 12 splash screen icon (windowSplashScreenAnimatedIcon), drawn once at start-up. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="VectorRaster"
     android:width="288dp" android:height="288dp" android:viewportWidth="108" android:viewportHeight="108">
 <group android:name="mascot" android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
     <group android:name="grass" android:pivotX="54" android:pivotY="38">

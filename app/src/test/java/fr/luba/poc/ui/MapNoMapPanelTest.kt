@@ -15,16 +15,14 @@ import fr.luba.poc.map.mapFetchAllowed
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.SimulationSession
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -38,10 +36,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], qualifiers = "w412dp-h800dp-xxhdpi")
 class MapNoMapPanelTest {
     val compose = createComposeRule()
-    // The test activity (ui-test-manifest) only exists in debug.
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private val gatewayRobot = RobotUi(connection = ConnectionState.Receiving, ready = true, viaGateway = true,
         telemetry = Telemetry(battery = 80, x = 1.0, y = 1.0, heading = 0.0, robotState = 11))

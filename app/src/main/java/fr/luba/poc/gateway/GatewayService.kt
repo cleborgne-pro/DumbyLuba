@@ -14,14 +14,22 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.*
+import android.util.Log
+import androidx.annotation.VisibleForTesting
 import fr.luba.poc.MainActivity
 import fr.luba.poc.ble.GattLink
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import fr.luba.poc.protocol.ModelSupport
+import java.net.Inet4Address
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
+import java.text.SimpleDateFormat
+import java.util.Date
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
  data class GatewayStatus(val running: Boolean = false, val message: String = tr("Gateway stopped", "Passerelle arrêtée"), val pilot: String? = null,
     val lastEvents: List<String> = emptyList(), val address: String? = null, val robot: GatewayRobotState = GatewayRobotState())
@@ -179,7 +187,7 @@ class GatewayService : Service() {
         val callback = object : ScanCallback() {
             override fun onScanResult(type: Int, result: ScanResult) {
                 val name = result.scanRecord?.deviceName ?: result.device.name ?: return
-                if (!fr.luba.poc.protocol.ModelSupport.isMower(name)) return
+                if (!ModelSupport.isMower(name)) return
                 if (synchronized(seen) { seen.add(result.device.address) }) onResult(name, result.device.address, result.rssi)
             }
         }
@@ -205,14 +213,14 @@ class GatewayService : Service() {
     }
 
     private fun localAddress(): String? = runCatching {
-        java.net.NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
-            .flatMap { it.inetAddresses.toList() }.firstOrNull { it is java.net.Inet4Address }?.hostAddress
+        NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+            .flatMap { it.inetAddresses.toList() }.firstOrNull { it is Inet4Address }?.hostAddress
     }.getOrNull()
 
     private fun report(text: String) {
-        val stamp = java.text.SimpleDateFormat("HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(java.util.Date())
+        val stamp = SimpleDateFormat("HH:mm:ss", I18n.locale).format(Date())
         update { it.copy(lastEvents = (it.lastEvents + "$stamp $text").takeLast(30), address = localAddress() ?: it.address) }
-        android.util.Log.i("DumbyLubaGateway", text)
+        Log.i("DumbyLubaGateway", text)
     }
 
     override fun onDestroy() {
@@ -250,7 +258,7 @@ class GatewayService : Service() {
         val status = mutable.asStateFlow()
         private fun update(change: (GatewayStatus) -> GatewayStatus) { synchronized(mutable) { mutable.value = change(mutable.value) } }
         /** Documentation screenshots (JVM): a running gateway state without starting the service. */
-        @androidx.annotation.VisibleForTesting internal fun showcase(status: GatewayStatus) = update { status }
+        @VisibleForTesting internal fun showcase(status: GatewayStatus) = update { status }
 
         fun start(context: Context) {
             try { context.startForegroundService(Intent(context, GatewayService::class.java)) }

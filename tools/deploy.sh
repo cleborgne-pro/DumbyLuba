@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploys the Fold variant, signed like debug but not debuggable, after validation.
-# Usage: tools/deploy.sh [--no-tests]   (all distinct ADB devices; DEPLOY_SERIALS="serial..." to restrict;
+# Usage: tools/deploy.sh [--no-tests]   (all distinct ADB devices at the same time; DEPLOY_SERIALS="serial..." to restrict;
 # DEPLOY_FULL_TESTS=1 runs the planner sweeps even when the branch does not touch the planner)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -12,26 +12,51 @@ if [ -z "$ADB" ]; then
   done
 fi
 [ -n "$ADB" ] || { echo "ERROR: adb not found (add platform-tools to PATH)." >&2; exit 1; }
+# shellcheck source=tools/adb-relay.sh
+source tools/adb-relay.sh
+trap adb_relay_stop EXIT
 
 # Fresh ADB session on every deployment (rule of 2026-10-22): a server left running for hours stopped seeing the
 # wireless devices (empty `adb devices` and mDNS list) until it was restarted. The old server is stopped with
 # `adb kill-server` (never by process name), then a new one waits for the devices to reconnect. ADB_KEEP_SERVER=1 skips it.
+# The new server starts before the build so the wireless devices reconnect while Gradle works; the wait for them
+# comes after the build.
 if [ "${ADB_KEEP_SERVER:-}" != "1" ]; then
   echo ">> New ADB session (old server stopped)"
   "$ADB" kill-server >/dev/null 2>&1 || true
   "$ADB" start-server >/dev/null 2>&1
-  for _ in $(seq 1 20); do
+fi
+
+# Build + tests + lint: tools/check.sh auto, the planner sweeps only when the branch touches the planner. The same
+# command as .agentdeck/session-check.sh, so the check of session.sh finish after a deployment finds everything up to date.
+if [ "${1:-}" != "--no-tests" ]; then
+  tools/check.sh auto
+else
+  echo ">> Build (without tests)"
+  ./gradlew :app:assembleFold
+fi
+
+# Wait for the devices of the new session (all of DEPLOY_SERIALS, or at least one), 20 s at most. Without
+# DEPLOY_SERIALS, 3 more seconds for the other devices only when the first one was still missing after the build.
+wait_devices() {
+  [ "${ADB_KEEP_SERVER:-}" = "1" ] && return 0
+  local i
+  for i in $(seq 1 20); do
     if [ -n "${DEPLOY_SERIALS:-}" ]; then
       missing=0
       for s in $DEPLOY_SERIALS; do "$ADB" devices | grep -q "^$s[[:space:]]*device$" || missing=1; done
       [ "$missing" = 0 ] && break
     else
-      "$ADB" devices | tail -n +2 | grep -q "device$" && { sleep 3; break; }
+      "$ADB" devices | tail -n +2 | grep -q "device$" && { [ "$i" = 1 ] || sleep 3; break; }
     fi
     sleep 1
   done
-fi
+}
 
+wait_devices
+# Wireless phones advertised over mDNS but unreachable by this adb server (macOS Local Network denied to an agent's
+# adb): connected through a local relay, which lives until the end of the deployment (tools/adb-relay.sh).
+[ -n "${DEPLOY_SERIALS:-}" ] || adb_relay_missing_devices
 # Devices: all distinct ADB devices (Fold, Redmi gateway...), deduplicated by hardware serial number
 # (the same phone can appear over IP and over mDNS). DEPLOY_SERIALS="s1 s2" to restrict.
 targets=()
@@ -51,31 +76,10 @@ fi
 echo ">> Target devices"
 for serial in "${targets[@]}"; do echo "   $serial ($("$ADB" -s "$serial" shell getprop ro.product.model | tr -d '\r'))"; done
 
-# Planner sweeps on the reference map (about two thirds of the test time) only when the branch touches the planner
-# (rule of 2026-10-29): files changed since the branch left origin/main, committed or not. DEPLOY_FULL_TESTS=1 forces them.
-planner_changed() {
-  [ "${DEPLOY_FULL_TESTS:-}" = "1" ] && return 0
-  local base
-  base="$(git merge-base HEAD origin/main 2>/dev/null)" || return 0
-  { git diff --name-only "$base"; git ls-files --others --exclude-standard; } | grep -qE \
-    '^app/src/main/java/fr/luba/poc/(map|planning|simulation|obstacles)/|^app/src/test/resources/|^app/src/test/java/fr/luba/poc/(map|planning|simulation)/|^app/build\.gradle\.kts$|^build\.gradle\.kts$|^gradle'
-}
-
-if [ "${1:-}" != "--no-tests" ]; then
-  if planner_changed; then
-    echo ">> Build + tests + lint (planner touched: full suite)"
-    ./gradlew :app:assembleFold :app:testFoldUnitTest :app:lintFold
-  else
-    echo ">> Build + tests + lint (planner untouched: without the planner sweeps, DEPLOY_FULL_TESTS=1 to run them)"
-    ./gradlew :app:assembleFold :app:testFoldUnitTest :app:lintFold -PlubaQuickTests
-  fi
-else
-  echo ">> Build (without tests)"
-  ./gradlew :app:assembleFold
-fi
-
 deploy_one() {
   SERIAL="$1"
+  # One file per device: the devices are deployed at the same time.
+  PACKAGE_DUMP="${TMPDIR:-/tmp}/luba-deploy-package-$$-${SERIAL//[^A-Za-z0-9]/_}.txt"
   echo ">> Installing on $SERIAL"
   # Log cleared BEFORE installing: ART verification happens at install time.
   "$ADB" -s "$SERIAL" logcat -c || true
@@ -96,11 +100,11 @@ deploy_one() {
   # Android can report Success while falling back to verify. Check the actual state.
   # Slow phone (Redmi A1: ~65 s of dex2oat): wait for compilation to finish, two minutes at most.
   for _ in $(seq 1 24); do
-    "$ADB" -s "$SERIAL" shell dumpsys package "$APP" > "${TMPDIR:-/tmp}/luba-deploy-package-$$.txt"
-    grep -q "status=speed" "${TMPDIR:-/tmp}/luba-deploy-package-$$.txt" && break
+    "$ADB" -s "$SERIAL" shell dumpsys package "$APP" > "$PACKAGE_DUMP"
+    grep -q "status=speed" "$PACKAGE_DUMP" && break
     sleep 5
   done
-  python3 - "${TMPDIR:-/tmp}/luba-deploy-package-$$.txt" <<'PY'
+  python3 - "$PACKAGE_DUMP" <<'PY'
 import pathlib, re, sys
 package = pathlib.Path(sys.argv[1]).read_text()
 flags = re.search(r"pkgFlags=\[([^\n]+)", package).group(1)
@@ -139,7 +143,20 @@ PY
   echo ">> Deployment finished for $APP ($SERIAL)"
 }
 
-APK="app/build/outputs/apk/fold/app-fold.apk"
+APK="app/build.noindex/outputs/apk/fold/app-fold.apk"
 [ -f "$APK" ] || { echo "ERROR: APK not found ($APK)." >&2; exit 1; }
 APP="$(grep -m1 applicationId app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')"
-for serial in "${targets[@]}"; do deploy_one "$serial"; done
+# Every device at the same time (the Redmi gateway spends about 65 s in dex2oat), each line prefixed with its
+# serial number when there are several; the deployment fails if one of them fails.
+if [ "${#targets[@]}" = 1 ]; then
+  deploy_one "${targets[0]}"
+else
+  pids=()
+  for serial in "${targets[@]}"; do
+    deploy_one "$serial" 2>&1 | sed -u "s/^/[$serial] /" &
+    pids+=("$!")
+  done
+  failed=0
+  for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+  [ "$failed" = 0 ] || { echo "ERROR: deployment failed on at least one device (see above)." >&2; exit 1; }
+fi

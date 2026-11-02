@@ -1,8 +1,9 @@
 package fr.luba.poc.auth
 
+import fr.luba.poc.i18n.tr
+import fr.luba.poc.map.StationPresence
 import fr.luba.poc.proto.DevNetProto.DrvUpgradeReport
 import org.json.JSONObject
-import fr.luba.poc.i18n.tr
 
 /*
  * Two Mammotion account actions, on explicit user request and without a BLE link: the native return to
@@ -19,7 +20,7 @@ enum class CloudReturnPhase { IDLE, CONNECTING, WAKING, REQUESTED, RETURNING, DO
 
 /** [presence]: robot on its base or not according to the latest account report (set by the screen, not by the tracker). */
 data class CloudReturnUi(val phase: CloudReturnPhase = CloudReturnPhase.IDLE, val status: String = "", val updatedAt: Long? = null,
-                         val presence: fr.luba.poc.map.StationPresence = fr.luba.poc.map.StationPresence.UNKNOWN) {
+                         val presence: StationPresence = StationPresence.UNKNOWN) {
     val active: Boolean get() = phase in setOf(CloudReturnPhase.CONNECTING, CloudReturnPhase.WAKING, CloudReturnPhase.REQUESTED, CloudReturnPhase.RETURNING)
     /** The robot is running (or about to run) the return: cancelling through the account makes sense. */
     val cancellable: Boolean get() = phase in setOf(CloudReturnPhase.REQUESTED, CloudReturnPhase.RETURNING)

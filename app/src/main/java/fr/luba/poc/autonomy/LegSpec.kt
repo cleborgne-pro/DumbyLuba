@@ -2,10 +2,13 @@ package fr.luba.poc.autonomy
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
+import fr.luba.poc.protocol.CutHeightRange
 import fr.luba.poc.simulation.DeadReckoning
 import fr.luba.poc.simulation.ReturnDrift
 import fr.luba.poc.simulation.SimEdge
 import fr.luba.poc.simulation.SlideField
+import fr.luba.poc.simulation.SmartFeatures
+import fr.luba.poc.simulation.SpeedCap
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -74,15 +77,39 @@ data class LegSpec(
      * (stop on 25 as before), an older pilot does not send it.
      */
     val offMapSections: List<List<Point>> = emptyList(),
+    /**
+     * Stretches of the route driven slower ([fr.luba.poc.simulation.AdaptiveSpeed]): edge ranges of [routeId] and their
+     * share of [speedPercent]. Optional trailing field, after [offMapSections]: an older gateway ignores it (set speed
+     * everywhere, as before), an older pilot does not send it.
+     */
+    val speedCaps: List<SpeedCap> = emptyList(),
+    /**
+     * Adaptive speed switched on by the pilot ([SmartFeatures]): off, the gateway drives at [speedPercent] everywhere, RTK
+     * included. Optional trailing field, after [speedCaps]: read as on when absent (older pilot).
+     */
+    val adaptiveSpeed: Boolean = SmartFeatures.adaptiveSpeed,
 ) {
     init {
         // Decoded on the gateway: the messages go back to the pilot in the refusal, in the gateway phone's language.
-        require(heightMm in fr.luba.poc.protocol.CutHeightRange.ANY) { tr("Height out of range", "Hauteur hors plage") }
+        require(heightMm in CutHeightRange.ANY) { tr("Height out of range", "Hauteur hors plage") }
         require(speedPercent in 10..100) { tr("Speed out of range", "Vitesse hors plage") }
         require(returnPercent in 10..80) { tr("Return threshold out of range", "Seuil de retour hors plage") }
         require(from >= 0)
         require(offMapSections.size <= MAX_OFF_MAP_SECTIONS && offMapSections.all { it.size <= MAX_OFF_MAP_POINTS }) {
             tr("Too many sections beyond the map", "Trop de tronçons hors carte") }
+        require(speedCaps.size <= MAX_SPEED_CAPS) {
+            tr("Invalid speed limits", "Limites de vitesse invalides") }
+    }
+
+    /**
+     * This leg within one gateway frame: without the slide map if needed (as before), then without the speed limits
+     * ([onCapsDropped] told: set speed everywhere). The obstacle list is the caller's (tracked from the pilot instead).
+     */
+    fun fitted(onCapsDropped: () -> Unit = {}): LegSpec {
+        val light = if (slideField != null && encode().size > LegFrames.MAX_PAYLOAD) copy(slideField = null) else this
+        if (light.speedCaps.isEmpty() || light.encode().size <= LegFrames.MAX_PAYLOAD) return light
+        onCapsDropped()
+        return light.copy(speedCaps = emptyList())
     }
 
     fun encode(): ByteArray = ByteArrayOutputStream().also { bytes ->
@@ -107,6 +134,10 @@ data class LegSpec(
             out.writeBoolean(offMapSections.isNotEmpty())
             if (offMapSections.isNotEmpty()) out.writeShort(offMapSections.size)
             offMapSections.forEach { section -> out.writeShort(section.size); section.forEach { out.writeDouble(it.x); out.writeDouble(it.y) } }
+            out.writeBoolean(speedCaps.isNotEmpty())
+            if (speedCaps.isNotEmpty()) out.writeShort(speedCaps.size)
+            speedCaps.forEach { out.writeDouble(it.from); out.writeDouble(it.to); out.writeByte(it.percent) }
+            out.writeBoolean(adaptiveSpeed)
         }
     }.toByteArray()
 
@@ -127,15 +158,20 @@ data class LegSpec(
             val slideField = if (input.available() > 0 && input.readBoolean()) SlideField.read(input) else null
             val offMap = if (input.available() > 0 && input.readBoolean()) (0 until input.readUnsignedShort()).map {
                 (0 until input.readUnsignedShort()).map { Point(input.readDouble(), input.readDouble()) } } else emptyList()
+            val speedCaps = if (input.available() > 0 && input.readBoolean()) (0 until input.readUnsignedShort()).map {
+                SpeedCap(input.readDouble(), input.readDouble(), input.readUnsignedByte()) } else emptyList()
+            val adaptiveSpeed = input.available() <= 0 || input.readBoolean()
             LegSpec(legId, routeId, from, cutting = flags and 1 != 0, shown = flags and 2 != 0, watchBattery = flags and 4 != 0,
                 departure = flags and 8 != 0, lastArrivalM = arrival.takeIf { hasArrival }, heightMm = height, speedPercent = speed,
                 returnPercent = low, baseApproach = if (hasBase) Point(bx, by) else null, guardId = guard, physicalGuardId = physical,
                 calibration = if (hasCalibration) DeadReckoning.Calibration(mpu, dpu) else null, obstacles = obstacles,
                 sampling = flags and 16 != 0, dockExit = flags and 32 != 0, baseZone = baseZone, slideField = slideField,
-                offMapSections = offMap)
+                offMapSections = offMap, speedCaps = speedCaps, adaptiveSpeed = adaptiveSpeed)
         }
 
         const val MAX_OFF_MAP_SECTIONS = 8
+        /** 17 bytes each: 10 KB at most, within a frame with the rest of the leg. */
+        const val MAX_SPEED_CAPS = 600
         const val MAX_OFF_MAP_POINTS = 64
 
         /** Sections beyond the map within the frame limits: the first ones, vertices thinned evenly (ends kept). */

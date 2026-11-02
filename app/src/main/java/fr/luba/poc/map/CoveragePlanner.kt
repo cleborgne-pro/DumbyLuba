@@ -1,15 +1,20 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
-import org.locationtech.jts.geom.Coordinate
-import org.locationtech.jts.geom.GeometryFactory
-import org.locationtech.jts.geom.Polygon
-import org.locationtech.jts.geom.LineString
-import org.locationtech.jts.geom.util.AffineTransformation
 import fr.luba.poc.obstacles.ObstacleDisc
 import fr.luba.poc.obstacles.RobotEnvelope
-import org.locationtech.jts.geom.Geometry as JtsGeometry
+import fr.luba.poc.planning.MissionLeg
+import fr.luba.poc.planning.RasterCoverage
+import fr.luba.poc.simulation.PreparationPool
+import java.util.Optional
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.*
+import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
+import org.locationtech.jts.geom.GeometryFactory
+import org.locationtech.jts.geom.LineString
+import org.locationtech.jts.geom.Polygon
+import org.locationtech.jts.geom.util.AffineTransformation
 
 enum class CoverageMode(private val en: String, private val fr: String) {
     LINES("Simple", "Simple"), CHECKERBOARD("Checkerboard", "Damier"), TOUR("Full loop", "Grand tour"),
@@ -112,7 +117,9 @@ object CoveragePlanner {
              /** Called at every layer of the Zamboni order (cancellation); may throw. */
              checkpoint: () -> Unit = {},
              /** Spiral mode: chains driven from the edge inwards (as built) or from the centre outwards. */
-             spiralDirection: SpiralDirection = SpiralDirection.FROM_EDGE): Preview {
+             spiralDirection: SpiralDirection = SpiralDirection.FROM_EDGE,
+             /** Zamboni: oblique U-turns along the slanted borders ([TurnOptimizer.OBLIQUE_UNSWEPT_M]). */
+             obliqueTurns: Boolean = true): Preview {
         val tour = mode == CoverageMode.TOUR
         val withBorders = mode.isSurvey || includeBorders
         val outerPasses = if (mode.isSurvey) 1 else borderPasses
@@ -322,7 +329,7 @@ object CoveragePlanner {
         val navigableCoverage = org.locationtech.jts.geom.prep.PreparedGeometryFactory.prepare(inset.buffer(1e-7))
         // Shared by the orientations evaluated in parallel: concurrent table
         // (a possible double computation gives the same exact result).
-        val safeSegments = java.util.concurrent.ConcurrentHashMap<Pair<Point, Point>, Boolean>()
+        val safeSegments = ConcurrentHashMap<Pair<Point, Point>, Boolean>()
         fun safe(a: Point, b: Point): Boolean {
             val key = if (a.x < b.x || (a.x == b.x && a.y <= b.y)) a to b else b to a
             return safeSegments.getOrPut(key) {
@@ -343,7 +350,9 @@ object CoveragePlanner {
         val roomyEnvelope by lazy { TrajectoryEnvelope(physicalFree.buffer(-TurnOptimizer.RISK_MARGIN_M, 16), robot) }
         val turnContext = TurnOptimizer.TurnContext(spacing, speedMps.coerceIn(0.05, 1.0),
             drivable = { path -> valid(path) && envelope.pathCollision(path) == null },
-            roomy = { path -> roomyEnvelope.pathCollision(path) == null }, robot = robot, cutWidthM = max(spacing, cutWidthM))
+            roomy = { path -> roomyEnvelope.pathCollision(path) == null }, robot = robot, cutWidthM = max(spacing, cutWidthM),
+            // Zamboni: oblique U-turns along the slanted borders ([TurnOptimizer.OBLIQUE_UNSWEPT_M]).
+            obliqueUnsweptM = if (mode == CoverageMode.ZAMBONI && obliqueTurns) TurnOptimizer.OBLIQUE_UNSWEPT_M else 0.0)
         // Zamboni: the Lawn friendly objective (duration plus wear) whatever the toggle says, without the one-in-two order.
         val zamboni = mode == CoverageMode.ZAMBONI
         val centreSpiral = mode == CoverageMode.SPIRAL && spiralDirection == SpiralDirection.FROM_CENTRE
@@ -358,9 +367,9 @@ object CoveragePlanner {
                 }
         // Zamboni: the same U-turn is asked by the zigzag ranking, the order search and the final join, from orientations
         // evaluated in parallel (concurrent table; a double computation gives the same result).
-        val turns = java.util.concurrent.ConcurrentHashMap<Triple<Point, Point, List<Point>>, java.util.Optional<TurnPlan>>()
+        val turns = ConcurrentHashMap<Triple<Point, Point, List<Point>>, Optional<TurnPlan>>()
         fun sharedTurn(aFrom: Point, aEnd: Point, run: List<Point>): TurnPlan? =
-            turns.getOrPut(Triple(aFrom, aEnd, run)) { java.util.Optional.ofNullable(verifiedTurn(aFrom, aEnd, run)) }.orElse(null)
+            turns.getOrPut(Triple(aFrom, aEnd, run)) { Optional.ofNullable(verifiedTurn(aFrom, aEnd, run)) }.orElse(null)
         require((if (recordedBoundary) emptyList() else borders).all(::valid)) { tr("Unsafe border: increase the margin", "Bordure non sûre : augmenter la marge") }
         if (recordedBoundary) borders.forEach { run ->
             run.zipWithNext().forEach { (a,b) ->
@@ -510,13 +519,13 @@ object CoveragePlanner {
             return runs to cost
         }
         // Zamboni order of each cell, by its passes in sweep order; the same cell driven from its other end reuses it backwards.
-        val zamboniOrders = java.util.concurrent.ConcurrentHashMap<List<List<Point>>, java.util.Optional<List<List<Point>>>>()
+        val zamboniOrders = ConcurrentHashMap<List<List<Point>>, Optional<List<List<Point>>>>()
         fun zamboniOrder(cellLines: List<SweepLine>): List<SweepLine>? {
             val mirrored = zamboniOrders[cellLines.reversed().map { it.path.reversed() }]
             if (mirrored != null) return mirrored.orElse(null)?.let { order -> order.reversed().map { cellLines[0].copy(path = it.reversed()) } }
             val order = ZamboniOrder.order(cellLines, spacing, TurnOptimizer.FOLLOW_RADIUS_M, { it.path }, { l, p -> l.copy(path = p) },
                 { aFrom, aEnd, bStart, bTo -> sharedTurn(aFrom, aEnd, listOf(bStart, bTo))?.score(style) }, BREAK_COST, checkpoint)
-            zamboniOrders[cellLines.map { it.path }] = java.util.Optional.ofNullable(order?.map { it.path })
+            zamboniOrders[cellLines.map { it.path }] = Optional.ofNullable(order?.map { it.path })
             return order
         }
         /** [front]: Zamboni order in the regular cells ([ZamboniOrder]), the zigzag elsewhere or when it would cost runs.
@@ -706,7 +715,7 @@ object CoveragePlanner {
         val spiralMode = mode == CoverageMode.SPIRAL
         val extra = if (spiralMode) 1 else 0
         var spiralCandidate: Pair<SpiralSweep.Result, Preview>? = null
-        val evaluated = fr.luba.poc.simulation.PreparationPool.map(angles.size + extra, {}, minParallel = 2) { slot ->
+        val evaluated = PreparationPool.map(angles.size + extra, {}, minParallel = 2) { slot ->
             if (slot < extra) { spiralCandidate = spiral(); return@map null }
             val angle = angles[slot - extra]
             val first: List<SweepLine>
@@ -740,33 +749,33 @@ object CoveragePlanner {
             val spiral = spiralCandidate
             val zigzag = best
             val target = try { free.intersection(inset.buffer(max(spacing, cutWidthM) / 2, 8)) } catch (e: org.locationtech.jts.geom.TopologyException) { free }
-            fun covered(p: Preview) = fr.luba.poc.planning.RasterCoverage.measure(p.cuttingPaths.filter { it.size >= 2 }
-                .map { fr.luba.poc.planning.MissionLeg(it, true) }, target, max(spacing, cutWidthM) / 2, 0.02).covered
+            fun covered(p: Preview) = RasterCoverage.measure(p.cuttingPaths.filter { it.size >= 2 }
+                .map { MissionLeg(it, true) }, target, max(spacing, cutWidthM) / 2, 0.02).covered
             val spiralCovered = spiral?.let { covered(it.second) }
             val zigzagCovered = zigzag?.let(::covered)
             val kept = spiralCovered != null && (zigzagCovered == null || spiralCovered >= zigzagCovered - 0.002 * target.area)
             SpiralSweep.observer?.invoke(SpiralSweep.Decision(spiral?.first, spiralCovered, zigzagCovered, target.area, kept))
-            if (kept) best = spiral!!.second
+            if (kept) spiral?.let { best = it.second }
             best?.let { onProgress(nearBase(it)) }
         }
-        requireNotNull(best) { tr("No route possible", "Aucun trajet possible") }
+        var plan: Preview = requireNotNull(best) { tr("No route possible", "Aucun trajet possible") } // `best` is captured: not narrowed
         if (orientationRule != null) {
-            observeAutomatic?.invoke(best!!)
+            observeAutomatic?.invoke(plan)
             // Far enough from the last mowing at a small extra cost; otherwise the same direction, rows shifted (a
             // sweep refused at the new phase keeps the centred rows).
             val chosen = orientationRule.pick(ranked)?.value ?: try {
-                candidates(best!!.angle, orientationRule.phase).minByOrNull(::cost)
+                candidates(plan.angle, orientationRule.phase).minByOrNull(::cost)
             } catch (e: IllegalArgumentException) { null }
-            if (chosen != null && chosen !== best) { best = chosen; onProgress(nearBase(chosen)) }
+            if (chosen != null && chosen !== plan) { plan = chosen; onProgress(nearBase(chosen)) }
         }
         if (zamboni) {
             // Zamboni: the orientations are ranked with the zigzag order; the passes of the 3 cheapest ones (the one kept by
             // "Change every session" or the manual angle alone) are then reordered cell by cell, in both directions, and the
             // cheapest wins. A failure keeps the zigzag order.
-            val phase = best!!.zonePhases.singleOrNull() ?: sweepOptions?.phase ?: 0.5
-            val tops = if (orientationRule != null) listOf(best!!.angle)
+            val phase = plan.zonePhases.singleOrNull() ?: sweepOptions?.phase ?: 0.5
+            val tops = if (orientationRule != null) listOf(plan.angle)
                 else zigzags.sortedBy { it.second }.map { it.first.angle }.distinct().take(3)
-            val fronts = fr.luba.poc.simulation.PreparationPool.map(tops.size, {}, minParallel = 2) { index ->
+            val fronts = PreparationPool.map(tops.size, {}, minParallel = 2) { index ->
                 val angle = tops[index]
                 try {
                     val lines = sweep(angle, phase)
@@ -775,20 +784,20 @@ object CoveragePlanner {
                         .filter { it.runs.isNotEmpty() }.map { it to cost(it) }
                 } catch (e: IllegalArgumentException) { emptyList() }
             }
-            fronts.flatten().minByOrNull { it.second }?.let { (candidate, _) -> best = candidate; onProgress(nearBase(candidate)) }
+            fronts.flatten().minByOrNull { it.second }?.let { (candidate, _) -> plan = candidate; onProgress(nearBase(candidate)) }
         }
         if (mode == CoverageMode.OPTIMIZED) {
             // Optimized mode: the kept zigzag, in which only the bands saving at least a few U-turns are reoriented.
             // Deterministic choice, then compared with the simple zigzag on the full mission. A failure keeps the zigzag.
-            val angle = best!!.angle
+            val angle = plan.angle
             try {
                 mixed(angle)?.let { lines ->
                     listOf(route(lines, angle), route(lines.reversed().map { it.copy(path = it.path.reversed()) }, angle))
                         .filter { it.runs.isNotEmpty() }.minByOrNull(::cost)
-                }?.let { best = it; onProgress(nearBase(it)) }
-            } catch (e: IllegalArgumentException) {
-            } catch (e: org.locationtech.jts.geom.TopologyException) { }
+                }?.let { plan = it; onProgress(nearBase(it)) }
+            } catch (_: IllegalArgumentException) { // no reoriented band fits: the zigzag is kept
+            } catch (_: org.locationtech.jts.geom.TopologyException) { /* invalid geometry while reorienting: the zigzag is kept */ }
         }
-        return nearBase(best!!)
+        return nearBase(plan)
     }
 }

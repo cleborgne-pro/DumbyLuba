@@ -1,6 +1,7 @@
 package fr.luba.poc.obstacles
 
 import fr.luba.poc.map.Point
+import fr.luba.poc.protocol.CollisionLatch
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -27,7 +28,7 @@ object ManualContact {
      * or bumper / lift alert bits.
      */
     fun suspected(selfCheck: Long?, sensors: Int?): Boolean =
-        fr.luba.poc.protocol.CollisionLatch.latched(selfCheck) || TeachSafety.bumperHealthAlert(sensors)
+        CollisionLatch.latched(selfCheck) || TeachSafety.bumperHealthAlert(sensors)
 
     /**
      * Estimated object centre: in front of the bumper going forward, behind the chassis when reversing ([reversing]: last

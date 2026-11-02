@@ -84,7 +84,7 @@ fun MeScreen(
                     else -> tr("Hides the account entries: account map, camera, obstacle photo, firmware.", "Masque les entrées du compte : carte du compte, caméra, photo d'obstacle, firmware.")
                 }, enabled = localOnly || !localOnlyLocked)
         }
-        SettingsGroup(tr("App", "Application")) {
+        SettingsGroup(title = tr("App", "Application")) {
             Column(verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
                 Text(tr("Appearance", "Apparence"), style = MaterialTheme.typography.bodyLarge)
                 Segmented(ThemeMode.entries.map { it to it.label }, themeMode, onThemeModeChange)
@@ -96,13 +96,13 @@ fun MeScreen(
             NavRow("Notifications", icon = Icons.Rounded.Notifications, subtitle = alertsSummary, onClick = onAlerts)
         }
         // Connection, tests and logs: Service tab of the bottom bar (no second entry here).
-        SettingsGroup(tr("About", "À propos")) {
+        SettingsGroup(title = tr("About", "À propos")) {
             ValueRow(Icons.Rounded.Info, "Version", BuildConfig.VERSION_NAME)
-            // New version on GitHub: opens the release page when one is available, otherwise checks now.
-            val available = update.available
-            NavRow(tr("Updates", "Mises à jour"), icon = if (available != null) Icons.Rounded.NewReleases else Icons.Rounded.SystemUpdate,
+            // New version on GitHub (update, or newer release than a development build): opens the release page, otherwise checks now.
+            val release = update.releaseToOpen
+            NavRow(tr("Updates", "Mises à jour"), icon = if (release != null) Icons.Rounded.NewReleases else Icons.Rounded.SystemUpdate,
                 subtitle = UpdateCheck.summary(update), enabled = !update.checking,
-                onClick = { if (available != null) onOpenRelease(available) else onCheckUpdate() })
+                onClick = { if (release != null) onOpenRelease(release) else onCheckUpdate() })
             if (update.publishedBuild) ToggleRow(tr("Check automatically", "Vérifier automatiquement"), update.automatic, onAutomaticUpdates,
                 subtitle = tr("Once a day, reads the latest release on GitHub. Nothing is installed without you.",
                     "Une fois par jour, lit la dernière publication sur GitHub. Rien n'est installé sans vous."))

@@ -6,10 +6,10 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,15 +23,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.simulation.DeadReckoning
 import fr.luba.poc.ui.theme.Drawing
 import fr.luba.poc.ui.theme.LubaColors
 import fr.luba.poc.ui.theme.MammotionColors
@@ -121,7 +124,7 @@ internal fun DrawScope.drawLawnLayers(
     // DumbyLuba zone (phone only): dashed outline; Mammotion zone: solid outline.
     zones.forEachIndexed { i, zone ->
         if (MapCorrections.isDumbyLuba(zone)) drawPath(outlines[i], colors.ZoneStroke, style = Stroke(2f * unit, join = StrokeJoin.Round,
-            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f * unit, 4f * unit))))
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * unit, 4f * unit))))
         else drawPath(outlines[i], colors.ZoneStroke, style = Stroke(1.5f * unit, join = StrokeJoin.Round))
     }
     // Mammotion drawings: over the zones, under the no-go zones and the routes (switch in the Map sheet).
@@ -142,7 +145,7 @@ internal fun DrawScope.drawLawnLayers(
                     else (if (dark) Color.White else Color(0xFF6E767E)).copy(alpha = if (dark) 0.22f else 0.35f),
                     style = Stroke(6f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 drawPath(line, Color.White.copy(alpha = 0.95f), style = Stroke(1.5f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
-                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f * unit, 3f * unit))))
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f * unit, 3f * unit))))
             }
             ShapeKind.UNKNOWN, ShapeKind.VISION_ZONE, ShapeKind.NO_GO_VARIANT -> {
                 val closed = shape.points.size >= 3
@@ -157,13 +160,13 @@ internal fun DrawScope.drawLawnLayers(
             ShapeKind.TRANSFER_ZONE, ShapeKind.MOW_LINE, ShapeKind.DUMP, ShapeKind.DRAWING, ShapeKind.MOW_PROGRESS, ShapeKind.CORRIDOR ->
                 drawPath(path(shape.points, shape.kind == ShapeKind.TRANSFER_ZONE || shape.kind == ShapeKind.DUMP), colors.ObstacleStroke.copy(alpha = 0.6f),
                     style = Stroke(1f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round,
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(3f * unit, 3f * unit))))
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f * unit, 3f * unit))))
             // No-Stop zone: light blue tint and dashed outline, ordinary ground (mowed and crossed).
             ShapeKind.NO_STOP_ZONE -> {
                 val outline = path(shape.points, true)
                 drawPath(outline, colors.Info.copy(alpha = 0.12f))
                 drawPath(outline, colors.Info.copy(alpha = 0.8f), style = Stroke(1.25f * unit, join = StrokeJoin.Round,
-                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(5f * unit, 3f * unit))))
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f * unit, 3f * unit))))
             }
         }
     }
@@ -182,19 +185,19 @@ internal fun DrawScope.drawPatterns(drawings: List<MapDrawing>, path: (List<Poin
         val tile = path(drawing.footprint, true)
         if (drawing.hidden) {
             drawPath(tile, tint.copy(alpha = 0.4f), style = Stroke(1f * unit, join = StrokeJoin.Round,
-                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2f * unit, 3f * unit))))
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(2f * unit, 3f * unit))))
             continue
         }
         for (shape in drawing.outline.shapes) {
             val area = Path().apply {
-                fillType = if (shape.evenOdd) androidx.compose.ui.graphics.PathFillType.EvenOdd else androidx.compose.ui.graphics.PathFillType.NonZero
+                fillType = if (shape.evenOdd) PathFillType.EvenOdd else PathFillType.NonZero
                 shape.paths.forEach { addPath(path(it.points, it.closed)) }
             }
             if (shape.filled) drawPath(area, tint.copy(alpha = 0.25f))
             drawPath(area, tint.copy(alpha = 0.85f), style = Stroke(1f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
         drawPath(tile, tint.copy(alpha = 0.7f), style = Stroke(0.75f * unit, join = StrokeJoin.Round,
-            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(3f * unit, 3f * unit))))
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f * unit, 3f * unit))))
     }
 }
 
@@ -202,7 +205,7 @@ internal fun DrawScope.drawPatterns(drawings: List<MapDrawing>, path: (List<Poin
 fun DrawScope.drawBeyondMammotion(beyond: BeyondArea, path: (List<Point>, Boolean) -> Path, unit: Float, colors: LubaColors) {
     if (beyond.rings.isEmpty()) return
     val area = Path().apply {
-        fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+        fillType = PathFillType.EvenOdd
         beyond.rings.filter { it.size >= 3 }.forEach { addPath(path(it, true)) }
     }
     val bounds = area.getBounds()
@@ -271,7 +274,7 @@ data class DisplayPose(val point: Point, val heading: Double?) {
          * ([fr.luba.poc.simulation.DeadReckoning.rotationCenter]), which stays still during a pivot.
          */
         fun published(point: Point, heading: Double?): DisplayPose =
-            DisplayPose(fr.luba.poc.simulation.DeadReckoning.rotationCenter(point, heading), heading)
+            DisplayPose(DeadReckoning.rotationCenter(point, heading), heading)
     }
 }
 
@@ -470,5 +473,3 @@ fun fitProjection(all: List<Point>, width: Float, height: Float, pad: Float = 16
     val scale = min((width - pad) / b.width, (height - pad) / b.height).takeIf { it.isFinite() && it > 0 } ?: 1e-3
     return MapProjection(b.minX, b.minY, scale, (width - b.width * scale) / 2, (height - b.height * scale) / 2, height)
 }
-
-

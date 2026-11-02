@@ -3,6 +3,7 @@ package fr.luba.poc.map
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.planning.BoundaryMeaning
+import fr.luba.poc.planning.DockClearance
 import fr.luba.poc.planning.PlanningConfig
 import fr.luba.poc.planning.PlanningNavigation
 import fr.luba.poc.planning.PlanningRequest
@@ -13,15 +14,20 @@ import fr.luba.poc.simulation.MowingSimulation
 import fr.luba.poc.simulation.SimConfig
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.Envelope
+import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.Polygon
 import org.locationtech.jts.operation.union.UnaryUnionOp
 import org.locationtech.jts.simplify.TopologyPreservingSimplifier
-import org.locationtech.jts.geom.Geometry as JtsGeometry
 
 /** Brush stroke on the map, in meters: add or erase, constant radius. */
 data class PaintStroke(val points: List<Point>, val radiusM: Double, val erase: Boolean = false) {
     init { require(radiusM.isFinite() && radiusM > 0) }
+}
+
+/** Retained painted area: temporary zones in mowing order, outlines to display and area outside no-go zones. */
+data class PaintedArea(val zones: List<MapShape>, val outlines: List<List<Point>>, val areaM2: Double) {
+    companion object { val EMPTY = PaintedArea(emptyList(), emptyList(), 0.0) }
 }
 
 /** Mission prepared for debug mowing: planner preview and verified route. */
@@ -138,6 +144,32 @@ object PaintedZone {
     }
 
     /**
+     * Retained area of [strokes] as temporary zones ordered from [start] (from its first piece when unknown), named by
+     * [label]: the target of a mowing task chosen by painting ([ZonePaintState]).
+     */
+    fun area(map: RobotMap, strokes: List<PaintStroke>, start: Point?,
+             label: (Int) -> String = { tr("Painted zone $it", "Zone peinte $it") }): PaintedArea {
+        val pieces = pieces(map, strokes)
+        if (pieces.isEmpty()) return PaintedArea.EMPTY
+        val mowable = mowable(map, pieces)
+        return PaintedArea(zones(map, pieces, start ?: pieces.first().first(), label), outlines(mowable), mowable.area)
+    }
+
+    /** Identifier given by [zones] to a temporary zone: never a recorded zone (not saved with the zone settings). */
+    fun isTemporary(id: Long): Boolean = id <= FIRST_ID
+
+    /** Planning map of a painted task: the robot map plus its temporary [zones], only a target for the planner. */
+    fun withZones(map: RobotMap, zones: List<MapShape>): RobotMap = if (zones.isEmpty()) map else map.copy(shapes = map.shapes + zones)
+
+    /**
+     * Continuous-blade zones of a task planned on [planningMap] for [zoneIds]: the temporary zones it targets, for a route
+     * prepared on the unchanged robot map; null for recorded zones (those of the preview, [MowingSimulation]).
+     */
+    fun bladeZones(planningMap: RobotMap, zoneIds: List<Long>): List<List<Point>>? =
+        if (zoneIds.none(::isTemporary)) null
+        else planningMap.shapes.filter { it.kind == ShapeKind.ZONE && it.id in zoneIds }.map { it.points }
+
+    /**
      * Full computation and preparation, like mowing zones from the map: same automatic planner, same navigation and
      * same route preparation as real mowing.
      */
@@ -168,7 +200,7 @@ object PaintedZone {
             boundary = BoundaryMeaning.RECORDED_TRACE, outerOffsetM = OuterOffsetSetting.meters)
         progress(tr("Computing the passes", "Calcul des passes"))
         val planned = RoutePlanning.coverage(PlanningRequest(planningMap, zones.map { it.id }, from, config = config,
-            obstacles = fr.luba.poc.planning.DockClearance.planning(obstacles, base),
+            obstacles = DockClearance.planning(obstacles, base),
             navigation = PlanningNavigation(accesses, base), end = base.point.takeIf { it != from }), checkpoint = checkpoint)
         require(!planned.preview.localOnly) {
             val detail = planned.report?.selected?.diagnostics?.joinToString(" ; ")?.takeIf { it.isNotBlank() }

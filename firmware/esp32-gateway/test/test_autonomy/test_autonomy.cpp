@@ -19,6 +19,7 @@
 #include "gw_follow.h"
 #include "gw_leg_frames.h"
 #include "gw_leg_runner.h"
+#include "gw_speed.h"
 #include "gw_worker.h"
 #include "sim_robot.h"
 
@@ -130,10 +131,10 @@ void test_leg_spec_round_trip_and_older_payloads() {
   TEST_ASSERT_EQUAL_DOUBLE(1.05, d.baseZone->radiusM);
   TEST_ASSERT_EQUAL(1, d.offMapSections.size());
   TEST_ASSERT_TRUE(d.encode() == bytes);
-  // Older pilot: frame without the trailing optional fields (base zone, slides, beyond the map).
+  // Older pilot: frame without the trailing optional fields (base zone, slides, beyond the map, speed limits, switch).
   LegSpec legacy = spec();
   Bytes old = legacy.encode();
-  old.resize(old.size() - 3);
+  old.resize(old.size() - 5);
   const LegSpec dl = LegSpec::decode(old);
   TEST_ASSERT_FALSE((bool)dl.baseZone);
   TEST_ASSERT_TRUE(dl.slideField.empty());
@@ -146,6 +147,63 @@ void test_leg_spec_round_trip_and_older_payloads() {
   } catch (const LegInvalid &e) {
     TEST_ASSERT_EQUAL_STRING("Vitesse hors plage", e.what());
   }
+}
+
+void test_speed_caps_travel_with_the_spec() {
+  LegSpec s = spec();
+  s.speedCaps = {SpeedCap{0.0, 1.25, 60}, SpeedCap{2.5, 3.0, 70}};
+  const Bytes bytes = s.encode();
+  const LegSpec d = LegSpec::decode(bytes);
+  TEST_ASSERT_EQUAL(2, d.speedCaps.size());
+  TEST_ASSERT_EQUAL_DOUBLE(1.25, d.speedCaps[0].to);
+  TEST_ASSERT_EQUAL(70, d.speedCaps[1].percent);
+  TEST_ASSERT_TRUE(d.encode() == bytes);
+  // Older pilot: no speed limit field nor switch (adaptive speed on).
+  Bytes old = spec().encode();
+  old.resize(old.size() - 2);
+  TEST_ASSERT_TRUE(LegSpec::decode(old).speedCaps.empty());
+  TEST_ASSERT_TRUE(LegSpec::decode(old).adaptiveSpeed);
+}
+
+void test_adaptive_speed_rules_match_the_app() {
+  TEST_ASSERT_EQUAL(100, AdaptiveSpeed::rtkPercent(4, (int64_t)500));
+  TEST_ASSERT_EQUAL(100, AdaptiveSpeed::rtkPercent(std::nullopt, std::nullopt));
+  TEST_ASSERT_EQUAL(60, AdaptiveSpeed::rtkPercent(5, (int64_t)500));
+  TEST_ASSERT_EQUAL(50, AdaptiveSpeed::rtkPercent(1, (int64_t)500));
+  TEST_ASSERT_EQUAL(50, AdaptiveSpeed::rtkPercent(4, (int64_t)10001));
+  const std::vector<SpeedCap> caps = {SpeedCap{2.0, 5.5, 60}, SpeedCap{5.0, 6.0, 70}, SpeedCap{5.2, 5.4, 50}};
+  const double at[] = {1.9, 2.0, 5.1, 5.3, 5.45, 5.6, 6.0};
+  const int expected[] = {100, 60, 60, 50, 60, 70, 100};
+  for (int i = 0; i < 7; i++) TEST_ASSERT_EQUAL(expected[i], AdaptiveSpeed::percentAt(caps, at[i]));
+  TEST_ASSERT_EQUAL(240, AdaptiveSpeed::linear(400, 60));
+  TEST_ASSERT_EQUAL(100, AdaptiveSpeed::linear(150, 50));
+  TEST_ASSERT_EQUAL(80, AdaptiveSpeed::linear(80, 50));
+}
+
+void test_slowed_stretches_and_a_float_rtk_lower_the_set_speed() {
+  LegSpec fast = spec();
+  fast.speedPercent = 80;
+  auto free = robotAtStart();
+  TEST_ASSERT_EQUAL((int)LegOutcome::DONE, (int)run(free, fast).outcome);
+  TEST_ASSERT_TRUE_MESSAGE(free.maxLinearSeen > 300, "set speed reached");
+  LegSpec capped = fast;
+  capped.speedCaps = {SpeedCap{0.0, 3.0, 50}};
+  auto slow = robotAtStart();
+  TEST_ASSERT_EQUAL((int)LegOutcome::DONE, (int)run(slow, capped).outcome);
+  TEST_ASSERT_TRUE_MESSAGE(slow.maxLinearSeen <= 200, "half of 400 at most");
+  auto floating = robotAtStart();
+  floating.rtkStatus = 5;
+  TEST_ASSERT_EQUAL((int)LegOutcome::DONE, (int)run(floating, fast).outcome);
+  TEST_ASSERT_TRUE_MESSAGE(floating.maxLinearSeen <= 240, "RTK float: 60 % of 400 at most");
+  // Switched off by the pilot: set speed everywhere, RTK float included.
+  LegSpec off = capped;
+  off.adaptiveSpeed = false;
+  const LegSpec decoded = LegSpec::decode(off.encode());
+  TEST_ASSERT_FALSE(decoded.adaptiveSpeed);
+  auto plain = robotAtStart();
+  plain.rtkStatus = 5;
+  TEST_ASSERT_EQUAL((int)LegOutcome::DONE, (int)run(plain, decoded).outcome);
+  TEST_ASSERT_TRUE_MESSAGE(plain.maxLinearSeen > 300, "switched off: set speed reached");
 }
 
 void test_slide_field_travels_with_the_spec() {
@@ -1278,6 +1336,9 @@ int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_crc32_and_modified_utf8);
   RUN_TEST(test_leg_spec_round_trip_and_older_payloads);
+  RUN_TEST(test_speed_caps_travel_with_the_spec);
+  RUN_TEST(test_adaptive_speed_rules_match_the_app);
+  RUN_TEST(test_slowed_stretches_and_a_float_rtk_lower_the_set_speed);
   RUN_TEST(test_slide_field_travels_with_the_spec);
   RUN_TEST(test_route_blob_and_result_codecs);
   RUN_TEST(test_leg_event_fields);

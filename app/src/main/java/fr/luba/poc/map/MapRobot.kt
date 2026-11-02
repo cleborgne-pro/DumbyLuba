@@ -1,6 +1,5 @@
 package fr.luba.poc.map
 
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -11,6 +10,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import fr.luba.poc.obstacles.RobotEnvelope
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.sin
 
 /**
  * Top view of the LUBA 2 AWD, to scale (690 × 513 mm): four lugged drive wheels, anthracite chassis, white shell with a
@@ -68,7 +72,7 @@ fun DrawScope.drawLuba(center: Offset, scale: Double, heading: Double, wheels: W
         drawPath(outline(-0.27f to -0.43f, 0.27f to -0.43f, 0.23f to -0.375f, -0.23f to -0.375f,
             curves = mapOf(1 to (0f to -0.53f), 3 to (0f to -0.46f))), Color(0xFF1C2022))
         for (x in listOf(-0.12f, 0f, 0.12f))
-            drawCircle(Color(0xFF6A7376), 0.028f * width, at(x, -0.455f + kotlin.math.abs(x) * 0.25f))
+            drawCircle(Color(0xFF6A7376), 0.028f * width, at(x, -0.455f + abs(x) * 0.25f))
         // Central anthracite cover: control panel.
         drawPath(outline(-0.17f to -0.26f, 0.17f to -0.26f, 0.225f to 0.21f, -0.225f to 0.21f,
             curves = mapOf(3 to (0f to 0.28f))), Color(0xFF394045))
@@ -117,9 +121,9 @@ class WheelOdometer(private val trackM: Double = RobotEnvelope.LUBA2.widthM * 0.
         if (pose == null || previous == null || pose.heading == null || previous.heading == null) return travel
         val dx = pose.point.x - previous.point.x
         val dy = pose.point.y - previous.point.y
-        if (kotlin.math.hypot(dx, dy) > MAX_STEP_M) return travel
+        if (hypot(dx, dy) > MAX_STEP_M) return travel
         val h = Math.toRadians(previous.heading)
-        val forward = dx * kotlin.math.cos(h) + dy * kotlin.math.sin(h)
+        val forward = dx * cos(h) + dy * sin(h)
         val turn = Math.toRadians(((pose.heading - previous.heading) % 360 + 540) % 360 - 180)
         fun bounded(step: Double) = step.coerceIn(-maxSideStepM, maxSideStepM)
         travel = WheelTravel(travel.leftM + bounded(forward - turn * trackM / 2), travel.rightM + bounded(forward + turn * trackM / 2))
@@ -137,13 +141,13 @@ class WheelOdometer(private val trackM: Double = RobotEnvelope.LUBA2.widthM * 0.
 
 /** LUBA display size: to the map scale, but never below [minimumPx] on screen. */
 fun lubaDrawScale(mapScale: Double, minimumPx: Float, zoom: Float): Double =
-    kotlin.math.max(mapScale, minimumPx / zoom.coerceAtLeast(0.01f) / RobotEnvelope.LUBA2.lengthM)
+    max(mapScale, minimumPx / zoom.coerceAtLeast(0.01f) / RobotEnvelope.LUBA2.lengthM)
 
 /** Station and back-off corridor to scale, from the approach point to the docked robot. */
 fun DrawScope.drawStation(center: Offset, scale: Double, heading: Double?, radius: Double?, color: Color, approachDistanceM: Double=1.5, circleStrokePx: Float=1.5f) {
     radius?.let {
         drawCircle(Color.White.copy(alpha=0.9f), (it*scale).toFloat(), center,
-            style=androidx.compose.ui.graphics.drawscope.Stroke(circleStrokePx))
+            style=Stroke(circleStrokePx))
     }
     rotate((90.0-(heading ?: 90.0)).toFloat(), center) {
         if(heading!=null) {

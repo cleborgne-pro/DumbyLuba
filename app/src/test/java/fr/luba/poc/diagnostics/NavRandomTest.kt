@@ -1,11 +1,11 @@
 package fr.luba.poc.diagnostics
 
 import fr.luba.poc.map.Point
-import fr.luba.poc.protocol.Commands
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
+import fr.luba.poc.protocol.Commands
+import kotlin.random.Random
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.random.Random
 
 class NavRandomTest {
     @Test fun `auto mode refuses missing stale or non-finite position`() {
@@ -15,7 +15,6 @@ class NavRandomTest {
         assertNotNull(NavSafety.automaticPositionFailure(0, null, 1.0))
         assertNotNull(NavSafety.automaticPositionFailure(0, Double.NaN, 1.0))
     }
-
 
     @Test fun `stop requires two new positions after STOP`() {
         val old = NavSample(0.0, 0.0, null, 100)

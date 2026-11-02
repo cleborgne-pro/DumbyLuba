@@ -3,6 +3,7 @@ package fr.luba.poc.manual
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -46,6 +47,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -55,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.theme.MammotionColors
 import kotlin.math.abs
@@ -241,7 +244,7 @@ private fun SpeedStepper(drive: ManualDrive) {
     Surface(shape = RoundedCornerShape(14.dp), color = colors.SurfaceMuted, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("$speed %", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = colors.TextPrimary)
-            Text("≈ ${String.format(fr.luba.poc.i18n.I18n.locale, "%.1f", Joystick.estimatedLinearMps(speed))} m/s",
+            Text("≈ ${String.format(I18n.locale, "%.1f", Joystick.estimatedLinearMps(speed))} m/s",
                 style = MaterialTheme.typography.labelSmall, color = colors.TextSecondary)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 StepButton(Icons.Rounded.Remove, tr("Slower", "Moins vite"), !drive.held && speed > ManualSpeed.MIN_PERCENT) { drive.step(-10) }
@@ -252,9 +255,9 @@ private fun SpeedStepper(drive: ManualDrive) {
 }
 
 @Composable
-private fun StepButton(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, enabled: Boolean, onClick: () -> Unit) {
+private fun StepButton(icon: ImageVector, description: String, enabled: Boolean, onClick: () -> Unit) {
     Surface(onClick = onClick, enabled = enabled, shape = CircleShape, color = MammotionColors.Surface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MammotionColors.Outline), modifier = Modifier.size(34.dp)) {
+        border = BorderStroke(1.dp, MammotionColors.Outline), modifier = Modifier.size(34.dp)) {
         Box(contentAlignment = Alignment.Center) {
             Icon(icon, description, Modifier.size(18.dp), tint = if (enabled) MammotionColors.TextPrimary else MammotionColors.TextTertiary)
         }

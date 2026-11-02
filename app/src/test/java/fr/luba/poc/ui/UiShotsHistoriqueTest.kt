@@ -1,7 +1,5 @@
 package fr.luba.poc.ui
 
-import fr.luba.poc.i18n.tr
-
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -24,6 +22,7 @@ import fr.luba.poc.history.TaskTrack
 import fr.luba.poc.history.TrackMeta
 import fr.luba.poc.history.TrackPhase
 import fr.luba.poc.history.TrackSample
+import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.*
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.simulation.SimulationSession

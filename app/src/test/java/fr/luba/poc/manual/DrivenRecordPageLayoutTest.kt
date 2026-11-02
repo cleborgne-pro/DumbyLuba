@@ -26,16 +26,14 @@ import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.protocol.Telemetry
 import fr.luba.poc.ui.theme.LubaTheme
+import fr.luba.poc.withComposeTestActivity
 import org.junit.After
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -50,15 +48,16 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], qualifiers = "w412dp-h800dp-xxhdpi")
 class DrivenRecordPageLayoutTest {
     val compose = createComposeRule()
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
-        object : Statement() { override fun evaluate() { assumeTrue(fr.luba.poc.BuildConfig.BUILD_TYPE == "debug"); base.evaluate() } }
-    }).around(compose)
+    @get:Rule val rules: RuleChain = withComposeTestActivity(compose)
 
     private val context get() = ApplicationProvider.getApplicationContext<android.content.Context>()
     private val robot by lazy { RobotBle(ApplicationProvider.getApplicationContext()) }
 
-    // Camera view shown at its full 16:9 size (stream impossible: static view, no endless animation).
-    @Before fun showCamera() { LiveCamera.setVisible(context, true); LiveCamera.relevant = true; LiveCamera.eligible = false }
+    // Camera view shown at its full 16:9 size (stream impossible: static view, no endless animation). No blocking
+    // reason: LiveCamera is a process-wide object, another class run before this one may leave one (account not connected).
+    @Before fun showCamera() {
+        LiveCamera.setVisible(context, true); LiveCamera.relevant = true; LiveCamera.eligible = false; LiveCamera.blocked = ""
+    }
     @After fun reset() { LiveCamera.relevant = false; Snapshot.sendApplyNotifications() }
 
     private val lawn = MapShape(1, 0, listOf(Point(0.0, 0.0), Point(10.0, 0.0), Point(10.0, 8.0), Point(0.0, 8.0)), "Pelouse")

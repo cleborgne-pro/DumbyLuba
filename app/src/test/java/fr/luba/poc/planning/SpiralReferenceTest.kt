@@ -33,7 +33,7 @@ class SpiralReferenceTest {
         navigation = PlanningNavigation(emptyList(), base))
     private fun <T> timed(block: () -> T): Pair<T, Double> { val start = System.nanoTime(); val r = block(); return r to (System.nanoTime() - start) / 1e9 }
 
-    @Test(timeout = 1_800_000) fun spiralOnTheReferenceMapAgainstZigzag() {
+    @Test(timeout = 900_000) fun spiralOnTheReferenceMapAgainstZigzag() {
         RoutePlanning.calculate(request(zones.take(1)), CoverageMode.LINES)
         RoutePlanning.calculate(request(zones.take(1)), CoverageMode.SPIRAL)
         val failures = mutableListOf<String>()

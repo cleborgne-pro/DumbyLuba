@@ -7,6 +7,7 @@ import fr.luba.poc.i18n.tr
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.LubaMsgProto.MsgCmdType
 import fr.luba.poc.proto.LubaMsgProto.MsgDevice
+import fr.luba.poc.proto.MctrlSysProto
 
 /**
  * Probe looking for the ultrasonic sensors (and perception) in the BLE stream.
@@ -267,7 +268,7 @@ class SensorProbe {
         }
     }
 
-    private fun acceptDev(dev: fr.luba.poc.proto.MctrlSysProto.rpt_dev_status) {
+    private fun acceptDev(dev: MctrlSysProto.rpt_dev_status) {
         extras = extras.copy(vslamStatus = dev.vslamStatus,
             fpvFlag = if (dev.hasFpvInfo()) dev.fpvInfo.fpvFlag else extras.fpvFlag,
             fpvWifi = if (dev.hasFpvInfo()) dev.fpvInfo.wifiAvailable else extras.fpvWifi,

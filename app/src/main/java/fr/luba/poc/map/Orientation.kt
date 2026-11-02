@@ -3,6 +3,7 @@ package fr.luba.poc.map
 import fr.luba.poc.i18n.tr
 import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.round
 
 /**
  * Direction of the passes for the modes that sweep in straight rows ([usesOrientation]), chosen in the task settings.
@@ -57,8 +58,8 @@ fun directionLine(map: RobotMap, preview: Preview, spacingM: Double): String? {
         val angle = preview.zoneAngles[i]
         val mode = preview.zoneModes.getOrNull(i) ?: preview.mode
         val degrees = if (mode == CoverageMode.CHECKERBOARD) "$angle°/${angle + 90}°" else "$angle°"
-        val shift = preview.zonePhases.getOrNull(i)?.let { kotlin.math.abs(it - 0.5) } ?: 0.0
-        val cm = kotlin.math.round(shift * spacingM * 100).toInt()
+        val shift = preview.zonePhases.getOrNull(i)?.let { abs(it - 0.5) } ?: 0.0
+        val cm = round(shift * spacingM * 100).toInt()
         "${zoneName(map, preview, i)} $degrees" + if (shift > 1e-9) tr(" (shifted by $cm cm)", " (décalée de $cm cm)") else ""
     }
 }

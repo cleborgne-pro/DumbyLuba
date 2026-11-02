@@ -2,6 +2,10 @@ package fr.luba.poc
 
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
+import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.zip.ZipInputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,10 +13,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.zip.ZipInputStream
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -96,5 +96,44 @@ class EventLogExportTest {
         assertEquals(setOf("0000.jsonl", "0001.jsonl"), parts)
         assertEquals(List(140) { "line $it" }, lines(File(context.filesDir, "diagnostics")))
         assertEquals(List(140) { "line $it" }, lines(context.getExternalFilesDir("diagnostics")))
+    }
+
+    /** The Mammotion account screen logs in its own channel: it no longer pushes robot launches out of the external copy. */
+    @Test fun externalCopyKeepsTheLastLaunchesOfEachChannel() {
+        val mirror = requireNotNull(context.getExternalFilesDir("diagnostics"))
+        repeat(8) { index ->
+            val robot = EventLog(context) { error -> throw AssertionError(error) }
+            val cloud = EventLog(context, "cloud") { error -> throw AssertionError(error) }
+            robot.append("probe", "robot $index"); cloud.append("probe", "cloud $index")
+            listOf(robot, cloud).forEach { log ->
+                val done = CountDownLatch(1); log.history { done.countDown() }; assertTrue(done.await(10, TimeUnit.SECONDS)); log.close()
+            }
+        }
+        val folders = mirror.listFiles().orEmpty().map { it.name }
+        // 5 earlier launches + the last one, per channel.
+        assertEquals(folders.toString(), 6, folders.count { EventLog.channelOf(it) == "" })
+        assertEquals(folders.toString(), 6, folders.count { EventLog.channelOf(it) == "cloud" })
+    }
+
+    /** Aggregate health of the launch: stop requests, failures, link losses and the average successful preparation time. */
+    @Test fun healthCountsStopsFailuresLinkLossesAndSuccessfulPreparations() {
+        val log = EventLog(context) { error -> throw AssertionError(error) }
+        log.append("stop_request", "STOP")
+        log.append("stop_request", "STOP")
+        log.append("failure", "BLE lost")
+        log.append("gateway_outage", "Wi-Fi cut")
+        log.append("simulation_preparation", "ready", mapOf("result" to "READY", "elapsedMs" to 1200.0))
+        log.append("simulation_preparation", "ready", mapOf("result" to "READY", "elapsedMs" to 1800.0))
+        log.append("simulation_preparation", "failed", mapOf("result" to "FAILED", "elapsedMs" to 9000.0))
+        val latch = CountDownLatch(1); var health: EventHealth? = null
+        log.health { health = it; latch.countDown() }   // same writer thread: runs after every line
+        assertTrue(latch.await(10, TimeUnit.SECONDS))
+        val result = requireNotNull(health)
+        assertEquals(2, result.stops)
+        assertEquals(1, result.failures)
+        assertEquals(2, result.linkLosses)
+        assertTrue(result.lastLinkLossAt > 0)
+        assertEquals(1500L, result.averagePreparationMs)
+        log.close()
     }
 }

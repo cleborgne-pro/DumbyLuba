@@ -6,8 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,9 +30,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import kotlin.math.abs
-import kotlin.math.roundToInt
+import androidx.core.content.edit
+import fr.luba.poc.Clock
 import fr.luba.poc.i18n.tr
+import kotlin.math.abs
 
 /**
  * Geometry of a floating camera window (map thumbnail, thumbnail of the other screens): pure computations, in dp,
@@ -111,15 +112,21 @@ class CameraWindowState internal constructor(private val key: String, val defaul
     }
 
     internal fun save(context: Context) {
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
-            .putFloat("$key.dx", dx).putFloat("$key.dy", dy).putFloat("$key.width", width).apply()
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit {
+            putFloat("$key.dx", dx)
+            putFloat("$key.dy", dy)
+            putFloat("$key.width", width)
+        }
     }
 
     /** Original position and size (double-tap on the handle). */
     internal fun reset(context: Context) {
         dx = 0f; dy = 0f; width = defaultWidth.value
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
-            .remove("$key.dx").remove("$key.dy").remove("$key.width").apply()
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit {
+            remove("$key.dx")
+            remove("$key.dy")
+            remove("$key.width")
+        }
     }
 
     private companion object { const val FILE = "camera_window" }
@@ -236,7 +243,7 @@ fun BoxScope.CameraWindow(state: CameraWindowState, anchor: Alignment, modifier:
                     state.active = false
                     state.save(context)
                 } else if (resizing) {
-                    val now = System.currentTimeMillis()
+                    val now = Clock.now()
                     if (now - lastHandleTap < viewConfiguration.doubleTapTimeoutMillis) { state.reset(context); lastHandleTap = 0L }
                     else lastHandleTap = now
                 }

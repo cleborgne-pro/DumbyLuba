@@ -133,4 +133,34 @@ class TurnOptimizerTest {
         assertTrue("$exit s", exit > 2.0 / 0.3 + hold / speed - hold / 0.3)
         assertTrue("$exit s", exit < 2.0 / 0.3 + (hold + ramp) / speed)
     }
+
+    /**
+     * Passes 0.75 m apart ending on a border slanted at 30° from the normal of the passes (B, the outer one, 0.43 m
+     * longer): centres must stay behind that border. Every equal trim leaves the shortened passes unswept; the oblique U
+     * (Zamboni) shortens B by 2 r × stagger / lateral more than A, runs its straight line along the border, and leaves
+     * the acute corner by B's end unswept, within the tolerance and counted.
+     */
+    @Test fun `an oblique U-turn follows a slanted border, its acute corner counted as unswept`() {
+        val lateral = 0.75; val stagger = lateral * kotlin.math.tan(Math.toRadians(30.0))
+        // Border through (10, 0) and (10 + stagger, lateral): outward normal (lateral, −stagger).
+        val behind = { path: List<Point> -> path.all { (it.x - 10.0) * lateral - it.y * stagger <= 1e-6 } }
+        fun context(tolerance: Double) = TurnOptimizer.TurnContext(0.25, 0.3, drivable = behind, cutWidthM = 0.4, obliqueUnsweptM = tolerance)
+        val plain = candidates(lateral, context(0.0), stagger).of(TurnKind.U_ARC)
+        assertFalse("equal trims: ${plain.refusal}", plain.possible)
+        val u = candidates(lateral, context(TurnOptimizer.OBLIQUE_UNSWEPT_M), stagger).of(TurnKind.U_ARC)
+        assertTrue(u.refusal, u.possible)
+        assertEquals(0.0, u.pivotDegrees, 1e-6)
+        assertEquals("B shortened 2 r × stagger / lateral more", 2 * TurnOptimizer.FOLLOW_RADIUS_M * stagger / lateral, u.trimB - u.trimA, 1e-9)
+        assertTrue("unswept ${u.unsweptM}", u.unsweptM > 0.05 && u.unsweptM <= TurnOptimizer.OBLIQUE_UNSWEPT_M + 1e-9)
+        assertTrue(behind(u.points))
+        assertEquals(TurnPlan.UNSWEPT_PENALTY_PER_M * u.unsweptM, u.score(TurnStyle.LAWN) - u.copy(unsweptM = 0.0).score(TurnStyle.LAWN), 1e-9)
+        // Mirrored (A the longer pass): A shortened more.
+        val mirrored = TurnOptimizer.candidates(Point(0.0, 0.0), Point(10.0 + stagger, 0.0), Point(10.0, lateral), Point(0.0, lateral),
+            TurnOptimizer.TurnContext(0.25, 0.3, drivable = { path -> path.all { (it.x - 10.0 - stagger) * lateral + it.y * stagger <= 1e-6 } },
+                cutWidthM = 0.4, obliqueUnsweptM = TurnOptimizer.OBLIQUE_UNSWEPT_M)).of(TurnKind.U_ARC)
+        assertTrue(mirrored.refusal, mirrored.possible)
+        assertEquals(u.trimB - u.trimA, mirrored.trimA - mirrored.trimB, 1e-9)
+        // Level ends: no oblique U, the equal trim as before.
+        assertEquals(0.0, candidates(lateral, context(TurnOptimizer.OBLIQUE_UNSWEPT_M)).of(TurnKind.U_ARC).unsweptM, 1e-12)
+    }
 }

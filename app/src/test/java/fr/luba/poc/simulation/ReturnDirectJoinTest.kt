@@ -3,11 +3,11 @@ package fr.luba.poc.simulation
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.ObstacleDisc
 import fr.luba.poc.obstacles.RobotEnvelope
+import kotlin.math.abs
+import kotlin.math.atan2
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.abs
-import kotlin.math.atan2
 
 /**
  * Return to base of 2026-10-13 (15:16, Fold log): robot stopped 41.5 cm from a border of the Piscine zone, heading 23°.

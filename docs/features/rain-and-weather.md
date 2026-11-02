@@ -1,14 +1,15 @@
 # Rain and weather
 
-Monitors rain around the garden using radar and forecasts. It warns before and during mowing, without ever stopping
-the robot on its own (observation mode).
+Monitors rain around the garden using radar and forecasts. It warns before and during mowing; with **Return to base
+on confirmed rain** switched on, confirmed rain also stops a mowing, sends the robot back to its base and resumes the
+mowing once the rain is over (off by default: observation mode).
 
 | | |
 |---|---|
 | **Access** | Service → Garden and history → **Rain and weather**; Map → weather in the status pill at the top → **Garden weather** |
-| **Status** | Implemented in observation mode (warnings only); robot rain sensor not read yet; thresholds not calibrated on real showers |
+| **Status** | Warnings, and the automatic rain return when switched on (off by default); robot rain sensor not read yet; thresholds not calibrated on real showers |
 | **Code** | `weather/` (`WeatherService.kt`, `RainAnalysis.kt`, `RainDecision.kt`, `RadarMath.kt`, `GrassWetness.kt`, `WeatherUi.kt`) |
-| **Tests** | `RainWeatherTest`, `GrassWetnessTest`, `WeatherPillLabelTest`, `WeatherServiceTest` (no Internet access) |
+| **Tests** | `RainWeatherTest`, `GrassWetnessTest`, `WeatherPillLabelTest`, `WeatherServiceTest` (no Internet access), `RainReturnTest`, `RobotBleRainReturnTest` |
 | **Reference** | [Sensor and radar fusion: design](../RAIN_WEATHER_FUSION.md) |
 
 <p align="center">
@@ -105,7 +106,30 @@ weather (less than 3 h old), no correction is applied.
   forecast unavailable: rain not checked".
 - **During mowing** (app mowing or app route): **Rain during mowing** alert (warning) when the same check over the
   next 30 minutes warns ([notifications](notifications.md)); the weather segment of the status pill turns orange.
-- No automatic action: cutting the blades or going home remains the user's decision.
+- With **Return to base on confirmed rain** off (default), no automatic action: cutting the blades or going home
+  remains the user's decision.
+
+## Return to base on confirmed rain
+
+Service → Garden and history → **Rain and weather** → Settings → **Return to base on confirmed rain**, or the same switch
+in Map → **Mow** → **Task settings** → **Smart features** (needs **Monitor rain** and the garden position; kept between
+launches). The notice at the top of the page says which mode is on.
+
+- **Return**: only when the decision is **Rain** (confirmed: two radar images at 23 dBZ or more within 1.5 km of the
+  garden, or one at 30 dBZ, see [rain decision](#rain-decision)). Monitoring, "Rain imminent", an isolated echo and a
+  rain forecast give the usual alert only. The mowing stops at the next tracking check exactly as at the end of the
+  [working hours](real-mowing.md#working-hours): blades OFF, return along the recharge route, official docking, progress
+  kept ("Rain confirmed: robot on the base, mowing resumes after the rain"). During a recharge, the robot stays on the
+  base. Tracking handed to a gateway: the gateway is asked to stop.
+- **Wait**: on the base, the mowing bar shows "Rain return: rain, waiting on the base (12 min)". Stale or missing
+  weather is never taken for dry weather: the robot keeps waiting ("weather unavailable").
+- **Resume**: once the decision is back to **Dry** (30 min without rain after the last shower) and the robot has been on
+  the base for at least 30 min, the mowing resumes by itself as with **Resume**, robot charging and link ready. At most
+  2 automatic resumes per mowing: a third rain, 6 h on the base, 3 refused resumes or a mowing abandoned leave the mowing
+  to be resumed by hand.
+- Log: `rain_return`, `work_window_docked` (with the rain reason), `rain_resumed`, `rain_resume_given_up`.
+- The robot's protections, STOP and the link checks keep priority. Not tried on the robot; the radar thresholds are not
+  calibrated on real showers yet, which is why the switch is off by default.
 
 ## Data and network
 

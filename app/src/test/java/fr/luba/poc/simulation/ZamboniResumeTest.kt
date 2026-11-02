@@ -1,10 +1,10 @@
 package fr.luba.poc.simulation
 
 import fr.luba.poc.map.*
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.atan2
+import org.junit.Assert.*
+import org.junit.Test
 
 /**
  * Mission checkpoint and smart resume with a Zamboni plan (long runs of passes joined by rolling U-turns): the preview

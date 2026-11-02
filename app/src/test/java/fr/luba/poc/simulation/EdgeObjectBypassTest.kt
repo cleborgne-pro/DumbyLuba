@@ -3,11 +3,9 @@ package fr.luba.poc.simulation
 import fr.luba.poc.map.*
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.planning.*
+import kotlin.math.atan2
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
  * B0 replay of 2026-10-28, 09:52:08 (Zamboni zone, passes at 59°, 0.35 m spacing): bumper contact against a wood pile

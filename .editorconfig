@@ -1,0 +1,39 @@
+# Kotlin / Android sources: ktlint reads this file; the values match the existing code so that the baseline does
+# not have to carry avoidable entries.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{kt,kts}]
+max_line_length = 180
+ij_kotlin_allow_trailing_comma = false
+ij_kotlin_allow_trailing_comma_on_call_site = false
+# Wildcard imports are used on purpose (fr.luba.poc.map.*, simulation.*) and inline qualified names must move to
+# imports (audit of 2026-10-30): the rule is off rather than frozen in the baseline.
+ij_kotlin_imports_layout = *
+ktlint_standard_no-wildcard-imports = disabled
+ktlint_standard_function-signature = disabled
+
+[*.{md,yml,yaml,toml,conf,pro}]
+indent_size = 2
+
+# ktlint: the full standard ruleset fights the project's dense style (several statements per line, aligned
+# declarations) and would need a 7 MB baseline. Only high-signal rules are enforced; the style overhaul
+# (imports instead of inline qualified names, formatting) stays a separate, deliberate change.
+[*.{kt,kts}]
+ktlint_standard = disabled
+ktlint_standard_no-unused-imports = enabled
+ktlint_standard_no-trailing-spaces = enabled
+ktlint_standard_final-newline = enabled
+ktlint_standard_no-consecutive-blank-lines = enabled
+ktlint_standard_import-ordering = enabled
+ktlint_standard_no-semi = enabled
+ktlint_standard_string-template = enabled
+ktlint_standard_no-empty-first-line-in-class-body = enabled
+ktlint_standard_discouraged-comment-location = enabled

@@ -36,7 +36,7 @@ Fold (planning, safety) ── Wi-Fi TCP 8766 ── ESP32 (on the robot) ──
   attempts per minute. Unencrypted traffic: home Wi-Fi only.
 - **mDNS advertisement** `_dumbyluba._tcp` (and `_http._tcp`), instance "DumbyLuba passerelle ESP32"; status page
   `http://dumbyluba-esp32.local/` (see [Web pages](#web-pages)).
-- **Health** reported to the Fold every 5 s: battery level (T-Call: IP5306, 100/75/50/25/0 %; Olimex board: from the
+- **Health** reported to the Fold every 5 s: battery level (T-Call: IP5306 steps 100/75/50/25/0 %, spread inside the current step from the time spent in it, see [Battery level on the T-Call](#battery-level-on-the-t-call); Olimex board: from the
   cell voltage, unknown while 5 V is present, see [Boards](#boards)), power present (shown as "charging"), Wi-Fi
   signal. No temperature or thermal state (−1), no accelerometer (no terrain).
 - T-Call: the board's 2G modem is kept powered off; the IP5306 output is kept on so that the board stays powered on
@@ -53,6 +53,10 @@ Fold (planning, safety) ── Wi-Fi TCP 8766 ── ESP32 (on the robot) ──
   replayed when the pilot returns, official Mammotion docking requested when a return ends with no pilot. A pilot
   write or a deliberate departure stops the tracking; so does **Stop the autonomous tracking** on the gateway page.
   No update over Wi-Fi and no **Release the robot** while a tracking runs. Routes and surfaces of 1.5 MB at most.
+- **Adaptive speed** (`gw_speed`): the slowed stretches sent by the pilot with each leg (`LegSpec.speedCaps`,
+  optional trailing field: route positions and share of the set speed) and the RTK solution of the telemetry lower the
+  set speed like the app does ([adaptive speed](../../docs/features/real-mowing.md#adaptive-speed)). A pilot older than
+  this firmware sends none: set speed everywhere.
 
 ## Boards
 
@@ -64,7 +68,7 @@ Firmware 0.5.0 builds for two boards, one PlatformIO environment each (`src/boar
 | PlatformIO board | `esp32-s3-devkitc1-n8r8` (same memory, `qio_opi`) with the pin names of the Arduino variant `esp32s3-devkit-lipo`: PlatformIO has no board file for the Olimex ESP32-S3 | `esp32dev` |
 | Partitions | `ota_8mb.csv`: two OTA slots of 4,128,768 bytes, NVS 20 KB, core dump 64 KB, no SPIFFS | `min_spiffs.csv`: two OTA slots of 1,966,080 bytes |
 | Upload and console | USB-UART port (CH340X on UART0, auto-reset); the native USB port also powers and charges the board | USB |
-| Power reading | cell voltage on BAT_SENS (GPIO 6, 470 k / 150 k divider), 5 V present on PWR_SENS (GPIO 5); charger state not readable | IP5306 over I2C: level in 25 % steps, power present, charge full |
+| Power reading | cell voltage on BAT_SENS (GPIO 6, 470 k / 150 k divider), 5 V present on PWR_SENS (GPIO 5); charger state not readable | IP5306 over I2C: level in 25 % steps (estimated between steps), power present, charge full |
 | LED | GPIO 38, green, lit when LOW | GPIO 13 |
 | Pairing window opened by | a reset through EN (reset button, if the board has one: to check; auto-reset of the USB-UART port when a console opens) or a power-up | the PWR button or a power-up |
 | Status | builds; **not tried**: board not received yet | in service |
@@ -126,6 +130,26 @@ The diagnostics firmware (`firmware/esp32-diag`) stays T-Call only.
    connection).
 4. On the Fold: Service → Wi-Fi gateway → Control via the gateway, the ESP32's code, **Find and test**
    (the address is found over mDNS), then search for and tap the robot.
+
+## Battery level on the T-Call
+
+The IP5306 gives four LEDs, so a raw level of 100, 75, 50, 25 or 0 %: it stays at 100 % for hours, then the steps follow
+each other quickly at the end of the discharge. `gw_battery_steps` (native tests `test_battery_steps`) spreads the level
+inside the current step from the time spent in it:
+
+- the raw step S means a level between S − 25 and S: the estimate never leaves that range, and stops at 90 % of the
+  step so that the next step is always announced by the gauge itself;
+- the duration of each step is learned (moving average, a quarter of the weight to the last discharge) when its start
+  and its end were both seen, and kept in non-volatile memory (`bat_s25` … `bat_s100`); a step never seen is assumed
+  to last 4 h, so the estimate leans low;
+- a step entered without having seen its start (boot, back from external power) begins in its middle, except the
+  100 % step after a charge that ended full, which begins at the top;
+- with external 5 V present the raw step is reported and no time is counted;
+- the last LED never reads 4 % or less (floor at 5 %), and the raw step 0 is reported as 0: the cutting rule (4 % or
+  less with no power) triggers exactly where it did.
+
+The estimate is an approximation tied to the load (Wi-Fi, Bluetooth, mowing); `/status` `power.level_step` keeps the
+raw step.
 
 ## Toolchain (arduino-esp32 3.x, ESP-IDF 5.5)
 
@@ -358,14 +382,16 @@ command `ota`. While writing (~12 s), the board no longer answers over Wi-Fi.
 - `/`: status page refreshed every 5 s: **Robot** ("No robot: pick it from the Fold (Control via the gateway)",
   "… connected over Bluetooth · piloted from the Fold", "… waiting for the pilot phone", "Bluetooth connection to …",
   "… off, out of range or held by another device: retrying automatically"), **Pilot**, **Last safety stop**, button
-  **Release the robot** (Mammotion app, direct Bluetooth; no more automatic reconnection), links to Wi-Fi and JSON,
-  and the full status. Redirects to `/wifi` while only the access point is up.
-- `/status`: status as JSON (firmware, `board` (`tcall` or `s3lipo`), uptime, memory, power, Wi-Fi with its power
+  **Release the robot** (Mammotion app, direct Bluetooth; no more automatic reconnection), links to Wi-Fi, JSON and
+  the journal, and the full status. Redirects to `/wifi` while only the access point is up.
+- `/status`: status as JSON (firmware, `board` (`tcall` or `s3lipo`), uptime, `reset_reason` (power on, crash, watchdog, brownout…), memory, power, Wi-Fi with its power
   save mode in force `wifi.ps`, robot, pilot, `ota`). `power`: `vin_present` (external 5 V), `level_percent` (−1:
   unknown) and `battery_mv` (cell voltage, −1 on the T-Call, which does not measure it) on both boards; T-Call only:
-  `ip5306_ok`, `keep_on`, `charge_full`. Memory: `heap_free` / `heap_min` count every internal region (including the IRAM left over, 32-bit
+  `ip5306_ok`, `keep_on`, `charge_full`, `level_step` (raw IP5306 step, `level_percent` is the estimate). Memory: `heap_free` / `heap_min` count every internal region (including the IRAM left over, 32-bit
   access only); `heap_internal_free` / `heap_internal_min` (lowest since boot) count the byte-addressable internal RAM
   that `malloc` and the task stacks use; `heap_largest_internal`; `psram` (size, free, largest block).
+- `/log`: journal as plain text, to find out why the board stopped or restarted by itself, on the robot, without a
+  console (see [Journal](#journal)).
 - `/wifi`: network list with signal, or a typed name, and password; **Save** restarts the board on that network.
 - `/pair`: pairing link as JSON (`{"open":true,"link":"dumbyluba://pair?…"}`) while the window opened by the PWR
   button is open, 403 otherwise. `/status` only says whether it is open (`pairing` block), never the code.
@@ -376,17 +402,46 @@ command `ota`. While writing (~12 s), the board no longer answers over Wi-Fi.
 | Command | Effect |
 |---|---|
 | `status` | Full state as JSON (same content as `/status`) |
+| `log` | Journal (same content as `/log`) |
 | `code` / `code NNNNNN` | Shows / changes the six-digit code |
 | `pair` | Prints the pairing link (`dumbyluba://pair?…`, with the code) |
 | `release` | Releases the robot (Mammotion app, direct Bluetooth) and forgets it |
 | `wifi NAME\|PASSWORD` / `forget-wifi` | Wi-Fi network (saved, then restart) |
 | `ap-pass` | Shows the access point name and password again |
 | `reboot` | Restarts |
+| `crash` | Deliberate crash (`abort()`), to check that the journal keeps the lines before a crash |
 | `ota` / `ota-mowing on\|off` | Update-over-Wi-Fi status / "during mowing" setting (normally sent by the Fold) |
 | `wifi-ps` / `wifi-ps none\|min` | Wi-Fi power save of the station: shows / sets it (stored, default `none`, applied at once) |
 
 A state line is printed every 30 s (Wi-Fi, robot, pilot, power (`usb`: external 5 V present) with the cell voltage on
 the Olimex board, free memory: `heap`, then `internal` and its lowest value since boot `min`).
+
+## Journal
+
+`/log` (or `log` on the console) answers, after the board stopped or restarted by itself on the robot, what it was
+doing and how it ended (`src/journal.cpp`, pure part `lib/gwcore/src/gw_journal.cpp`, tests `test_journal`):
+
+- **Last 8 starts**, newest first, with the reason (`power on`, `software restart`, `crash`, `watchdog`, `brownout`,
+  `reset button`) and the last state of the run before it: how long it ran, when it was last seen (local time once NTP
+  set the clock), battery level, on battery or external power, Wi-Fi, robot connected, lowest internal heap. Kept in
+  non-volatile memory, so a run that ended in a power cut (battery empty) still says how it ended. On the T-Call a reset
+  through EN (PWR button, USB-serial auto-reset) reads as `power on`.
+- **Last lines of the previous run** and the lines of this run (4 KB each, about 20 minutes of state lines): what the
+  gateway writes on the console (`[robot]`, `[wifi]`, `[pilot]`, `[leg]`, `[ota]`, `[state]`), what goes through
+  `printf` and the ESP-IDF log (NimBLE `E NimBLEClient: …`, Wi-Fi driver) and the ROM output (`ets_printf`: Arduino
+  `log_e`, task watchdog). Kept in RTC memory left uninitialised at boot: survives a crash, a watchdog, a software
+  restart (tried: `reboot`, `crash`); a brownout most likely (the chip resets without losing power, not tried); lost on
+  a power cut.
+- **Sent to each pilot that connects** (`start` event, logged by the app as `gateway_start`): this start in one line,
+  "#12 power on, up 6 s; previous run 52 s, battery 100 % on external power, Wi-Fi ok, robot connected…". The app
+  raises a **Gateway restarted** alert when the boot number changed since its previous connection for a reason not
+  asked for, so a board that restarts on the robot no longer goes unnoticed until someone reads `/log`.
+- Not in it: the code, the pairing link and the access point password (console only, `/log` is readable by anyone
+  on the Wi-Fi, like `/status`); the crash dump itself (`Guru Meditation`, backtrace), written by ESP-IDF straight to
+  the UART: the journal gives `crash` and the lines before it.
+
+Flash wear: the state is written to non-volatile memory at the first 30 s state line, when external power appears or
+goes, and every 5 min otherwise (the RTC copy is refreshed every 30 s).
 
 ## Tests
 

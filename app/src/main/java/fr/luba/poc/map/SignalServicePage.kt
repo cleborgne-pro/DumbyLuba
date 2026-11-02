@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.Format
 import fr.luba.poc.ui.components.InfoNote
@@ -31,11 +32,11 @@ import fr.luba.poc.ui.components.PushedPage
 import fr.luba.poc.ui.components.SettingsGroup
 import fr.luba.poc.ui.components.StatusNote
 import fr.luba.poc.ui.theme.MammotionColors
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
+import kotlin.math.floor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Service → Signal surveys. The survey is automatic: every robot movement feeds the continuous map ([SignalLiveMap]).
@@ -70,28 +71,28 @@ fun SignalSurveyPage(state: RobotUi, onBack: () -> Unit, onShowOnMap: () -> Unit
             "pilotage manuel), l'application enregistre le Wi-Fi, le RTK, le Bluetooth, le réseau mobile, les satellites et, " +
             "avec le téléphone passerelle posé sur le robot, son inclinaison pour le relief. Une mesure par seconde au plus et " +
             "tous les 30 cm, sans aucune commande envoyée au robot."))
-        SettingsGroup(tr("Continuous map", "Carte continue")) {
+        SettingsGroup(title = tr("Continuous map", "Carte continue")) {
             if (live == null) InfoNote(tr("No readings yet: they are added as soon as the robot moves on a complete map.", "Aucune mesure pour l'instant : elles s'ajoutent dès que le robot se déplace sur une carte complète."))
             else {
                 KeyValueRow("Version", surveyDate(live.startedAt))
-                val cells = remember(samples) { samples.map { kotlin.math.floor(it.point.x) to kotlin.math.floor(it.point.y) }.distinct().size }
+                val cells = remember(samples) { samples.map { floor(it.point.x) to floor(it.point.y) }.distinct().size }
                 KeyValueRow(tr("Readings", "Mesures"), tr("${Format.plural(samples.size, "reading", "readings")} · 1 m ${Format.plural(cells, "cell", "cells")}", "${Format.plural(samples.size, "mesure", "mesures")} · ${Format.plural(cells, "cellule", "cellules")} de 1 m"))
                 KeyValueRow(tr("Layers", "Calques"), layers.joinToString(" · ") { it.shortLabel() })
                 samples.maxOfOrNull { it.at }?.let { KeyValueRow(tr("Last reading", "Dernière mesure"), surveyDate(it)) }
                 KeyValueRow(tr("Map", "Carte"), if (sameMap) tr("current robot map", "carte actuelle du robot") else tr("other map (preview on its original map)", "autre carte (aperçu sur sa carte d'origine)"))
             }
-            if (state.surveySaveError) StatusNote(tr("Could not save the survey", "Sauvegarde du relevé impossible"), NoteTone.DANGER)
+            if (state.surveySaveError) StatusNote(tr("Could not save the survey", "Sauvegarde du relevé impossible"), tone = NoteTone.DANGER)
         }
-        if (live != null) SettingsGroup(tr("Preview", "Aperçu")) {
+        if (live != null) SettingsGroup(title = tr("Preview", "Aperçu")) {
             MapLive(mapForPreview, modifier = Modifier.fillMaxWidth().height(320.dp).clip(MaterialTheme.shapes.medium).background(MammotionColors.MapBackground),
                 interactive = true, cameraReset = live.sessionId.hashCode(), signalCells = view.cells, signal = signal, signalColor = view::color)
             SignalReliefControls(view, samples, onSignal = { signal = it }, onShading = {}, mount = null, onMount = {}, on3d = null)
         }
-        SettingsGroup(tr("Browse", "Consulter")) {
+        SettingsGroup(title = tr("Browse", "Consulter")) {
             NavRow(tr("Heatmap history", "Historique des heatmaps"), icon = Icons.Rounded.History,
                 subtitle = tr("Continuous map versions and dedicated routes, to show on the map", "Versions de la carte continue et parcours dédiés, à afficher sur la carte")) { historyOpen = true }
         }
-        SettingsGroup(tr("Dedicated route (optional)", "Parcours dédié (facultatif)")) {
+        SettingsGroup(title = tr("Dedicated route (optional)", "Parcours dédié (facultatif)")) {
             InfoNote(tr("To measure the whole garden at once: full loop of the boundary or crossed grid (better terrain), " +
                 "blades stopped. Its readings also feed the continuous map.",
                 "Pour mesurer tout le jardin en une fois : grand tour du contour ou quadrillage croisé (meilleur relief), " +
@@ -110,4 +111,4 @@ fun SignalSurveyPage(state: RobotUi, onBack: () -> Unit, onShowOnMap: () -> Unit
 }
 
 private fun surveyDate(epochMs: Long): String =
-    if (epochMs > 0) SimpleDateFormat(tr("yyyy-MM-dd HH:mm", "dd/MM/yyyy à HH:mm"), fr.luba.poc.i18n.I18n.locale).format(Date(epochMs)) else tr("unknown date", "date inconnue")
+    if (epochMs > 0) SimpleDateFormat(tr("yyyy-MM-dd HH:mm", "dd/MM/yyyy à HH:mm"), I18n.locale).format(Date(epochMs)) else tr("unknown date", "date inconnue")

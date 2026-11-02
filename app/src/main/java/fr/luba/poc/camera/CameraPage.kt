@@ -10,21 +10,23 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import fr.luba.poc.auth.AccountMode
 import fr.luba.poc.auth.CameraCommand
 import fr.luba.poc.auth.CloudUi
 import fr.luba.poc.auth.CloudViewModel
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.i18n.tr
+import fr.luba.poc.ui.ServicePage
 import fr.luba.poc.ui.components.*
 import fr.luba.poc.ui.theme.Dimens
 import fr.luba.poc.ui.theme.MammotionColors
-import fr.luba.poc.i18n.tr
 
 /** Camera used for the obstacle photo (saved setting, shared by the Camera and Obstacles pages). */
 @Composable
 fun ObstaclePhotoCameraChoice(robot: RobotBle, state: RobotUi) {
     val camera = state.obstaclePhoto.camera
-    val enabled = state.obstaclePhoto.enabled && !fr.luba.poc.auth.AccountMode.observe()
+    val enabled = state.obstaclePhoto.enabled && !AccountMode.observe()
     Text(tr("Photo camera", "Caméra de la photo"), style = MaterialTheme.typography.bodyMedium)
     Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
         ChoiceTile(Icons.Rounded.Videocam, tr("Front / left", "Avant / gauche"), camera == ObstaclePhotoUi.CAMERA_FRONT,
@@ -78,7 +80,7 @@ fun CameraPage(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudStat
         }
     }
 
-    PushedPage(fr.luba.poc.ui.ServicePage.CAMERA.title, back, bottomBar = {
+    PushedPage(ServicePage.CAMERA.title, back, bottomBar = {
         Column(Modifier.fillMaxWidth().padding(Dimens.Md), verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
             if (playing) PrimaryPillButton(tr("Stop the stream", "Arrêter le flux"), { stopCamera(robot, cloud, cloudState) }, Modifier.fillMaxWidth())
             else if (camera.busy) PrimaryPillButton(tr("Cancel the request", "Annuler la demande"), { cloud.stopCamera() }, Modifier.fillMaxWidth())
@@ -99,7 +101,7 @@ fun CameraPage(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudStat
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black, MaterialTheme.shapes.medium)) {
             CameraPlayerView(Modifier.fillMaxSize())
         }
-        SettingsGroup(tr("Stream", "Flux")) {
+        SettingsGroup(title = tr("Stream", "Flux")) {
             KeyValueRow(tr("State", "État"), camera.status)
             KeyValueRow(tr("Player", "Lecteur"), controller.status)
             if (controller.stats.isNotBlank()) KeyValueRow(tr("Reception", "Réception"), controller.stats)
@@ -108,7 +110,7 @@ fun CameraPage(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudStat
             camera.robot?.let { KeyValueRow(tr("Account robot", "Robot du compte"), it.name) }
             if (camera.lastCommand.isNotBlank()) KeyValueRow(tr("Last command", "Dernière commande"), camera.lastCommand)
         }
-        SettingsGroup(tr("Displayed camera", "Caméra affichée")) {
+        SettingsGroup(title = tr("Displayed camera", "Caméra affichée")) {
             Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
                 ChoiceTile(Icons.Rounded.Videocam, tr("Front / left (1)", "Avant / gauche (1)"), controller.target == 1, { controller.select(1) }, Modifier.weight(1f))
                 ChoiceTile(Icons.Rounded.Videocam, tr("Right (2)", "Droite (2)"), controller.target == 2, {
@@ -126,7 +128,7 @@ fun CameraPage(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudStat
             Text(tr("The Mammotion app only requests the front camera. Choosing \"Right\" requests both cameras (stream restarted if needed).", "L'app Mammotion ne demande que la caméra avant. Choisir « Droite » demande les deux caméras (flux relancé si besoin)."),
                 style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
         }
-        SettingsGroup(tr("Obstacle photo after a contact", "Photo de l'obstacle après un contact")) {
+        SettingsGroup(title = tr("Obstacle photo after a contact", "Photo de l'obstacle après un contact")) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(tr("Photograph the obstacle after the back-off", "Photographier l'obstacle après le recul"), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 LubaSwitch(state.obstaclePhoto.enabled, robot::setObstaclePhotoEnabled)
@@ -135,7 +137,7 @@ fun CameraPage(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudStat
             if (state.obstaclePhoto.status.isNotBlank()) KeyValueRow(tr("Last photo", "Dernière photo"), state.obstaclePhoto.status)
             Text(tr("Photos taken: Service → Obstacles.", "Photos prises : Service → Obstacles."), style = MaterialTheme.typography.bodySmall, color = MammotionColors.TextSecondary)
         }
-        SettingsGroup(tr("Robot (telemetry)", "Robot (télémétrie)")) {
+        SettingsGroup(title = tr("Robot (telemetry)", "Robot (télémétrie)")) {
             KeyValueRow(tr("Video command link", "Liaison des commandes vidéo"), if (viaRobot) tr("robot (Bluetooth / gateway)", "robot (Bluetooth / passerelle)") else tr("Mammotion cloud", "cloud Mammotion"))
             KeyValueRow("FPV (fpv_info)", robotCamera.fpvLabel)
             KeyValueRow(tr("Robot network", "Réseau du robot"), robotCamera.netLabel + if (robotCamera.mobileStream) tr(" · refresh_fpv every 3 s", " · refresh_fpv toutes les 3 s") else "")

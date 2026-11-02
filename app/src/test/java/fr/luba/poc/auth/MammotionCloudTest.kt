@@ -8,6 +8,8 @@ import fr.luba.poc.auth.FakeMammotionServer.Companion.jwt
 import fr.luba.poc.auth.FakeMammotionServer.Companion.ok
 import fr.luba.poc.auth.FakeMammotionServer.Companion.session
 import fr.luba.poc.protocol.Commands
+import java.io.IOException
+import java.net.URLDecoder
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -17,8 +19,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.io.IOException
-import java.net.URLDecoder
 
 /** Mammotion account HTTP client against a cloud simulated on a local ephemeral port. */
 @RunWith(RobolectricTestRunner::class)

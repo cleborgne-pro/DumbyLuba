@@ -4,13 +4,13 @@ import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.MapStation
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
+import java.io.File
+import java.io.RandomAccessFile
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.File
-import java.io.RandomAccessFile
 
 class TaskTrackTest {
     @get:Rule val folder = TemporaryFolder()

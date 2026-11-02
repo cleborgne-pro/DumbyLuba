@@ -1,9 +1,9 @@
 package fr.luba.poc.map
 
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.max
 import kotlin.math.min
+import org.junit.Assert.*
+import org.junit.Test
 
 /**
  * Robot icon during a simulation: one pose every 50 ms. The glide restarts from the displayed pose towards each new pose

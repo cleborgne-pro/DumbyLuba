@@ -65,7 +65,7 @@ class LogSanitizer {
         // Account number: removed whatever its JSON type (number or string).
         key in ACCOUNT_KEYS && value != JSONObject.NULL -> { count("account number"); "‹removed›" }
         value !is String -> value
-        key in REDACTED_KEYS -> { count(key!!); "‹removed›" }
+        key != null && key in REDACTED_KEYS -> { count(key); "‹removed›" }
         key in PROTOBUF_KEYS -> text(protobuf(value))
         else -> text(value)
     }

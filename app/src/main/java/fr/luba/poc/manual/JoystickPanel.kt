@@ -5,6 +5,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.camera.LiveCameraView
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.LubaCheckRow
@@ -19,17 +21,17 @@ import fr.luba.poc.ui.components.StatusNote
 fun JoystickPanel(robot: RobotBle, state: RobotUi, belowControls: @Composable () -> Unit = {}) {
     val drive = rememberManualDrive(robot, state)
     SafetyNotice(tr("Blades stopped. Supervise the robot, keep the area clear, physical stop within reach.", "Lames arrêtées. Supervisez le robot, zone dégagée, arrêt physique accessible."))
-    SettingsGroup(tr("Preparation", "Préparation")) {
+    SettingsGroup(title = tr("Preparation", "Préparation")) {
         LubaCheckRow(title = tr("I am supervising the robot", "Je supervise le robot"), checked = drive.confirmed, onCheckedChange = { drive.confirmed = it }, enabled = !drive.held)
         SliderRow(tr("Maximum speed", "Vitesse maximale"), drive.speed, { drive.speed = it }, valueRange = 10f..100f,
-            valueLabel = "${drive.speedPercent} % · ≈ ${String.format(fr.luba.poc.i18n.I18n.locale, "%.1f", Joystick.estimatedLinearMps(drive.speedPercent))} m/s", enabled = !drive.held)
+            valueLabel = "${drive.speedPercent} % · ≈ ${String.format(I18n.locale, "%.1f", Joystick.estimatedLinearMps(drive.speedPercent))} m/s", enabled = !drive.held)
     }
     // Large camera view above the joysticks (the view can be hidden).
-    fr.luba.poc.camera.LiveCameraView(Modifier.fillMaxWidth(), large = true)
-    SettingsGroup(tr("Controls", "Commandes")) {
+    LiveCameraView(Modifier.fillMaxWidth(), large = true)
+    SettingsGroup(title = tr("Controls", "Commandes")) {
         JoystickDeck(drive, state.manualActive, speedControl = false)
         if (!drive.confirmed) InfoNote(tr("Tick \"I am supervising the robot\" to unlock the joysticks.", "Cochez « Je supervise le robot » pour déverrouiller les joysticks."))
-        if (state.manualStatus.isNotBlank()) StatusNote(state.manualStatus, if (state.manualActive) NoteTone.WARNING else NoteTone.INFO)
+        if (state.manualStatus.isNotBlank()) StatusNote(state.manualStatus, tone = if (state.manualActive) NoteTone.WARNING else NoteTone.INFO)
     }
     belowControls()
     InfoNote(tr("Releasing a joystick resets its axis to zero; releasing both stops the robot. The response is progressive beyond the 12 % dead zone; a tick is felt at each third of the travel and at the end stop. ",

@@ -1,11 +1,11 @@
 package fr.luba.poc.simulation
 
 import fr.luba.poc.map.Point
+import java.util.Random
+import kotlin.math.*
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import java.util.Random
-import kotlin.math.*
 
 /**
  * Precision of actual mowing tracking: same loop as [fr.luba.poc.ble.RobotBle] (one range per blade state, STOP

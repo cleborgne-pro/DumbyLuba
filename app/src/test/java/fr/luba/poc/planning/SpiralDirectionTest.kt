@@ -90,7 +90,7 @@ class SpiralDirectionTest {
      * outwards, or the whole zone driven from the edge when no order from the centre has safe links (warned). Printed per
      * zone: coverage, mission duration and transit from the edge / from the centre, computation time.
      */
-    @Test(timeout = 1_800_000) fun referenceMapFromTheCentre() {
+    @Test(timeout = 900_000) fun referenceMapFromTheCentre() {
         val json = org.json.JSONObject(javaClass.getResourceAsStream("/planner-reference-map.json")!!.bufferedReader().use { it.readText() })
         val array = json.getJSONArray("shapes")
         val shapes = (0 until array.length()).map { i ->

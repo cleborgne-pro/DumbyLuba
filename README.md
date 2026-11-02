@@ -196,7 +196,6 @@ The app UI is available in English and French: it follows the phone language, or
 | **Camera** | front/left and right streams, token refresh, forced video activation, detailed player status |
 | **Navigation** | short route computed around the robot, measurement of deviation and stopping delay, calibration |
 | **Border** | follow a single border at a chosen inset (0 to 100 cm), validate it with its deviation (validated borders in green, borders still to validate in red on the map), then reuse that inset for mowing |
-| **Trial mowing (painted zone)** | mow a zone painted with your finger ([below](#paint-an-area-to-mow)) |
 | **Command cutoff** | measure whether *your* robot stops on its own when the app goes silent |
 | **Bluetooth and telemetry** | diagnostics campaign, detailed status, latest error among 664 decoded error codes |
 | **Sensors and perception** | what the robot publishes about its ultrasonic sensors and camera perception (exploration) |
@@ -215,19 +214,19 @@ All tests are supervised, either hold-to-run or with a permanent STOP button.
 
 ### Paint an area to mow
 
-- Service → **Trial mowing (painted zone)**: **paint with your finger**, overlaid on the map, the area to mow right
-  now (the damaged corner, the strip in front of the terrace…), with a 0.6 to 4 m brush, an eraser and undo.
+- Map → **Mow** → **Paint a zone**: **paint with your finger**, on the map, the area to mow right now (the damaged
+  corner, the strip in front of the terrace…), with a 0.6 to 4 m brush, an eraser and undo.
 - Only paint inside existing zones is kept, no-go zones excluded.
-- The route is computed by the same engine as a full mowing session, then **Mow · X mm** (blades running). To check
-  a route with the blades stopped first, use **Border following** or **Follow, blades stopped** from a simulation.
+- **Next**: the painted area is mowed like whole zones, with the same task settings, route preview, simulation and
+  start. To check a route with the blades stopped first, use **Border following** or **Follow, blades stopped** from a
+  simulation.
 - The robot's map is not modified.
 
 <p align="center">
-  <img src="docs/images/debug-mowing-paint.png" width="200" alt="Trial mowing, painted zone">
-  <img src="docs/images/painted-zone.png" width="200" alt="Painted area kept">
+  <img src="docs/images/painted-zone.png" width="200" alt="Paint a zone">
 </p>
 
-[Trial mowing (painted zone)](docs/features/tests-and-diagnostics.md#trial-mowing-painted-zone) · [Border following](docs/features/tests-and-diagnostics.md#border-following)
+[Paint a zone](docs/features/mowing-preparation.md#paint-a-zone) · [Border following](docs/features/tests-and-diagnostics.md#border-following)
 
 ### A last position that is truly remembered
 
@@ -281,9 +280,12 @@ All tests are supervised, either hold-to-run or with a permanent STOP button.
 - **Editing passages in the local map corrections**: new passages can be recorded by driving
   ([DumbyLuba passages](docs/features/map.md#mammotion-zones-and-dumbyluba-zones)); the passages recorded by the robot
   cannot be edited yet.
-- **Varied travel routes**: not always take the same path to reach a zone or the base, to avoid wearing tracks into
-  the lawn.
-- Fusion of the robot's rain sensor with the radar and the forecast ([design](docs/RAIN_WEATHER_FUSION.md)).
+- **Varied travel routes to the zones**: the returns to the base already alternate between several approach lanes
+  ([return lanes](docs/features/real-mowing.md#return-lanes-to-the-base)); the departures towards the zones still take
+  the shortest path.
+- Fusion of the robot's rain sensor with the radar and the forecast ([design](docs/RAIN_WEATHER_FUSION.md)); the
+  automatic return on confirmed radar rain exists, off by default
+  ([rain return](docs/features/rain-and-weather.md#return-to-base-on-confirmed-rain)).
 - Autonomous tracking on the ESP32 gateway, and the ESP32-S3 gateway (Olimex ESP32-S3-DevKit-Lipo: firmware 0.5.0
   builds for it) tried on the board.
 
@@ -426,7 +428,7 @@ echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties   # adjust the path
 
 ```sh
 ./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build.noindex/outputs/apk/debug/app-debug.apk
 ```
 
 #### Option 2: build, test and deploy in one command
@@ -438,12 +440,14 @@ tools/deploy.sh --no-tests  # build only
 DEPLOY_SERIALS=SERIAL tools/deploy.sh   # restrict to one device
 ```
 
-Each run starts a **new ADB session**: the old server is stopped (`adb kill-server`) and a new one waits up to 20 s for
-the devices, wireless ones included (a server left running for hours stopped seeing them). `ADB_KEEP_SERVER=1` keeps
-the running server.
+Each run starts a **new ADB session**: the old server is stopped (`adb kill-server`) and a new one is started before
+the build, then waits up to 20 s for the devices, wireless ones included (a server left running for hours stopped
+seeing them). `ADB_KEEP_SERVER=1` keeps the running server. The devices are installed at the same time, each output
+line prefixed with its serial number.
 
 `deploy.sh` builds the `fold` variant (not debuggable, hence faster at computing routes, signed with the debug key so
-it can update an existing install) and checks that the app starts without crashing.
+it can update an existing install) and checks that the app starts without crashing. Lint runs on the app sources
+(`lintFold`); the variant skips the "lint vital" pass, which would analyse the same sources again at each assembly.
 
 #### Option 3: signed release
 
@@ -502,7 +506,8 @@ Detailed procedure for the first test: [docs/MILESTONE_1_TEST.md](docs/MILESTONE
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug   # build, JVM/Robolectric tests, lint
 tools/check.sh quick     # reduced suite (without the planner sweeps on the reference map)
 tools/check.sh planner   # planner sweeps on the reference map only (all zones, angles, spacings)
-tools/check.sh full      # build + tests + lint
+tools/check.sh full      # build + tests + lint (after quick, only the sweeps run)
+tools/check.sh auto      # what deployments and session checks run: full when the branch touches the planner
 ```
 
 - Every planner change is validated on the reference map
@@ -510,6 +515,10 @@ tools/check.sh full      # build + tests + lint
 - Firmware: `pio test -e native` in `firmware/esp32-gateway` (core tests on the computer).
 - Home server: `python3 -m unittest discover -s home-server/tests -v` and
   `node --test tools/relay-map-test.cjs tools/relay-web-test.cjs`.
+- Style: `./gradlew :app:ktlintCheck` (reduced high-signal rule set, `.editorconfig`); `ktlintFormat` fixes import
+  order and trailing spaces.
+- Continuous integration: `.gitlab-ci.yml` only builds the fold variant on every push and merge request; lint and
+  tests run locally with `tools/check.sh`. The signed release stays on the maintainer's machine.
 - Screenshots (Robolectric, no device):
   `./gradlew :app:testDebugUnitTest --tests '*UiShots*' --tests '*UiScreenshotTest*' -PuiShots=/tmp/captures`,
   then `tools/export-screenshots.py` to update `docs/images/` (instructions at the top of the script).

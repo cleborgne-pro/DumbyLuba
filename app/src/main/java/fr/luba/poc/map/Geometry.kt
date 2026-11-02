@@ -1,6 +1,8 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.i18n.tr
+import fr.luba.poc.obstacles.ObstacleDisc
+import fr.luba.poc.obstacles.RobotEnvelope
 import kotlin.math.*
 data class Point(val x: Double, val y: Double) {
     // Plain sqrt: bounded metric coordinates, no overflow risk (hypot is slow).
@@ -187,7 +189,7 @@ object Geometry {
         }; return yes
     }
     fun distance(p: Point,a: Point,b: Point): Double {
-        val dx=b.x-a.x;val dy=b.y-a.y
+        val dx=b.x-a.x; val dy=b.y-a.y
         val t=if(dx*dx+dy*dy==0.0) 0.0 else (((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy)).coerceIn(0.0,1.0)
         return p.distance(Point(a.x+t*dx,a.y+t*dy))
     }
@@ -203,8 +205,8 @@ object Geometry {
     fun plan(zone:List<Point>,holes:List<List<Point>>,spacing:Double=0.5,margin:Double=0.6,
              mode:CoverageMode=CoverageMode.LINES,borders:Boolean=true,
              borderPasses:Int=1,noGoPasses:Int=1,
-             obstacles:List<fr.luba.poc.obstacles.ObstacleDisc> = emptyList(),
-             robot:fr.luba.poc.obstacles.RobotEnvelope = fr.luba.poc.obstacles.RobotEnvelope.LUBA2,
+             obstacles:List<ObstacleDisc> = emptyList(),
+             robot:RobotEnvelope = RobotEnvelope.LUBA2,
              recordedBoundary:Boolean=false, basePoint:Point?=null,
              outerOffsetM:Double=CoveragePlanner.RECORDED_OUTER_OFFSET_M,
              turnStyle:TurnStyle=TurnStyle.FAST, speedMps:Double=0.3, cutWidthM:Double=spacing, onProgress:(Preview)->Unit={}):Preview =

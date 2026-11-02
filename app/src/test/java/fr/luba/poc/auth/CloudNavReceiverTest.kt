@@ -6,12 +6,13 @@ import android.util.Base64
 import fr.luba.poc.auth.FakeMammotionServer.Companion.TOKEN_PATH
 import fr.luba.poc.auth.FakeMammotionServer.Companion.ok
 import fr.luba.poc.auth.FakeMammotionServer.Companion.session
-import fr.luba.poc.protocol.Commands
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.LubaMsgProto.MsgCmdType
 import fr.luba.poc.proto.LubaMsgProto.MsgDevice
 import fr.luba.poc.proto.MctrlNavProto.MctlNav
 import fr.luba.poc.proto.MctrlNavProto.NavGetHashListAck
+import fr.luba.poc.protocol.Commands
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.channels.Channel
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,7 +27,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Account reading per robot model (DumbyLuba#3) against the simulated cloud: LUBA 2 frames unchanged, LUBA 1 map

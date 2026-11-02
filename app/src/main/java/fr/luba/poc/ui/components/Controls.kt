@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -152,7 +153,7 @@ fun ToggleRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Dimens.Md),
     ) {
-        if (icon != null) Box(Modifier.size(38.dp).background(MammotionColors.SurfaceMuted, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)),
+        if (icon != null) Box(Modifier.size(38.dp).background(MammotionColors.SurfaceMuted, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = MammotionColors.TextPrimary, modifier = Modifier.size(20.dp))
         }
@@ -203,7 +204,7 @@ enum class NoteTone { INFO, SUCCESS, WARNING, DANGER }
  * instead of coloured texts placed freely in the screens.
  */
 @Composable
-fun StatusNote(text: String, tone: NoteTone = NoteTone.INFO, modifier: Modifier = Modifier) {
+fun StatusNote(text: String, modifier: Modifier = Modifier, tone: NoteTone = NoteTone.INFO) {
     val colors = MammotionColors
     val (bg, fg, icon) = when (tone) {
         NoteTone.INFO -> Triple(colors.InfoSoft, colors.Info, Icons.Rounded.Info)

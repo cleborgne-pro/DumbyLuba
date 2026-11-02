@@ -2,6 +2,8 @@ package fr.luba.poc.simulation
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
+import fr.luba.poc.map.Preview
+import kotlin.math.atan2
 
 /**
  * Position in the prepared mowing edges ([MowingSimulation.edges]): edge [edge] and point on it ([point] null: start of
@@ -213,7 +215,7 @@ object SmartResume {
     }
 
     private fun headingOf(e: SimEdge): Double? =
-        if (e.meters < 1e-6) null else Math.toDegrees(kotlin.math.atan2(e.b.y - e.a.y, e.b.x - e.a.x))
+        if (e.meters < 1e-6) null else Math.toDegrees(atan2(e.b.y - e.a.y, e.b.x - e.a.x))
 
     /** Possible entries of a reordered remainder: block starts (cutting edge after a transit) and deferred portion starts. */
     fun entries(edges: List<SimEdge>, spans: List<MissionSpan>): List<Pair<Int, PlanPos>> {
@@ -254,7 +256,7 @@ object SmartResume {
      * (path to mow first, outward chain), with the path of every edge ([pathOfEdges]). Empty when the plan has none;
      * null when it has some that cannot be placed on [edges] (no reordering then).
      */
-    fun outwardRules(edges: List<SimEdge>, preview: fr.luba.poc.map.Preview): Pair<IntArray, List<Pair<Int, Int>>>? {
+    fun outwardRules(edges: List<SimEdge>, preview: Preview): Pair<IntArray, List<Pair<Int, Int>>>? {
         if (preview.outwardPaths.isEmpty()) return IntArray(0) to emptyList()
         val pathOf = pathOfEdges(edges, preview.cuttingPaths.filter { it.size >= 2 }.let { kept ->
             // Indices of the paths kept by the preparation (a path of fewer than two points is not driven).

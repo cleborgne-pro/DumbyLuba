@@ -4,9 +4,9 @@ import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlNavProto
 import fr.luba.poc.proto.MctrlSysProto.*
 import fr.luba.poc.protocol.TelemetryReducer
+import kotlin.math.hypot
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.hypot
 
 class RainWeatherTest {
     private val t0 = 1_791_660_000L
@@ -121,7 +121,7 @@ class RainWeatherTest {
     }
 
     @Test fun `Open-Meteo forecast in 15-minute steps`() {
-        val json = """{"minutely_15":{"time":[${t0},${t0 + 900},${t0 + 1800},${t0 + 2700},${t0 + 3600}],"precipitation":[0.4,0.0,0.1,0.3,null]}}"""
+        val json = """{"minutely_15":{"time":[$t0,${t0 + 900},${t0 + 1800},${t0 + 2700},${t0 + 3600}],"precipitation":[0.4,0.0,0.1,0.3,null]}}"""
         val f = PrecipForecast.parse(json, 0)
         assertEquals(4, f.steps.size)
         val now = t0 + 300

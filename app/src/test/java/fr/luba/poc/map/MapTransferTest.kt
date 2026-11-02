@@ -1,9 +1,9 @@
 package fr.luba.poc.map
 
-import fr.luba.poc.protocol.Commands
 import fr.luba.poc.proto.CommonProto.CommDataCouple
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.proto.MctrlNavProto.*
+import fr.luba.poc.protocol.Commands
 import org.junit.Assert.*
 import org.junit.Test
 

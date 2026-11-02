@@ -47,4 +47,15 @@ class ZamboniDeadEndTest {
             assertEquals(selected.planHash, RoutePlanning.calculate(request(angle), CoverageMode.ZAMBONI).selected.planHash)
         }
     }
+
+    /** Manual 10°: the oblique U-turns leave no safe link to the remaining blocks, the route is computed without them. */
+    @Test(timeout = 600_000) fun obliqueTurnsWithoutSafeRouteAreDropped() {
+        val zamboni = RoutePlanning.calculate(request(10), CoverageMode.ZAMBONI).selected
+        assertTrue("${zamboni.status} ${zamboni.diagnostics}", zamboni.valid)
+        assertEquals(0, zamboni.metrics!!.geometricViolations)
+        assertEquals(listOf(10), zamboni.preview!!.zoneAngles)
+        val withoutOblique = RoutePlanning.calculate(request(10).let { it.copy(config = it.config.copy(zamboniObliqueTurns = false)) },
+            CoverageMode.ZAMBONI).selected
+        assertEquals(withoutOblique.planHash, zamboni.planHash)
+    }
 }

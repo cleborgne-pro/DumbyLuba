@@ -1,8 +1,8 @@
 package fr.luba.poc.map
 
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
-import fr.luba.poc.proto.MctrlSysProto.*
 import fr.luba.poc.proto.MctrlNavProto.*
+import fr.luba.poc.proto.MctrlSysProto.*
 import org.junit.Assert.*
 import org.junit.Test
 

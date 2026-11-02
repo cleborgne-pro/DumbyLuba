@@ -1,9 +1,9 @@
 package fr.luba.poc.map
 
+import java.nio.file.Files
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
-import java.nio.file.Files
 
 /**
  * Border types: choice of a boundary portion, reprojection when the boundary changes (point added, ring reversed, zone

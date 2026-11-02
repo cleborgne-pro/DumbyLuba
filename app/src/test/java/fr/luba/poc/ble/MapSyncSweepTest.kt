@@ -7,13 +7,13 @@ import fr.luba.poc.map.NoGoOrigin
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.mapsync.SyncPhase
+import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.io.File
 
 /**
  * Success rate of the sync of [MapSyncBenchTest] (one no-go zone, robot at (6, 4)) over many draws of the [SimRobot]
@@ -35,7 +35,7 @@ class MapSyncSweepTest {
         val range = System.getenv("MAPSYNC_SWEEP")
         assumeTrue("MAPSYNC_SWEEP=<first>-<last> not set", range != null)
         val (first, last) = range!!.split("-").map { it.trim().toLong() }
-        val out = File(System.getenv("MAPSYNC_SWEEP_OUT") ?: "build/mapsync-sweep.txt").also { it.parentFile?.mkdirs(); it.writeText("") }
+        val out = File(System.getenv("MAPSYNC_SWEEP_OUT") ?: "build.noindex/mapsync-sweep.txt").also { it.parentFile?.mkdirs(); it.writeText("") }
         val failures = mutableMapOf<String, Int>()
         for (seed in first..last) {
             val bench = RobotBench(Point(6.0, 4.0), 0.0, seed = seed)

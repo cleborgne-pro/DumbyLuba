@@ -6,9 +6,11 @@ import fr.luba.poc.map.MapShape
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
 import fr.luba.poc.map.ShapeKind
-import fr.luba.poc.map.kind
 import fr.luba.poc.map.excludes
+import fr.luba.poc.map.kind
 import fr.luba.poc.obstacles.LocalObstacle
+import kotlin.math.cos
+import kotlin.math.sin
 import org.json.JSONObject
 
 /**
@@ -189,7 +191,7 @@ object SilenceClearance {
         if (!headingDegrees.isFinite()) return tr("Heading unavailable", "Cap indisponible")
         val rad = Math.toRadians(headingDegrees)
         val samples = (0..25).map { i -> val d = CommandSilenceProbe.CLEARANCE_M * i / 25
-            Point(position.x + d * kotlin.math.cos(rad), position.y + d * kotlin.math.sin(rad)) }
+            Point(position.x + d * cos(rad), position.y + d * sin(rad)) }
         val end = samples.last()
         val zones = map.shapes.filter { it.kind == ShapeKind.ZONE && it.points.size >= 3 }
         val zone = zones.firstOrNull { Geometry.inside(position, it.points) } ?: return tr("Robot outside the map zones", "Robot hors des zones de la carte")

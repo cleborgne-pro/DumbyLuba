@@ -67,7 +67,7 @@ class ZamboniReferenceTest {
     /** Cutting runs in mowing order (closed border loops left out: they join every stripe to the perimeter). */
     private fun runsInOrder(p: Preview) = p.cuttingPaths.filter { it.size >= 2 && it.first().distance(it.last()) > 1e-6 }
 
-    @Test(timeout = 1_800_000) fun zamboniOnTheReferenceMapAgainstZigzagAndLawnFriendly() {
+    @Test(timeout = 900_000) fun zamboniOnTheReferenceMapAgainstZigzagAndLawnFriendly() {
         val m = TurnOrder.step(spacing, TurnOptimizer.FOLLOW_RADIUS_M)
         val w = ZamboniOrder.window(spacing, TurnOptimizer.FOLLOW_RADIUS_M)
         val searches = java.util.Collections.synchronizedList(mutableListOf<Pair<Int, Long>>())
@@ -140,13 +140,13 @@ class ZamboniReferenceTest {
             "$rollingTurns of $regularTurns U-turns without pivot in regular cells (%.0f %%), computation %.1f s → %.1f s (×%.2f)").format(
             totals[0], totals[1], totals[1] / totals[0], totals[2], totals[3], totals[3] / totals[2], totals[4], totals[5], totals[5] / totals[4], totals[6],
             100.0 * rollingTurns / regularTurns, totals[7], totals[8], totals[8] / totals[7]))
-        // First targets: pivots ×0.35, wear ×0.6, 80 % of rolling U-turns in the regular cells. Measured ×0.81, ×0.94 and 38 %:
-        // on this map most pass ends lie along slanted recorded borders, where a rolling U-turn needs its passes shortened by
-        // more than its arcs can sweep (TurnOptimizer.MAX_TRIM_M, the "shortened passes not swept" refusal), and many cells
-        // have fewer than 2 m + 2 passes. Square to the boundary every U-turn rolls (CoveragePlannerTest).
-        if (totals[1] > 0.85 * totals[0]) failures += "pivoted %.0f° against %.0f°".format(totals[1], totals[0])
-        if (totals[3] > 0.97 * totals[2]) failures += "wear %.0f against %.0f".format(totals[3], totals[2])
-        if (rollingTurns < 0.33 * regularTurns) failures += "$rollingTurns of $regularTurns U-turns without pivot"
+        // First targets: pivots ×0.35, wear ×0.6, 80 % of rolling U-turns in the regular cells. Measured ×0.81, ×0.94 and 38 %
+        // before the oblique U-turns (most pass ends of this map lie along slanted recorded borders, where an equal trim of
+        // both passes leaves the shortened parts unswept), ×0.59, ×0.86 and 69 % with them (2026-10-30); many cells have fewer
+        // than 2 m + 2 passes. Square to the boundary every U-turn rolls (CoveragePlannerTest).
+        if (totals[1] > 0.65 * totals[0]) failures += "pivoted %.0f° against %.0f°".format(totals[1], totals[0])
+        if (totals[3] > 0.90 * totals[2]) failures += "wear %.0f against %.0f".format(totals[3], totals[2])
+        if (rollingTurns < 0.6 * regularTurns) failures += "$rollingTurns of $regularTurns U-turns without pivot"
         val meanShare = means.map { it.first }.average(); val zigzagShare = means.map { it.second }.average()
         println("ZAMBONI contiguous share at 25/50/75 %%, mean of the map: %.2f (zigzag %.2f)".format(meanShare, zigzagShare))
         if (meanShare < 0.85 || meanShare < zigzagShare) failures += "contiguous share %.2f against %.2f".format(meanShare, zigzagShare)

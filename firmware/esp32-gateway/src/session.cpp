@@ -9,6 +9,7 @@
 
 #include "gw_leg_frames.h"
 #include "gw_ota.h"
+#include "journal.h"
 #include "ota.h"
 #include "robot.h"
 
@@ -47,7 +48,7 @@ struct Lock {
 };
 
 void note(const String &text) {
-  Serial.printf("[pilot] %s\n", text.c_str());
+  journal::console.printf("[pilot] %s\n", text.c_str());
   Lock l;
   stats.last = text;
 }
@@ -199,6 +200,8 @@ void run(void *arg) {
   }
   send(s, P::WELCOME, P::welcome(std::string(P::CAP_AUTONOMY) + "," + P::CAP_DOCK_EXIT + "," + gw::ota::CAPABILITY));
   note("pilot connected: " + s->peer.toString());
+  // Why and since when the board runs: restarts on power cuts show in the pilot's log (Fold test of 2026-11-02).
+  send(s, P::EVENT, text(std::string("start\n") + journal::startSummary()));
 
   bool intentional = false;
   bool attached = false;

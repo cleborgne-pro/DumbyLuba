@@ -59,7 +59,7 @@ passes stay inside the gap.
   (the surface the BLE route follows) and the whole route length against a new mowing of the task zones (area /
   spacing, cutting only). Refused when a pass collides or when the ratio exceeds `MAX_ROUTE_RATIO` (0.5).
 - **Launch**: `FinishingDraft` (UI state, per map) set from the report for the connected robot of that mowing with its
-  complete map; Service → Trial mowing then targets the gaps, shows the route length, its share of a new mowing and
+  complete map; Service → Finishing the gaps then targets them, shows the route length, its share of a new mowing and
   the envelope result, and starts it like a painted zone (`startRobotRoute`).
 
 `FinishingPassTest` leaves a 1 m and a 3 m band unmowed across Aire de jeux on the reference map: the 1 m band is closed

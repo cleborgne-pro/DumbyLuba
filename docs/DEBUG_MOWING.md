@@ -1,41 +1,50 @@
-# Trial mowing (painted zone) and border following
+# Painted zone and border following
 
-Two entries under Service → Supervised tests:
-
-- **Trial mowing (painted zone)**: real mowing, blades running, limited to a small temporary zone painted on the
-  map.
-- **Border following** (its own entry since 0.54.0, after the navigation test): a single border followed at a
+- **Painted zone**: real mowing, blades running, limited to a temporary zone painted on the map. Since 2026-11-01 it is
+  chosen in Map → **Mow**, at the zone choice (**Paint a zone**), and then runs as the usual mowing task (settings,
+  route preview, simulation, start, resume); it was before the Service → **Trial mowing** page, which now only hosts
+  the [finishing of the gaps](features/mowing-history.md#finishing-of-the-gaps) of a mowing (Service → **Finishing the gaps**,
+  opened from the mowing report).
+- **Border following** (Service → Supervised tests) (its own entry since 0.54.0, after the navigation test): a single border followed at a
   chosen offset, blades stopped by default (see below). Before 0.38.1, it was a second mode of debug mowing, behind a
   selector at the top of the page.
 
-Both pages follow the order of the test pages: safety warning, tracking, map, settings with the supervision box **I
+The border following and finishing pages follow the order of the test pages: safety warning, tracking, map, settings with the supervision box **I
 am supervising on site, area cleared** last, then the buttons. An interrupted run is resumed from the map ("Interrupted
 (STOP, link, app closed): resume from the point reached, from the map.", see
 [resume](features/mowing-resume.md)); starting replaces a task saved for resume (the page says so).
 
 ## Principle
 
-- **Paint / Erase / Move**: one finger paints (or erases), two fingers pan, zoom and rotate the map.
-  "Move" disables the brush. **Brush size**: Ø 0.6 to 4 m (Ø 1.2 m by default). **Undo** (last stroke) and **Clear
-  all**.
+- Map → **Mow** → **Paint a zone** (instead of **Whole zones**; mowing only, the survey routes keep whole zones).
+- **Paint / Erase / Move**: one finger paints (or erases) on the map itself, two fingers pan, zoom and rotate it.
+  "Move" disables the brush (a tap then selects nothing). **Brush size**: Ø 0.6 to 4 m (Ø 1.2 m by default). **Undo**
+  (last stroke) and **Clear all**; the panel shows the retained area ("33.2 m² outside no-go zones · 1 painted zone").
+  Code: `map/ZonePaint.kt` (state, tools, drawing), `map/MapGestures.kt` (one-finger stroke), `map/MapPanels.kt`
+  (`ZoneChoicePanel`).
 - Only paint **inside existing zones** is kept: it only appears there, and the
   kept area is outlined in orange. No-go zones are excluded from the orange outline and from the displayed area
   ("m² outside no-go"); the planner goes around them (lap of the enclosed no-go zone), as well as learned obstacles and the
   surroundings of the base, as for mowing whole zones.
 - The kept area is split into simple outlines (a painted ring gives several pieces; the hole is never
   filled). Fringes narrower than 20 cm and pieces smaller than 0.5 m² are ignored.
-- The painted zone is kept for the session (so you can look at the map and come back), for the map that was read.
+- The painted zone is kept for the session (so you can close the zone choice and come back), for the map that was read.
 
 ## Route
 
-`PaintedZone.prepare` uses the same building blocks as mowing started from the map:
+The painting is a zone choice like any other (`PaintedZone.area`, `ZonePaintState`):
 
-1. the pieces become temporary zones (negative identifiers) in a **copy** of the map, as the
-   only target of the automatic planner (`RoutePlanning.coverage`);
+1. the pieces become temporary zones ("Painted zone 1"…, negative identifiers, ordered from the robot or the base)
+   added to a **copy** of the map, the planning map of the task: they are the zone selection, so the task settings
+   (mode, direction, heights, borders…), the route preview, the start point (a chosen start is not saved for a
+   temporary zone) and the simulation apply as for recorded zones;
 2. preparation (`MowingSimulation`) and BLE control (`startRobotRoute`) use the **unchanged robot
-   map** and the same navigation (`RoutePlanning.mission`, shared with the map screen): same driving
-   areas, margins, base safety zone and route checks;
+   map** and the same navigation (`RoutePlanning.mission`): same driving areas, margins, base safety zone and route
+   checks, with the temporary zones as continuous-blade zones (`PaintedZone.bladeZones`), kept by the checkpoint for
+   the resume ("Partial mowing interrupted");
 3. start from the robot's position (or from the base if unknown), then return to base.
+
+`PaintedZone.prepare` (fixed settings) still prepares the finishing of the gaps (`FinishingPass`).
 
 ### Blades kept running within a zone
 
@@ -49,10 +58,7 @@ Reference map: a single blades-on range (no stop) for Jardin d'Eden, Aire de jeu
 Piscine, Fosse and Potager; Figuier and Enfer keep one or two stops for links that go through the
 neighboring Piscine.
 
-**Mowing settings**: **Cutting height** (25 to 70 mm), **Pass spacing** (15 to 35 cm in 5 cm steps, 25 cm by
-default), **Forward speed** (10 to 100 %, the shared travel speed), **Border of the painted zone** ("One lap of the
-retained outline before the passes"). The *Preparation* group shows the target and retained areas ("m² outside no-go
-zones"), **Compute**, then **Mow · 60 mm**; the result shows the planned coverage and cutting / link distances.
+**Settings**: those of the mowing task (Map → Mow → **Next**).
 
 The only difference from mowing zones: minimum required coverage of 80 % instead of 95 %. A small
 painted area has proportionally more rounded edges out of reach of the cut (offset of the outer
@@ -124,6 +130,8 @@ obstacles of Oct 14 (one 82 cm from the approach point): margin reduced from 30 
 start accepted from the base and from the garden; object placed on the approach point: refusal naming the obstacle.
 
 `PaintedZoneTest` (reference map): paint outside zones ignored, clipping to zones, eraser and holes,
-validated plan and route prepared on the unchanged robot map, cutting passes inside the paint; case of the capture
+temporary zones ordered from the start, task planned on them and prepared on the unchanged robot map with them as
+continuous-blade zones, validated plan, cutting passes inside the paint; `MapPaintedZoneTest` (map screen): Mow →
+Paint a zone → Next → Route preview → Start, route on the robot map; case of the capture
 of Oct 10 (Aire de jeux, enclosed no-go zones, learned obstacle stuck to the no-go zone, real base and robot pose), area outside
 no-go zones. `ObstaclePlannerTest`: no-go lap around a stuck obstacle, no-go zone too close to the boundary.

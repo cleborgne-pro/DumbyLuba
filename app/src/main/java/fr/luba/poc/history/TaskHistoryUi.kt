@@ -1,5 +1,6 @@
 package fr.luba.poc.history
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,10 +26,10 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.ReportProblem
+import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.WifiTethering
-import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
@@ -50,12 +52,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.MapLive
 import fr.luba.poc.map.MapOverlay
 import fr.luba.poc.map.Point
 import fr.luba.poc.map.RobotMap
+import fr.luba.poc.planning.FinishingOffer
+import fr.luba.poc.planning.FinishingPass
 import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.KeyValueRow
 import fr.luba.poc.ui.components.NavRow
@@ -71,7 +77,8 @@ import fr.luba.poc.ui.theme.MammotionColors
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Labels specific to history tasks (mowings, surveys, runs with blades stopped). */
 object TaskText {
@@ -86,7 +93,7 @@ object TaskText {
         }
     }
     fun subtitle(r: MowingRecord) = "${MowingText.date(r.startedAt)} · ${outcome(r)} · ${MowingText.summary(r)}${if (r.excluded) tr(" · excluded", " · écartée") else ""}"
-    fun clock(epochMs: Long): String = DateTimeFormatter.ofPattern("HH:mm:ss", fr.luba.poc.i18n.I18n.locale)
+    fun clock(epochMs: Long): String = DateTimeFormatter.ofPattern("HH:mm:ss", I18n.locale)
         .withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(epochMs))
     fun elapsed(ms: Long): String {
         val s = (ms / 1000).coerceAtLeast(0)
@@ -118,9 +125,9 @@ fun TaskHistorySheet(history: List<MowingRecord>, current: MowingRecord?, onOpen
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Dimens.Lg).padding(bottom = Dimens.Lg),
             verticalArrangement = Arrangement.spacedBy(Dimens.Md)) {
             Text(tr("Latest tasks", "Dernières tâches"), style = MaterialTheme.typography.headlineSmall)
-            current?.let { r -> SettingsGroup(tr("In progress", "En cours")) { TaskRow(r, onOpen) } }
+            current?.let { r -> SettingsGroup(title = tr("In progress", "En cours")) { TaskRow(r, onOpen) } }
             val finished = history.filter { it.finished }.take(RECENT)
-            SettingsGroup(if (finished.isEmpty()) tr("Completed", "Réalisées") else tr("Completed · ${finished.size} most recent", "Réalisées · ${finished.size} plus récentes")) {
+            SettingsGroup(title = if (finished.isEmpty()) tr("Completed", "Réalisées") else tr("Completed · ${finished.size} most recent", "Réalisées · ${finished.size} plus récentes")) {
                 if (finished.isEmpty()) InfoNote(tr("No completed task. Every mowing, signal survey or run with blades stopped appears here, with its actual route to replay on the map.", "Aucune tâche réalisée. Chaque tonte, relevé des signaux ou parcours lames arrêtées apparaît ici, avec son trajet réel à revoir sur la carte."))
                 Column(verticalArrangement = Arrangement.spacedBy(Dimens.Xs)) { finished.forEach { TaskRow(it, onOpen) } }
             }
@@ -159,8 +166,8 @@ private fun chunks(pieces: List<TaskTrackPieces.Piece>, size: Int = 240): List<C
 @Composable
 fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMap: RobotMap?, loadTrack: suspend (String) -> TaskTrack?,
                    onExcluded: (Boolean) -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier,
-                   onFinishing: ((fr.luba.poc.planning.FinishingOffer) -> Unit)? = null) {
-    androidx.activity.compose.BackHandler(onBack = onBack)
+                   onFinishing: ((FinishingOffer) -> Unit)? = null) {
+    BackHandler(onBack = onBack)
     var track by remember(record.id) { mutableStateOf<TaskTrack?>(null) }
     var loading by remember(record.id) { mutableStateOf(true) }
     var coverage by remember(record.id) { mutableStateOf<CoverageMap?>(null) }
@@ -172,7 +179,7 @@ fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMa
         loading = false
         // Real coverage: mowings only (surveys and routes run with blades stopped).
         coverage = track?.takeIf { record.kind == TaskKind.MOW }?.let { t ->
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { runCatching { CoverageMap.of(t, fallbackMap) }.getOrNull() } }
+            withContext(Dispatchers.Default) { runCatching { CoverageMap.of(t, fallbackMap) }.getOrNull() } }
     }
     PushedPage(tr("${record.kind.label} of ${MowingText.date(record.startedAt)}", "${record.kind.label} du ${MowingText.date(record.startedAt)}"), onBack, modifier) {
         StatusNote(when (record.outcome) {
@@ -180,16 +187,16 @@ fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMa
             MowingOutcome.INTERRUPTED -> tr("${record.kind.label} ${TaskText.outcome(record).lowercase()} at ${MowingText.percent(record.progress * 100)}: ${record.reason?.let(::reasonText) ?: "unknown cause"}",
                 "${record.kind.label} ${TaskText.outcome(record).lowercase()} à ${MowingText.percent(record.progress * 100)} : ${record.reason?.let(::reasonText) ?: "cause inconnue"}")
             MowingOutcome.RUNNING -> tr("${record.kind.label} in progress", "${record.kind.label} en cours")
-        }, when (record.outcome) { MowingOutcome.COMPLETE -> NoteTone.SUCCESS; MowingOutcome.INTERRUPTED -> NoteTone.WARNING; else -> NoteTone.INFO })
+        }, tone = when (record.outcome) { MowingOutcome.COMPLETE -> NoteTone.SUCCESS; MowingOutcome.INTERRUPTED -> NoteTone.WARNING; else -> NoteTone.INFO })
         TaskReplay(record, track, loading, fallbackMap, coverage, jump)
         if (!loading) TrackingQuality(record, track)
         if (!loading) TaskJournal(track, jumpTo)
         if (!loading) BlackBoxSection(track, jumpTo)
         coverage?.let { RealCoverageSection(record, it) }
         coverage?.let { c ->
-            val offer by androidx.compose.runtime.produceState<fr.luba.poc.planning.FinishingOffer?>(null, c, record.outcome) {
-                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    runCatching { fr.luba.poc.planning.FinishingPass.offer(record.id, c, record.outcome == MowingOutcome.COMPLETE) }.getOrNull() }
+            val offer by produceState<FinishingOffer?>(null, c, record.outcome) {
+                value = withContext(Dispatchers.Default) {
+                    runCatching { FinishingPass.offer(record.id, c, record.outcome == MowingOutcome.COMPLETE) }.getOrNull() }
             }
             offer?.let { FinishingOfferGroup(it, onFinishing) }
         }
@@ -204,7 +211,7 @@ fun TaskDetailPage(record: MowingRecord, history: List<MowingRecord>, fallbackMa
                         "Désactiver pour un essai ou une tonte anormale : elle ne corrigera pas les prochaines estimations."),
                     enabled = record.finished)
             }
-        } else SettingsGroup(record.kind.label) {
+        } else SettingsGroup(title = record.kind.label) {
             KeyValueRow("Zones", MowingText.zones(record))
             KeyValueRow(tr("Start", "Début"), MowingText.date(record.startedAt))
             record.endedAt?.let { KeyValueRow(tr("End", "Fin"), MowingText.date(it)) }
@@ -236,13 +243,14 @@ private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean
     var showCoverage by remember { mutableStateOf(true) }
     val coverageImage = remember(coverage, record.finished) { coverage?.let { CoverageLayerStyle.image(it, gaps = record.finished) } }
     LaunchedEffect(playing, speed, track) {
-        if (!playing || samples.size < 2) return@LaunchedEffect
+        val played = track
+        if (!playing || samples.size < 2 || played == null) return@LaunchedEffect
         if (cursor >= end) cursor = start
         var last = withFrameMillis { it }
         while (cursor < end) {
             val now = withFrameMillis { it }
             // Recharges and long stationary periods play 20 times faster so the route stays readable.
-            val here = samples.getOrNull(track!!.indexAt(cursor))
+            val here = samples.getOrNull(played.indexAt(cursor))
             val boost = if (here?.phase == TrackPhase.CHARGING) 20 else 1
             cursor = minOf(end, cursor + (now - last) * speed * boost)
             last = now
@@ -269,7 +277,7 @@ private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean
             }
         }
     }
-    SettingsGroup(tr("Actual route", "Trajet réel")) {
+    SettingsGroup(title = tr("Actual route", "Trajet réel")) {
         Box(Modifier.fillMaxWidth().height(400.dp).clip(RoundedCornerShape(16.dp)).background(colors.SurfaceMuted)) {
             MapLive(map, Modifier.fillMaxWidth().height(400.dp), x = pose?.x, y = pose?.y, heading = pose?.heading?.takeUnless { it.isNaN() },
                 trail = if (map.shapes.isEmpty()) samples.map { it.point } else emptyList(),
@@ -327,10 +335,10 @@ private fun TaskReplay(record: MowingRecord, track: TaskTrack?, loading: Boolean
  */
 @Composable
 private fun RealCoverageSection(record: MowingRecord, coverage: CoverageMap) {
-    val gaps by androidx.compose.runtime.produceState<List<CoverageGap>?>(null, coverage) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { runCatching { coverage.gaps() }.getOrDefault(emptyList()) }
+    val gaps by produceState<List<CoverageGap>?>(null, coverage) {
+        value = withContext(Dispatchers.Default) { runCatching { coverage.gaps() }.getOrDefault(emptyList()) }
     }
-    SettingsGroup(tr("Real coverage", "Couverture réelle")) {
+    SettingsGroup(title = tr("Real coverage", "Couverture réelle")) {
         if (coverage.coveredM2 <= 0.0) {
             InfoNote(tr("No position recorded with the blades running: coverage not measured.", "Aucune position relevée lames en marche : couverture non mesurée."))
             return@SettingsGroup
@@ -353,7 +361,7 @@ private fun RealCoverageSection(record: MowingRecord, coverage: CoverageMap) {
 private fun TrackingQuality(record: MowingRecord, track: TaskTrack?) {
     val deviation = remember(track) { track?.let(RouteDeviation::of) }
     if (record.links.isEmpty() && deviation == null) return
-    SettingsGroup(tr("Route tracking", "Suivi du trajet")) {
+    SettingsGroup(title = tr("Route tracking", "Suivi du trajet")) {
         TrackingText.links(record)?.let { KeyValueRow(tr("Tracked by", "Suivi par"), it) }
         if (deviation == null) {
             InfoNote(tr("No position recorded with the blades running: deviation not measured.", "Aucune position relevée lames en marche : écart non mesuré."))
@@ -377,7 +385,7 @@ private fun TaskJournal(track: TaskTrack?, onJump: (Long) -> Unit) {
     if (events.isEmpty()) return
     var all by remember(track) { mutableStateOf(false) }
     val start = track?.startMs?.takeIf { it > 0 }?.let { minOf(it, events.first().atMs) } ?: events.first().atMs
-    SettingsGroup(tr("Task journal", "Journal de la tâche")) {
+    SettingsGroup(title = tr("Task journal", "Journal de la tâche")) {
         KeyValueRow(tr("Events", "Événements"), JournalText.summary(events))
         val shown = if (all || events.size <= JOURNAL_PREVIEW) events else events.take(JOURNAL_PREVIEW)
         shown.forEach { e ->
@@ -416,7 +424,7 @@ private fun BlackBoxSection(track: TaskTrack?, onJump: (Long) -> Unit) {
     val boxes = track?.boxes.orEmpty()
     if (boxes.isEmpty()) return
     var open by remember(track) { mutableStateOf<Int?>(null) }
-    SettingsGroup("Black Box") {
+    SettingsGroup(title = "Black Box") {
         boxes.forEachIndexed { i, b ->
             NavRow("${TaskText.clock(b.atMs)} · ${BlackBoxText.title(b)}", icon = Icons.Rounded.ReportProblem, subtitle = BlackBoxText.summary(b)) {
                 open = if (open == i) null else i
@@ -430,7 +438,7 @@ private fun BlackBoxSection(track: TaskTrack?, onJump: (Long) -> Unit) {
 
 @Composable
 private fun BlackBoxDetail(box: BlackBox, onJump: (Long) -> Unit) {
-    val mono = MaterialTheme.typography.labelSmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+    val mono = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace)
     Column(Modifier.fillMaxWidth().padding(start = Dimens.Md), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         SecondaryPillButton(tr("Show in the replay", "Voir dans le replay"), { onJump(box.atMs) }, Modifier.fillMaxWidth())
         if (box.detail.isNotBlank()) Text(box.detail, style = MaterialTheme.typography.labelMedium, color = MammotionColors.TextSecondary)

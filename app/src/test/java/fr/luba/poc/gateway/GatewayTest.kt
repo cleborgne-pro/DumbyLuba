@@ -4,14 +4,14 @@ import fr.luba.poc.ble.RobotLink
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
 import fr.luba.poc.protocol.Blufi
 import fr.luba.poc.protocol.Commands
-import org.junit.After
-import org.junit.Assert.*
-import org.junit.Test
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Test
 
 class GatewayTest {
     private val code = "042137"

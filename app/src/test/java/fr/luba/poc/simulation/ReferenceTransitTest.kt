@@ -2,18 +2,18 @@ package fr.luba.poc.simulation
 
 import fr.luba.poc.map.*
 import org.json.JSONObject
-import org.junit.Test
 import org.junit.Assert.*
+import org.junit.Test
 
 class ReferenceTransitTest {
     private fun shapes():List<MapShape> {
         val a=JSONObject(javaClass.getResourceAsStream("/planner-reference-map.json")!!.bufferedReader().readText()).getJSONArray("shapes")
         return (0 until a.length()).map { i -> val s=a.getJSONObject(i); val p=s.getJSONArray("points")
             MapShape(s.getString("id").toLong(),s.getInt("type"),(0 until p.length()).map { k ->
-                val v=p.getJSONArray(k);Point(v.getDouble(0),v.getDouble(1)) },s.getString("name")) }
+                val v=p.getJSONArray(k); Point(v.getDouble(0),v.getDouble(1)) },s.getString("name")) }
     }
     @Test fun playAreaLoggedRunsRemainConnectedThroughFullMap() {
-        val shapes=shapes();val map=RobotMap(shapes,true)
+        val shapes=shapes(); val map=RobotMap(shapes,true)
         val planner=TrajectoryPlanner(map,0.3065,shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points },recordedBoundary=true)
         // Aire de jeux passes computed with the current rule (outline = chassis side); the passes recorded
         // before 0.40.0 (`reference-playarea-runs.json`) went too close to the border to remain a valid route.
@@ -57,7 +57,7 @@ class ReferenceTransitTest {
     }
 
     @Test fun connectedReferenceZonesCanBePreparedInSelectionOrder() {
-        val shapes=shapes();val map=RobotMap(shapes,true)
+        val shapes=shapes(); val map=RobotMap(shapes,true)
         val holes=shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points }
         val base=Point(-0.5351,1.0712)
         val preview=MultiZonePlanner.plan(shapes.filter { it.kind==ShapeKind.ZONE && it.name!="Potager" },holes,0.25,0.6,
@@ -120,7 +120,7 @@ class ReferenceTransitTest {
     }
 
     @Test fun allReferenceZonesCanBePreparedThroughMappedSurfaces() {
-        val shapes=shapes();val map=RobotMap(shapes,true)
+        val shapes=shapes(); val map=RobotMap(shapes,true)
         val holes=shapes.filter { it.kind==ShapeKind.NO_GO }.map { it.points }
         val base=Point(-0.5351,1.0712)
         val preview=MultiZonePlanner.plan(shapes.filter { it.kind==ShapeKind.ZONE },holes,0.25,0.6,

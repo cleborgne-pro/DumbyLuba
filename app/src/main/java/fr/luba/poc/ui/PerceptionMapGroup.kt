@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import fr.luba.poc.diagnostics.PerceptionMapFrame
+import fr.luba.poc.i18n.I18n
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.ui.components.InfoNote
 import fr.luba.poc.ui.components.KeyValueRow
@@ -27,7 +28,7 @@ import java.util.Date
  */
 @Composable
 internal fun PerceptionMapGroup(frame: PerceptionMapFrame?) {
-    SettingsGroup(tr("Robot perception map", "Carte de perception du robot")) {
+    SettingsGroup(title = tr("Robot perception map", "Carte de perception du robot")) {
         if (frame == null) {
             InfoNote(tr("None received since the app started. The robot sends it when it navigates by itself (seen at the start of the official return to base), even without a capture.",
                 "Aucune reçue depuis le lancement. Le robot l'envoie quand il navigue seul (vue au début du retour officiel à la base), même sans capture."))
@@ -40,7 +41,7 @@ internal fun PerceptionMapGroup(frame: PerceptionMapFrame?) {
             }
         }
         KeyValueRow(tr("Received", "Reçues"), tr("${frame.count} · last at ", "${frame.count} · dernière à ") +
-            SimpleDateFormat("HH:mm:ss", fr.luba.poc.i18n.I18n.locale).format(Date(frame.receivedAt)))
+            SimpleDateFormat("HH:mm:ss", I18n.locale).format(Date(frame.receivedAt)))
         KeyValueRow(tr("Image", "Image"), frame.info.label)
         KeyValueRow(tr("Robot state", "État du robot"), frame.robotState?.toString() ?: "—")
         if (decoded == null) InfoNote(tr("Image not decodable on this phone: raw content in the log (perception_map event).",

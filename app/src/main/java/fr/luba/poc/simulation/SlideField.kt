@@ -2,13 +2,17 @@ package fr.luba.poc.simulation
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.Point
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.File
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
+import kotlin.math.sin
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Robot slide measured during an in-place pivot: average speed of the rotation centre ([vx], [vy], m/s) during
@@ -113,7 +117,7 @@ class SlideField(cells: Collection<SlideCell> = emptyList()) {
     fun around(points: List<Point>, marginM: Double = 2.0, maxCells: Int = MAX_CELLS): SlideField {
         if (cells.isEmpty() || points.isEmpty()) return SlideField()
         val keep = HashSet<Pair<Int, Int>>()
-        val reach = kotlin.math.ceil(marginM / CELL_M).toInt()
+        val reach = ceil(marginM / CELL_M).toInt()
         points.forEach { p -> val ci = cellOf(p.x); val cj = cellOf(p.y)
             for (di in -reach..reach) for (dj in -reach..reach) keep += (ci + di) to (cj + dj) }
         return SlideField(cells.filterKeys { it in keep }.values.sortedByDescending { it.weightS }.take(minOf(maxCells, MAX_CELLS)))
@@ -172,15 +176,15 @@ class PivotSlideMeter {
 /** Component along the axis [headingDegrees] of a movement [v] (m). */
 internal fun alongAxis(v: Point, headingDegrees: Double): Double {
     val r = Math.toRadians(headingDegrees)
-    return v.x * kotlin.math.cos(r) + v.y * kotlin.math.sin(r)
+    return v.x * cos(r) + v.y * sin(r)
 }
 
 /** Significant non-zero speed (at least 2 mm/s). */
 internal fun Point.significant() = abs(x) + abs(y) >= 0.002
 
 /** Slide map in `filesDir/slide-field.json` (atomic write). */
-class SlideFieldStore(private val filesDir: java.io.File) {
-    private fun file() = java.io.File(filesDir, "slide-field.json")
+class SlideFieldStore(private val filesDir: File) {
+    private fun file() = File(filesDir, "slide-field.json")
 
     fun load(): SlideField = try {
         val stored = file()
@@ -191,7 +195,7 @@ class SlideFieldStore(private val filesDir: java.io.File) {
 
     fun save(field: SlideField) {
         val stored = file()
-        val temp = java.io.File(stored.path + ".tmp")
+        val temp = File(stored.path + ".tmp")
         temp.outputStream().use { stream -> stream.write(field.toJson().toByteArray(Charsets.UTF_8)); stream.fd.sync() }
         check(temp.renameTo(stored)) { tr("Slide map not saved", "Carte des glissements non enregistrée") }
     }

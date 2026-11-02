@@ -1,9 +1,9 @@
 package fr.luba.poc.map
 
-import org.junit.Assert.*
-import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import org.junit.Assert.*
+import org.junit.Test
 
 /**
  * [ZamboniOrder] on synthetic ladders with a synthetic U-turn cost (1 + 0.1 × gap for a gap of at least m ranks, 3 for

@@ -1,5 +1,8 @@
 package fr.luba.poc.camera
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -16,15 +19,17 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import fr.luba.poc.Clock
+import fr.luba.poc.auth.AccountMode
 import fr.luba.poc.auth.CameraCommand
 import fr.luba.poc.auth.CloudUi
 import fr.luba.poc.auth.CloudViewModel
 import fr.luba.poc.ble.RobotBle
 import fr.luba.poc.ble.RobotUi
+import fr.luba.poc.i18n.tr
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
-import fr.luba.poc.i18n.tr
 
 /** Video command through the robot link (Bluetooth / gateway) if it is ready, otherwise through the cloud. */
 fun cameraCommand(robot: RobotBle, cloud: CloudViewModel, kind: CameraCommand) {
@@ -38,9 +43,9 @@ fun cameraCommand(robot: RobotBle, cloud: CloudViewModel, kind: CameraCommand) {
 }
 
 /** Activity hosting [this] (Compose context, possibly wrapped). */
-internal fun android.content.Context.findActivity(): android.app.Activity? {
-    var c: android.content.Context? = this
-    while (c is android.content.ContextWrapper) { if (c is android.app.Activity) return c; c = c.baseContext }
+internal fun Context.findActivity(): Activity? {
+    var c: Context? = this
+    while (c is ContextWrapper) { if (c is Activity) return c; c = c.baseContext }
     return null
 }
 
@@ -78,9 +83,42 @@ fun BoxScope.CameraHost(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, 
     // Player created on first use only (the Agora SDK is downloaded at that moment).
     val needed = playing || camera.busy || request != null
     LaunchedEffect(needed) { if (needed) controller.webView(context) }
+
+    StreamStartEffects(robot, state, cloud, cloudState)
+    ObstaclePhotoEffects(robot, state, cloud, cloudState)
+    LiveCameraEffects(robot, state, cloud, cloudState)
+    FrozenFrameWatchdog(robot, state, cloud, cloudState)
+
+    // Thumbnail: the WebView must stay displayed to decode frames (obstacle photo), unless the map or manual control
+    // already show the view (even while loading) or deliberately hide their own stream. Same state as the map view
+    // (LiveCamera.streaming, updated at the same moment): never two thumbnails for one stream.
+    // First pass of a recreated tree (activity recreated, return to the app): the counters of the map views and of the
+    // Camera page are only updated after composition. Thumbnail decided one frame later (crashes of 2026-10-14).
+    var settled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { withFrameNanos { }; settled = true }
+    if (settled && LiveCamera.fallbackThumbnail(LiveCamera.streaming, controller.pageVisible, LiveCamera.embedded, LiveCamera.hosts, LiveCamera.owned)) {
+        // Movable (drag) and resizable (top-right corner, pinch) window, position saved.
+        val window = rememberCameraWindowState("fallback", 132.dp)
+        CameraWindow(window, Alignment.BottomStart, Modifier.padding(8.dp)) {
+            Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp)).background(Color.Black).border(1.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(10.dp))) {
+                CameraPlayerView(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+                Text(if (request != null) tr("Obstacle photo…", "Photo de l'obstacle…") else tr("Robot camera", "Caméra robot"), Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall, color = Color.White)
+            }
+        }
+    }
+}
+
+/** Stream start after a token: player loading, channel join, first frame awaited with timeouts, 4G refresh, robot leaving. */
+@Composable
+private fun StreamStartEffects(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudState: CloudUi) {
+    val controller = CameraController
+    val camera = cloudState.camera
+    val playing = camera.credentials != null
+    val request = state.obstaclePhoto.request
     val latestCloud by rememberUpdatedState(cloudState)
     val latestState by rememberUpdatedState(state)
-
     // Player loaded without the Agora SDK (CDN unreachable on first load): page reloaded on the next request,
     // otherwise the camera would stay broken until the app restarts.
     LaunchedEffect(camera.busy) {
@@ -142,14 +180,24 @@ fun BoxScope.CameraHost(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, 
     LaunchedEffect(controller.peerLeft) {
         if (controller.peerLeft > 0) { cloud.cameraStatus(tr("The robot left the video channel: restart the stream", "Le robot a quitté le canal vidéo : relancer le flux")); robot.cameraEvent(tr("Camera: publishing stopped by the robot", "Caméra : publication arrêtée par le robot")) }
     }
+}
 
+/** Obstacle photo: stream requested on contact, photo after the back-off, stream started for it stopped once unused. */
+@Composable
+private fun ObstaclePhotoEffects(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudState: CloudUi) {
+    val controller = CameraController
+    val camera = cloudState.camera
+    val playing = camera.credentials != null
+    val request = state.obstaclePhoto.request
+    val latestCloud by rememberUpdatedState(cloudState)
+    val latestState by rememberUpdatedState(state)
     // Obstacle photo, step 1 (contact): chosen camera displayed, stream requested (with the right camera if chosen).
     LaunchedEffect(request?.id) {
         val r = request ?: return@LaunchedEffect
         val camera = latestCloud.camera
         if (latestCloud.connected) controller.select(r.camera)
         when {
-            fr.luba.poc.auth.AccountMode.localOnly -> robot.obstaclePhotoFailed(r.id, fr.luba.poc.auth.AccountMode.message)
+            AccountMode.localOnly -> robot.obstaclePhotoFailed(r.id, AccountMode.message)
             !latestCloud.connected -> robot.obstaclePhotoFailed(r.id, tr("Mammotion account not connected (Me tab)", "compte Mammotion non connecté (onglet Moi)"))
             camera.credentials == null && !camera.busy -> { controller.photoOwned = true; cloud.requestCamera(bothFront = r.camera == ObstaclePhotoUi.CAMERA_RIGHT) }
             // Stream already open without the right camera: restarted with both front cameras (the robot only publishes the requested ones).
@@ -168,13 +216,13 @@ fun BoxScope.CameraHost(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, 
         val r = request ?: return@LaunchedEffect
         val readyAt = r.readyAt ?: return@LaunchedEffect
         val deadline = readyAt + ObstaclePhotoUi.HOLD_MS - 500
-        while (System.currentTimeMillis() < deadline) {
+        while (Clock.now() < deadline) {
             val camera = latestCloud.camera
             if (camera.credentials == null && !camera.busy && camera.status.startsWith(tr("Video stream failed", "Échec"))) {
                 robot.obstaclePhotoFailed(r.id, camera.status.removePrefix(tr("Video stream failed: ", "Échec du flux vidéo : "))); return@LaunchedEffect
             }
             val frame = controller.firstFrameAt
-            val now = System.currentTimeMillis()
+            val now = Clock.now()
             // Chosen camera as soon as it has a frame; at the end of the wait, another camera already displayed is the fallback.
             val uid = ObstaclePhotoUi.photoCamera(r.camera, controller.framedUids, deadline - now)
             if (frame != null && uid != null && now >= frame + 1000) {
@@ -182,7 +230,7 @@ fun BoxScope.CameraHost(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, 
                 val shot = controller.snapshot(uid)
                 // Frame kept only if it shows the robot stopped after its back-off (stream delay subtracted); at the end of
                 // the wait, the last displayed frame is taken anyway and flagged as possibly older.
-                val taken = System.currentTimeMillis()
+                val taken = Clock.now()
                 val fresh = shot != null && ObstaclePhotoUi.sceneAfterStop(readyAt, taken, shot.frameAt, shot.delayMs)
                 if (shot != null && (fresh || taken >= deadline - ObstaclePhotoUi.LAST_CHANCE_MS)) {
                     robot.obstaclePhotoCaptured(r.id, shot.jpeg, uid, ObstaclePhotoTiming(fresh, shot.frameAt?.takeIf { it > 0 }?.let { taken - it },
@@ -205,7 +253,18 @@ fun BoxScope.CameraHost(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, 
         if (latestState.obstaclePhoto.request == null && !controller.pageVisible && controller.photoOwned && !LiveCamera.wantedNow)
             stopCamera(robot, cloud, cloud.state.value)
     }
+}
 
+/** Live view: stream requested while the robot moves or on demand, kept, then stopped after the movement or in the background. */
+@Composable
+private fun LiveCameraEffects(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudState: CloudUi) {
+    val context = LocalContext.current
+    val controller = CameraController
+    val camera = cloudState.camera
+    val playing = camera.credentials != null
+    val request = state.obstaclePhoto.request
+    val latestCloud by rememberUpdatedState(cloudState)
+    val latestState by rememberUpdatedState(state)
     // Live camera ([LiveCamera]): stream requested as soon as the robot moves (or manual control is open), or on
     // demand (camera button, robot stopped), camera saved in the settings; stopped shortly after the end of the
     // movement or as soon as the view is hidden.
@@ -283,18 +342,27 @@ fun BoxScope.CameraHost(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, 
         }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_START) { LiveCamera.retry() }
+}
+
+/** Displayed live stream whose frame freezes: camera shown again, then stream restarted, then given up. */
+@Composable
+private fun FrozenFrameWatchdog(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, cloudState: CloudUi) {
+    val controller = CameraController
+    val camera = cloudState.camera
+    val playing = camera.credentials != null
+    val request = state.obstaclePhoto.request
     // Watchdog of a displayed stream: frozen frame (player put back on screen, robot left the channel, Agora connection
     // lost) → camera shown again, then stream restarted with a new token; never in the background (no image).
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val watched = playing && LiveCamera.owned && LiveCamera.embedded > 0 && !controller.pageVisible && request == null
     LaunchedEffect(watched, camera.session) {
         if (!watched) return@LaunchedEffect
-        val watchedSince = System.currentTimeMillis()
+        val watchedSince = Clock.now()
         var since = watchedSince
         var replayed = false
         while (true) {
             delay(2_000)
-            val now = System.currentTimeMillis()
+            val now = Clock.now()
             // Before the first frame: request timeouts (25 + 20 s). Background: no frame is displayed.
             if (controller.firstFrameAt == null || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) { since = now; continue }
             // Frame tracking impossible in this browser (-1): no watchdog.
@@ -324,26 +392,6 @@ fun BoxScope.CameraHost(robot: RobotBle, state: RobotUi, cloud: CloudViewModel, 
                     robot.cameraEvent(tr("Camera: frozen frame, restarts abandoned", "Caméra : image figée, relances abandonnées"), mapOf("agora" to health.connection, "users" to health.users))
                     return@LaunchedEffect
                 }
-            }
-        }
-    }
-
-    // Thumbnail: the WebView must stay displayed to decode frames (obstacle photo), unless the map or manual control
-    // already show the view (even while loading) or deliberately hide their own stream. Same state as the map view
-    // (LiveCamera.streaming, updated at the same moment): never two thumbnails for one stream.
-    // First pass of a recreated tree (activity recreated, return to the app): the counters of the map views and of the
-    // Camera page are only updated after composition. Thumbnail decided one frame later (crashes of 2026-10-14).
-    var settled by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { withFrameNanos { }; settled = true }
-    if (settled && LiveCamera.fallbackThumbnail(LiveCamera.streaming, controller.pageVisible, LiveCamera.embedded, LiveCamera.hosts, LiveCamera.owned)) {
-        // Movable (drag) and resizable (top-right corner, pinch) window, position saved.
-        val window = rememberCameraWindowState("fallback", 132.dp)
-        CameraWindow(window, Alignment.BottomStart, Modifier.padding(8.dp)) {
-            Column(Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp)).background(Color.Black).border(1.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(10.dp))) {
-                CameraPlayerView(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-                Text(if (request != null) tr("Obstacle photo…", "Photo de l'obstacle…") else tr("Robot camera", "Caméra robot"), Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelSmall, color = Color.White)
             }
         }
     }

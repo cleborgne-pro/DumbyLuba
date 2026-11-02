@@ -38,20 +38,22 @@ class CloudOwnedDevicesTest {
         assertTrue(CloudOwnedDevices.robot(CloudOwnedDevices.Owned("SERIAL0001", "iot", "", "", "", "", null)))
         assertFalse(CloudOwnedDevices.robot(CloudOwnedDevices.Owned("Base", "iot", "", "", "RTK3A0", "", null)))
         assertFalse(CloudOwnedDevices.robot(CloudOwnedDevices.Owned("Spino-S1DEMO", "iot", "", "", "", "", null)))
-        assertEquals("2 robots de votre compte sont sur l'ancien cloud Mammotion (Aliyun), que l'application ne prend pas encore en charge ; le contrôle Bluetooth fonctionne toujours.",
-            CloudOwnedDevices.status(empty, missing))
-        assertEquals("Votre LUBA est sur l'ancien cloud Mammotion (Aliyun), que l'application ne prend pas encore en charge ; le contrôle Bluetooth fonctionne toujours.",
-            CloudOwnedDevices.status(empty, missing.take(1)))
+        // Aliyun cloud reached without listing the robot, or not reached (reason given).
+        assertEquals("2 robots de votre compte sont sur l'ancien cloud Mammotion (Aliyun), qui ne le liste pas ; le contrôle Bluetooth fonctionne toujours. Exportez les diagnostics (Service → Journaux → Tout exporter) pour le signaler.",
+            CloudOwnedDevices.status(empty, missing, null))
+        assertEquals("Votre LUBA est sur l'ancien cloud Mammotion (Aliyun), qui n'a pas pu être joint (code 2401 (/account/createSessionByAuthCode)) ; le contrôle Bluetooth fonctionne toujours. Exportez les diagnostics (Service → Journaux → Tout exporter) pour le signaler.",
+            CloudOwnedDevices.status(empty, missing.take(1), "code 2401 (/account/createSessionByAuthCode)"))
+        assertEquals("1 LUBA dans le compte (ancien cloud Aliyun)", CloudOwnedDevices.aliyunStatus(1))
         // Nothing missing (empty list, or only an RTK station): the current status stays.
-        assertEquals("Aucun appareil dans le compte", CloudOwnedDevices.status(empty, emptyList()))
-        assertEquals("Aucun appareil dans le compte", CloudOwnedDevices.status(empty, CloudOwnedDevices.missingRobots(owned.filter { it.name.startsWith("RTK") }, empty.robots)))
+        assertEquals("Aucun appareil dans le compte", CloudOwnedDevices.status(empty, emptyList(), null))
+        assertEquals("Aucun appareil dans le compte", CloudOwnedDevices.status(empty, CloudOwnedDevices.missingRobots(owned.filter { it.name.startsWith("RTK") }, empty.robots), "x"))
     }
 
     @Test fun robotsListedByThePageAreNotMissing() {
         val owned = CloudOwnedDevices.parse(reply)
         val page = CloudRobotFilter.split(listOf(CloudRobot("Luba-VSDEMO003", "iot-SECRET-3", "a1iMygIwxFC"), CloudRobot("MA5000DEMO000001", "other-id", "a1FbaU4Bqk5")))
         assertTrue(CloudOwnedDevices.missingRobots(owned, page.robots).isEmpty())
-        assertEquals(page.status, CloudOwnedDevices.status(page, CloudOwnedDevices.missingRobots(owned, emptyList())))
+        assertEquals(page.status, CloudOwnedDevices.status(page, CloudOwnedDevices.missingRobots(owned, emptyList()), null))
     }
 
     @Test fun logFieldsCarryNoNameSerialNorIotId() {

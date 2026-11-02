@@ -1,7 +1,9 @@
 package fr.luba.poc.protocol
 
+import fr.luba.poc.auth.Maintenance
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.proto.LubaMsgProto.LubaMsg
+import kotlin.math.abs
 
  data class Telemetry(
     val bladeHeightMm: Int? = null,
@@ -34,7 +36,7 @@ import fr.luba.poc.proto.LubaMsgProto.LubaMsg
     val geoLat: Double? = null, val geoLon: Double? = null, val geoSource: String? = null,
     val firmware: String? = null,
     /** Maintenance counters (`rpt_maintain`, RIT_MAINTAIN): mileage, working time, battery cycles, blade use. */
-    val maintenance: fr.luba.poc.auth.Maintenance? = null, val lastMaintenanceAt: Long? = null,
+    val maintenance: Maintenance? = null, val lastMaintenanceAt: Long? = null,
     /** Internal model code (`device_product_type_info.sub_product_type`, e.g. HM060100LBVAWD50OMNIH or "62"): gives the
      * cutting heights ([CutHeightRange.forProductType]); [productName] is the trade name (`main_product_type`). */
     val productType: String? = null, val productName: String? = null,
@@ -71,7 +73,7 @@ class TelemetryReducer {
         }
         if (message.hasNav() && message.nav.hasToappLatUp()) message.nav.toappLatUp.let { geo ->
             // Depending on the version, the firmware publishes the position in degrees or radians: both are accepted.
-            val (lat, lon) = if (kotlin.math.abs(geo.lat) <= kotlin.math.PI / 2 && kotlin.math.abs(geo.lon) <= kotlin.math.PI && (geo.lat != 0.0 || geo.lon != 0.0))
+            val (lat, lon) = if (abs(geo.lat) <= kotlin.math.PI / 2 && abs(geo.lon) <= kotlin.math.PI && (geo.lat != 0.0 || geo.lon != 0.0))
                 Math.toDegrees(geo.lat) to Math.toDegrees(geo.lon) else geo.lat to geo.lon
             if (validGeo(lat, lon)) value = value.copy(geoLat = lat, geoLon = lon, geoSource = "robot")
         }
@@ -117,7 +119,7 @@ class TelemetryReducer {
         }
         if (report.hasMaintain()) report.maintain.let { m ->
             val blade = if (m.hasBladeUsedTime()) m.bladeUsedTime else null
-            value = value.copy(maintenance = fr.luba.poc.auth.Maintenance(m.mileage, m.workTime, m.batCycles,
+            value = value.copy(maintenance = Maintenance(m.mileage, m.workTime, m.batCycles,
                 blade?.bladeUsedTime ?: 0, blade?.bladeUsedWarnTime ?: 0), lastMaintenanceAt = wallTime)
         }
         if (report.hasCutterWorkModeInfo()) {
@@ -155,7 +157,7 @@ class TelemetryReducer {
     }
 
     private fun validGeo(lat: Double, lon: Double) =
-        lat.isFinite() && lon.isFinite() && lat in -90.0..90.0 && lon in -180.0..180.0 && (kotlin.math.abs(lat) > 1e-3 || kotlin.math.abs(lon) > 1e-3)
+        lat.isFinite() && lon.isFinite() && lat in -90.0..90.0 && lon in -180.0..180.0 && (abs(lat) > 1e-3 || abs(lon) > 1e-3)
 
     fun rate(elapsed: Long): Double {
         while (positions.isNotEmpty() && elapsed - positions.first() > 10000) positions.removeFirst()

@@ -1,13 +1,13 @@
 package fr.luba.poc.map
 
+import kotlin.math.*
+import org.locationtech.jts.algorithm.MinimumDiameter
 import org.locationtech.jts.geom.Coordinate
+import org.locationtech.jts.geom.Geometry as JtsGeometry
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.LineString
 import org.locationtech.jts.geom.Polygon
 import org.locationtech.jts.geom.util.AffineTransformation
-import org.locationtech.jts.algorithm.MinimumDiameter
-import org.locationtech.jts.geom.Geometry as JtsGeometry
-import kotlin.math.*
 
 /**
  * "Optimized" mode: the zone is split into sweep bands (boustrophedon cells, plus a cut where the pass width jumps
@@ -69,7 +69,7 @@ internal object MixedSweep {
                     (abs(row.low - parent.row.low) > jump || abs(row.high - parent.row.high) > jump ||
                         abs(row.length - parent.row.length) > max(WIDTH_CHANGE_M, WIDTH_CHANGE_RATIO * min(row.length, parent.row.length)))
                 val strip = if (parent != null && !jumped) parent.strip
-                    else strips.size.also { strips.add(Strip(mutableListOf(), if (jumped) parent!!.strip else null)) }
+                    else strips.size.also { strips.add(Strip(mutableListOf(), parent?.strip?.takeIf { jumped })) }
                 strips[strip].rows.add(row)
                 Interval(row, strip)
             }

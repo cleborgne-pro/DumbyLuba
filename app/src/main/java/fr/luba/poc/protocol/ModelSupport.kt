@@ -9,10 +9,10 @@ import fr.luba.poc.proto.MctrlDriverProto.MctlDriver
 import fr.luba.poc.proto.MctrlNavProto.MctlNav
 import fr.luba.poc.proto.MctrlSysProto.MctlSys
 import fr.luba.poc.ui.RobotModel
+import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlin.math.abs
 
 /**
  * Support level of the connected Mammotion mower, from its Bluetooth name.
@@ -99,9 +99,9 @@ object ModelTrial {
 
     /** Arms the trial for [name]; [sensors]: `sensor_status` at rest, whose bumper slot gives [Armed.bumperRest]. */
     fun arm(name: String?, now: Long, sensors: Int? = null): Armed {
-        require(eligible(name)) { tr("Trial reserved for a connected mower in read-only mode", "Essai réservé à une tondeuse connectée en lecture seule") }
+        require(name != null && eligible(name)) { tr("Trial reserved for a connected mower in read-only mode", "Essai réservé à une tondeuse connectée en lecture seule") }
         val rest = sensors?.let { it and 7 }?.takeIf { it == BUMPER_REST_ALERT } ?: 0
-        return Armed(name!!.trim(), now, now + DURATION_MS, rest).also { armed.value = it }
+        return Armed(name.trim(), now, now + DURATION_MS, rest).also { armed.value = it }
     }
 
     /**

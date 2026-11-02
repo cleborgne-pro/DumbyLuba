@@ -24,12 +24,14 @@
 #include <esp_wifi.h>
 
 #include "board.h"
+#include "gw_battery_steps.h"
 #include "gw_ota.h"
+#include "journal.h"
 #include "ota.h"
 #include "robot.h"
 #include "session.h"
 
-static const char *FW_VERSION = "gateway-0.5.1";
+static const char *FW_VERSION = "gateway-0.6.0";
 static const char *HOSTNAME = "dumbyluba-esp32";
 // mDNS instance name shown by the app, same naming as the phone gateway service (kept unchanged).
 static const char *INSTANCE = "DumbyLuba passerelle ESP32";
@@ -39,10 +41,18 @@ static const char *INSTANCE = "DumbyLuba passerelle ESP32";
 static board::Power power;
 static portMUX_TYPE healthMux = portMUX_INITIALIZER_UNLOCKED;
 static gw::proto::Health health;
+// T-Call: the IP5306 only gives 4 LED steps; the level is spread inside the current step from the time spent in it
+// (gw_battery_steps.h). The learned duration of each step is kept in non-volatile memory.
+static gw::battery::StepEstimator stepEstimator;
+static void saveBatteryLearning();
 
 // Health status sent to the pilot every 5 s (updated here, read by the session task).
 static void updateHealth() {
   board::readPower(power);
+  if (board::IP5306 && power.ok) {
+    power.level = stepEstimator.update(power.step, power.vin, power.full, millis());
+    if (stepEstimator.takeLearnedChanged()) saveBatteryLearning();
+  }
   gw::proto::Health h;
   h.batteryPercent = power.ok ? power.level : -1;
   h.charging = power.vin;
@@ -64,6 +74,16 @@ static gw::proto::Health currentHealth() {
 // ---------------------------------------------------------------- Settings
 
 static Preferences prefs;
+
+static String batteryStepKey(int band) { return "bat_s" + String((band + 1) * gw::battery::STEP_PERCENT); }
+
+static void loadBatteryLearning() {
+  for (int band = 0; band < gw::battery::BANDS; ++band) stepEstimator.setLearnedMs(band, prefs.getUInt(batteryStepKey(band).c_str(), 0));
+}
+
+static void saveBatteryLearning() {
+  for (int band = 0; band < gw::battery::BANDS; ++band) prefs.putUInt(batteryStepKey(band).c_str(), stepEstimator.learnedMs(band));
+}
 
 // Access point password: drawn at random at first boot, unique to each board and kept in non-volatile
 // memory (no shared password published with the code). Shown on the serial console.
@@ -152,11 +172,11 @@ static void applyWifiPowerSave() {
   wifi_ps_type_t applied = wifiPsWanted;
   esp_err_t err = esp_wifi_set_ps(applied);
   if (err != ESP_OK && applied != WIFI_PS_MIN_MODEM) {
-    Serial.printf("[wifi] power save \"%s\" refused (%s): falling back to \"min\"\n", wifiPsName(applied), esp_err_to_name(err));
+    journal::console.printf("[wifi] power save \"%s\" refused (%s): falling back to \"min\"\n", wifiPsName(applied), esp_err_to_name(err));
     applied = WIFI_PS_MIN_MODEM;
     err = esp_wifi_set_ps(applied);
   }
-  if (err != ESP_OK) Serial.printf("[wifi] power save \"%s\" refused (%s)\n", wifiPsName(applied), esp_err_to_name(err));
+  if (err != ESP_OK) journal::console.printf("[wifi] power save \"%s\" refused (%s)\n", wifiPsName(applied), esp_err_to_name(err));
   // Also the mode the Arduino core applies at each station start.
   WiFi.setSleep(applied);
 }
@@ -167,8 +187,8 @@ static void startAccessPoint() {
   WiFi.softAP(apName.c_str(), apPassword.c_str());
   dns.start(53, "*", WiFi.softAPIP());
   apActive = true;
-  Serial.printf("[wifi] access point \"%s\" (password %s) -> http://%s/wifi\n", apName.c_str(), apPassword.c_str(),
-                WiFi.softAPIP().toString().c_str());
+  journal::console.printf("[wifi] access point \"%s\" -> http://%s/wifi\n", apName.c_str(), WiFi.softAPIP().toString().c_str());
+  Serial.printf("[wifi] access point password: %s\n", apPassword.c_str());
 }
 
 static void stopAccessPoint() {
@@ -177,7 +197,7 @@ static void stopAccessPoint() {
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   apActive = false;
-  Serial.println("[wifi] access point closed");
+  journal::console.println("[wifi] access point closed");
 }
 
 static void beginStation() {
@@ -191,7 +211,7 @@ static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     WiFi.setTxPower(WIFI_POWER_19_5dBm);
     // 20 MHz channel: sturdier than 40 MHz on 2.4 GHz with a weak signal, and leaves room for Bluetooth.
     const esp_err_t bw = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
-    if (bw != ESP_OK) Serial.printf("[wifi] 20 MHz bandwidth refused (%d)\n", bw);
+    if (bw != ESP_OK) journal::console.printf("[wifi] 20 MHz bandwidth refused (%d)\n", bw);
     applyWifiPowerSave();
   } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
     staConnectedSinceMs = millis();
@@ -200,16 +220,16 @@ static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
       wifiLastOutageMs = outage;
       if (outage > wifiMaxOutageMs) wifiMaxOutageMs = outage;
       wifiOutageSinceMs = 0;
-      Serial.printf("[wifi] outage lasted %u ms\n", (unsigned)outage);
+      journal::console.printf("[wifi] outage lasted %u ms\n", (unsigned)outage);
     }
-    Serial.printf("[wifi] connected: %s, signal %d dBm, channel %d, power save %s\n", WiFi.localIP().toString().c_str(), WiFi.RSSI(),
-                  WiFi.channel(), wifiPsEffective());
+    journal::console.printf("[wifi] connected: %s, signal %d dBm, channel %d, power save %s\n", WiFi.localIP().toString().c_str(), WiFi.RSSI(),
+                            WiFi.channel(), wifiPsEffective());
   } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
     if (staConnectedSinceMs) {
       wifiDisconnects++;
       wifiLastDisconnectReason = info.wifi_sta_disconnected.reason;
       wifiOutageSinceMs = millis();
-      Serial.printf("[wifi] disconnected (reason %d)\n", wifiLastDisconnectReason);
+      journal::console.printf("[wifi] disconnected (reason %d)\n", wifiLastDisconnectReason);
     }
     staConnectedSinceMs = 0;
   }
@@ -249,6 +269,7 @@ static String statusJson() {
   j += "\"firmware\":\"" + String(FW_VERSION) + "\",";
   j += "\"board\":\"" + String(board::NAME) + "\",";
   j += "\"uptime_s\":" + String(millis() / 1000) + ",";
+  j += "\"reset_reason\":\"" + String(journal::startReasonText()) + "\",";
   // Internal RAM (task stacks, Wi-Fi, Bluetooth): free, lowest since boot, largest block a task stack could get.
   // heap_free/heap_min: every internal region (ESP.getFreeHeap, including the IRAM left over, 32-bit access only);
   // heap_internal_free/heap_internal_min: byte-addressable internal RAM only (DRAM), what malloc and the stacks use.
@@ -265,7 +286,8 @@ static String statusJson() {
   if (board::IP5306)
     j += "\"ip5306_ok\":" + String(power.ok ? "true" : "false") + ",\"keep_on\":" + String(power.keepOn ? "true" : "false") + ",";
   j += "\"vin_present\":" + String(power.vin ? "true" : "false");
-  if (board::IP5306) j += ",\"charge_full\":" + String(power.full ? "true" : "false");
+  if (board::IP5306)
+    j += ",\"charge_full\":" + String(power.full ? "true" : "false") + ",\"level_step\":" + String(power.step);
   j += ",\"level_percent\":" + String(power.level) + ",\"battery_mv\":" + String(power.batteryMv) + "},";
   j += "\"wifi\":{\"connected\":" + String(sta ? "true" : "false") + ",\"ssid\":\"" + jsonEscape(wifiSsid) + "\",\"ip\":\"" +
        (sta ? WiFi.localIP().toString() : String("")) + "\",\"rssi_dbm\":" + String(sta ? WiFi.RSSI() : 0) +
@@ -340,7 +362,7 @@ static void handleRoot() {
   if (!r.address.empty())
     h += F("<form method=post action=/robot/release><button>Release the robot</button> "
            "(Mammotion app, direct Bluetooth; no more automatic reconnection)</form>");
-  h += F("<p><a href=/wifi>Wi-Fi</a> · <a href=/status>JSON</a></p><pre>");
+  h += F("<p><a href=/wifi>Wi-Fi</a> · <a href=/status>JSON</a> · <a href=/log>Journal</a></p><pre>");
   h += htmlEscape(statusJson());
   h += F("</pre></body></html>");
   web.send(200, "text/html; charset=utf-8", h);
@@ -353,7 +375,7 @@ static void handlePair() {
     web.send(403, "application/json", "{\"open\":false}");
     return;
   }
-  Serial.printf("[pairing] code handed to %s\n", web.client().remoteIP().toString().c_str());
+  journal::console.printf("[pairing] code handed to %s\n", web.client().remoteIP().toString().c_str());
   web.send(200, "application/json",
            "{\"open\":true,\"link\":\"" + jsonEscape(pairingLink()) + "\",\"remaining_s\":" +
                String(pairing.remainingMs(millis()) / 1000) + "}");
@@ -423,7 +445,7 @@ static void handleCommand(String cmd) {
     }
     prefs.putString("ssid", rest.substring(0, sep));
     prefs.putString("pass", rest.substring(sep + 1));
-    Serial.println("[wifi] saved, restarting");
+    journal::console.println("[wifi] saved, restarting");
     delay(300);
     ESP.restart();
   } else if (cmd.startsWith("code ")) {
@@ -447,13 +469,15 @@ static void handleCommand(String cmd) {
                                              "ESP32").c_str());
   } else if (cmd == "status") {
     printStatus();
+  } else if (cmd == "log") {
+    Serial.print(journal::text());
   } else if (cmd == "release") {
     const std::string refused = robot::release(true);
-    Serial.println(refused.empty() ? "[robot] released" : refused.c_str());
+    journal::console.println(refused.empty() ? "[robot] released" : refused.c_str());
   } else if (cmd == "forget-wifi") {
     prefs.remove("ssid");
     prefs.remove("pass");
-    Serial.println("[wifi] erased, restarting");
+    journal::console.println("[wifi] erased, restarting");
     delay(300);
     ESP.restart();
   } else if (cmd == "wifi-ps none" || cmd == "wifi-ps min") {
@@ -461,20 +485,25 @@ static void handleCommand(String cmd) {
     prefs.putString("wifi_ps", wifiPsName(wifiPsWanted));
     if (WiFi.getMode() & WIFI_MODE_STA) applyWifiPowerSave();
     else WiFi.setSleep(wifiPsWanted);
-    Serial.printf("[wifi] power save: %s (in force: %s)\n", wifiPsName(wifiPsWanted), wifiPsEffective());
+    journal::console.printf("[wifi] power save: %s (in force: %s)\n", wifiPsName(wifiPsWanted), wifiPsEffective());
   } else if (cmd == "wifi-ps") {
-    Serial.printf("[wifi] power save: %s (in force: %s)\n", wifiPsName(wifiPsWanted), wifiPsEffective());
+    journal::console.printf("[wifi] power save: %s (in force: %s)\n", wifiPsName(wifiPsWanted), wifiPsEffective());
   } else if (cmd == "ap-pass") {
     Serial.printf("[wifi] access point \"%s\", password %s\n", apName.c_str(), apPassword.c_str());
   } else if (cmd == "reboot") {
     ESP.restart();
+  } else if (cmd == "crash") {
+    // Check of the journal: the lines before a crash must be readable on /log after the restart (serial console only).
+    journal::console.println("[journal] deliberate crash (crash command)");
+    Serial.flush();
+    abort();
   } else if (cmd == "ota") {
     Serial.println(ota::statusJson());
   } else if (cmd == "ota-mowing on" || cmd == "ota-mowing off") {
     ota::setAllowWhilePiloted(cmd.endsWith("on"));
   } else if (!cmd.isEmpty()) {
-    Serial.println("commands: status | code [NNNNNN] | pair | release | wifi NAME|PASSWORD | forget-wifi | wifi-ps [none|min] | "
-                   "ap-pass | reboot | ota | ota-mowing on|off");
+    Serial.println("commands: status | log | code [NNNNNN] | pair | release | wifi NAME|PASSWORD | forget-wifi | wifi-ps [none|min] | "
+                   "ap-pass | reboot | crash | ota | ota-mowing on|off");
   }
 }
 
@@ -501,6 +530,9 @@ void setup() {
   updateHealth();
 
   prefs.begin("gateway", false);
+  // Before the first journal line: keeps the lines of the previous run and records this start (GET /log).
+  journal::begin(prefs);
+  loadBatteryLearning();
   loadApPassword();
   wifiSsid = prefs.getString("ssid", "");
   wifiPass = prefs.getString("pass", "");
@@ -524,8 +556,9 @@ void setup() {
     prefs.putString("code", gatewayCode);
   }
 
-  Serial.println();
-  Serial.printf("DumbyLuba gateway %s (%s) — %s\n", FW_VERSION, board::NAME, board::describe(power).c_str());
+  journal::console.println();
+  journal::console.printf("DumbyLuba gateway %s (%s) — %s, started by: %s\n", FW_VERSION, board::NAME, board::describe(power).c_str(),
+                          journal::startReasonText());
   Serial.printf("[gateway] code to enter on the Fold: %s\n", gatewayCode.c_str());
 
   // Station MAC read from the eFuse: with arduino-esp32 3.x, WiFi.macAddress() before WiFi.mode() leaves the buffer
@@ -561,6 +594,7 @@ void setup() {
 
   web.on("/", handleRoot);
   web.on("/status", [] { web.send(200, "application/json", statusJson()); });
+  web.on("/log", [] { web.send(200, "text/plain; charset=utf-8", journal::text()); });
   web.on("/wifi", HTTP_GET, handleWifiForm);
   web.on("/wifi", HTTP_POST, handleWifiSave);
   web.on("/robot/release", HTTP_POST, handleRelease);
@@ -592,11 +626,11 @@ void setup() {
   const esp_reset_reason_t reset = esp_reset_reason();
   if (reset == ESP_RST_POWERON || reset == ESP_RST_EXT) {
     pairing.open(millis(), session::info().authenticated);
-    Serial.printf("[pairing] open for %u s (reset or power-on): \"Pair the ESP32\" in the app\n",
-                  (unsigned)(gw::proto::PairingWindow::DURATION_MS / 1000));
+    journal::console.printf("[pairing] open for %u s (reset or power-on): \"Pair the ESP32\" in the app\n",
+                            (unsigned)(gw::proto::PairingWindow::DURATION_MS / 1000));
   }
-  Serial.println("Commands: status | code [NNNNNN] | pair | release | wifi NAME|PASSWORD | forget-wifi | wifi-ps [none|min] | "
-                 "ap-pass | reboot | ota | ota-mowing on|off");
+  Serial.println("Commands: status | log | code [NNNNNN] | pair | release | wifi NAME|PASSWORD | forget-wifi | wifi-ps [none|min] | "
+                 "ap-pass | reboot | crash | ota | ota-mowing on|off");
 }
 
 void loop() {
@@ -616,8 +650,8 @@ void loop() {
     MDNS.addService("dumbyluba", "tcp", gw::proto::PORT);
     MDNS.addService("http", "tcp", 80);
     mdnsStarted = true;
-    Serial.printf("[wifi] advertised as \"%s\"; status page http://%s.local/ (%s)\n", INSTANCE, HOSTNAME,
-                  WiFi.localIP().toString().c_str());
+    journal::console.printf("[wifi] advertised as \"%s\"; status page http://%s.local/ (%s)\n", INSTANCE, HOSTNAME,
+                            WiFi.localIP().toString().c_str());
   }
   if (apActive && sta && staConnectedSinceMs && millis() - staConnectedSinceMs > 60000) stopAccessPoint();
   const bool apInUse = apActive && WiFi.softAPgetStationNum() > 0;
@@ -653,16 +687,17 @@ void loop() {
     lastLog = millis();
     const robot::State r = robot::state();
     const session::Info p = session::info();
+    journal::noteState(sta, r.ready, power.level, power.vin);
     // power=usb: external 5 V present (USB, or the dock contacts on the Olimex board); mV only where the board measures it.
     char batteryMv[24] = "";
     if (power.batteryMv >= 0) snprintf(batteryMv, sizeof(batteryMv), " battery=%dmV", power.batteryMv);
-    Serial.printf("[state] %lus wifi=%s rssi=%d | robot=%s%s | pilot=%s | power=%s level=%d%%%s | heap=%u internal=%u min=%u\n",
-                  (unsigned long)(millis() / 1000), sta ? "ok" : "no", sta ? WiFi.RSSI() : 0,
-                  r.address.empty() ? "none" : (r.name.empty() ? r.address.c_str() : r.name.c_str()),
-                  r.ready ? " (connected)" : (r.connecting ? " (connecting…)" : ""), p.active ? p.peer.c_str() : "none",
-                  power.vin ? "usb" : "battery", power.level, batteryMv, ESP.getFreeHeap(),
-                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                  (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    journal::console.printf("[state] %lus wifi=%s rssi=%d | robot=%s%s | pilot=%s | power=%s level=%d%%%s | heap=%u internal=%u min=%u\n",
+                            (unsigned long)(millis() / 1000), sta ? "ok" : "no", sta ? WiFi.RSSI() : 0,
+                            r.address.empty() ? "none" : (r.name.empty() ? r.address.c_str() : r.name.c_str()),
+                            r.ready ? " (connected)" : (r.connecting ? " (connecting…)" : ""), p.active ? p.peer.c_str() : "none",
+                            power.vin ? "usb" : "battery", power.level, batteryMv, ESP.getFreeHeap(),
+                            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   }
   delay(2);
 }

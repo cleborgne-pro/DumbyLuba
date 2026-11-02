@@ -217,13 +217,54 @@ of Zigzag in the same JVM. Mowed share still in one piece after a stop at 25, 50
 Tracking bench (`ZamboniExecutionTest`, Potager and Jardin d'Eden at 30 and 50 %): largest deviation 0.197 to 0.204 m
 (Lawn friendly 0.198 to 0.208 m), no blockage, no pivot in the middle of a pass.
 
+### Oblique U-turns
+
+Along a slanted border the pass ends of two passes `m` rows apart are staggered by `s` (0.43 m for 0.75 m at 30° from
+the normal of the passes). The rolling U was only tried with both passes shortened alike (`TurnOptimizer.shapedBoth`):
+its arcs then cut into the corner by the longer end, out of the pass-end surface, or, shortened enough, leave the
+shortened parts unswept ("shortened passes not swept by the manoeuvre"). In Zamboni
+(`TurnContext.obliqueUnsweptM` = `OBLIQUE_UNSWEPT_M`, 0.3 m; 0 in the other modes, which are unchanged), when no equal
+trim fits, `TurnOptimizer.oblique` shortens the longer pass by `2 r s / lateral` more than the other: the centres of
+the two arcs then lie on a line parallel to the border, so does the tangent of the Dubins U, and the U stays within
+the pass ends with the smallest common trim the planner accepts (same `drivable` check: pass-end surface and chassis
+envelope). The arc by the longer end cannot reach its acute corner: the part of that pass farther than half a cut
+from the manoeuvre is left unswept, accepted up to 0.3 m per pass (geometry at 0.75 m: 0.04 m at 10°, 0.09 m at 20°,
+0.25 m at 30°, about 0.02, 0.06 and 0.11 m² per U at 20, 30 and 45°), recorded in `TurnPlan.unsweptM` and costed
+`UNSWEPT_PENALTY_PER_M` = 20 per metre in the score, so that the order search keeps the pivots where they are cheaper;
+both passes keep at least `OBLIQUE_MIN_PASS_M` = 1.5 m (short passes, as across a 2 m corridor, keep the pivots and
+the bumper repairs that cross them stay local, `EdgeObjectBypassTest`). When the Zamboni route with them is not valid
+(Aire de jeux at a manual 10°: no safe link to the remaining blocks), `CoverageEngine.planPattern` computes it once more
+without them (`PlanningConfig.zamboniObliqueTurns` false) and keeps it if valid (`ZamboniDeadEndTest`).
+The penalty was set on the reference map: at 10 per metre the orientation of Piscine moved to 59°, where the order of
+its blocks broke the mowed part into pieces (contiguous share 0.58); at 20 it stays at 75° (1.00).
+
+Reference map, same test and settings (`ZamboniReferenceTest`, 2026-10-30), Zamboni with the oblique U-turns:
+
+| Zone | Angle | Pivoted in place | Wear | Pass duration | No pivot (regular cells) | Coverage | Mission |
+|---|---|---|---|---|---|---|---|
+| Jardin d'Eden | 60° | 890 → 350° | 1696 → 1449 | 778 → 745 s | 11 of 14 → 15 of 15 | 99.94 % | 1143 s |
+| Aire de jeux | 151° | 4631 → 3551° | 5518 → 5319 | 1847 → 1832 s | 12 of 27 → 24 of 33 | 99.87 % | 2711 s |
+| Piscine | 75° | 13185 → 7045° | 13938 → 11181 | 4568 → 4527 s | 10 of 72 → 56 of 84 | 99.88 % | 5245 s |
+| Figuier | 75° | 4146 → 3816° | 5278 → 5240 | 1147 → 1105 s | 15 of 31 → 19 of 33 | 99.84 % | 2039 s |
+| Enfer | 140° | 2871° | 2871 | 604 s | no regular cell | 99.96 % | 1706 s |
+| Fosse | 135° | 7622 → 6339° | 7997 → 7816 | 3316 → 3347 s | 5 of 28 → 20 of 36 | 99.96 % | 4750 s |
+| Potager | 150° | 1440° | 2906 → 2980 | 901 → 838 s | 20 of 22 → 21 of 23 | 99.83 % | 1407 s |
+| Map | | ×0.81 → ×0.59 of Zigzag | ×0.94 → ×0.86 | ×1.024 of Zigzag | 73 of 194 → 155 of 224 (69 %) | within 0.15 point of Zigzag | −3.9 to +0.7 % of Zigzag |
+
+Every plan valid, no geometric violation; contiguous share 0.92 on the map (0.89 before, Zigzag 0.83); computation ×1.49
+of Zigzag. Tracking bench (`ZamboniExecutionTest`, Potager and Jardin d'Eden at 30 and 50 %): largest deviation 0.064 to
+0.111 m, no blockage, no pivot in the middle of a pass. A 16 × 11 m rectangle with passes at 30°: 5 of 63 → 33 of 63
+U-turns without pivot (`CoveragePlannerTest`); the remaining pivots lie on the long sides, staggered by 0.43 m per row.
+A user's lawn with a long slanted side: 25 of 68 → 52 of 71 on its main zone (pivoted 7,803° → 3,559°, coverage
+99.99 → 99.85 %, mission −1.0 %), 35 of 55 → 38 of 47 on another (coverage 99.94 → 99.92 %).
+
 First targets of the design note and what was measured instead:
 
 | Target (PATTERNS.md 4.4) | Measured | Why |
 |---|---|---|
-| pivots ≤ 0.35 × Zigzag | ×0.81 | on this map most pass ends lie along slanted recorded borders: a rolling U-turn between passes three or four rows apart needs them shortened by more than its arcs sweep (`MAX_TRIM_M` 0.6 m): on Jardin d'Eden and Potager the rolling U fits 389 of the 1,404 rolling moves evaluated, and where nothing fits the refusal is "shortened passes not swept by the manoeuvre" (491 of 518); 55 % of the passes are in cells of fewer than 8 passes |
-| wear ≤ 0.6 × Zigzag | ×0.94 | same; where only pivots fit, Zamboni and Lawn friendly loop around adjacent passes or pivot |
-| ≥ 80 % of rolling U-turns in the regular cells | 38 % | same; square to the border every U-turn of the regular cells rolls (`CoveragePlannerTest`: 39 of 39 in a rectangle, pivots 7020° → 0°, wear ×0.41) and at 30° only 5 of 63 |
+| pivots ≤ 0.35 × Zigzag | ×0.81, ×0.59 with the [oblique U-turns](#oblique-u-turns) | on this map most pass ends lie along slanted recorded borders: a rolling U-turn between passes three or four rows apart needs them shortened by more than its arcs sweep (`MAX_TRIM_M` 0.6 m): on Jardin d'Eden and Potager the rolling U fits 389 of the 1,404 rolling moves evaluated, and where nothing fits the refusal is "shortened passes not swept by the manoeuvre" (491 of 518); 55 % of the passes are in cells of fewer than 8 passes |
+| wear ≤ 0.6 × Zigzag | ×0.94, ×0.86 with the oblique U-turns | same; where only pivots fit, Zamboni and Lawn friendly loop around adjacent passes or pivot |
+| ≥ 80 % of rolling U-turns in the regular cells | 38 %, 69 % with the oblique U-turns | same; square to the border every U-turn of the regular cells rolls (`CoveragePlannerTest`: 39 of 39 in a rectangle, pivots 7020° → 0°, wear ×0.41) and at 30° 5 of 63, 33 of 63 with the oblique U-turns |
 | pass duration ≤ Lawn friendly on every zone | up to ×1.08 (Jardin d'Eden), ×1.035 on the map | same objective plus the front rule; the orientation is chosen on the whole mission (Figuier: passes ×1.07, mission −4.6 % against Lawn friendly) |
 | contiguous share ≥ 0.9 on every zone | 0.71 to 1.00, mean 0.89 | the metric counts the order of the cells as well |
 | computation ≤ 2 × Zigzag on every zone | ×0.95 to ×1.67 (up to ×2.1 under load) | asserted on the map (×1.24) |
@@ -336,6 +377,47 @@ Every plan valid, no geometric violation, same `planHash` twice; the Figuier fal
 U-turns against 50, pivots 9000° → 1035°. Tracking bench (`SpiralExecutionTest`, Potager and Jardin d'Eden at 30 and
 50 %): largest deviation 0.186 to 0.196 m (Zigzag 0.176 to 0.184 m), no blockage, no pivot in a stripe; missions
 +3.0 / +12.0 % (Jardin d'Eden) and +7.3 / +15.4 % (Potager) against Zigzag, pivoting time 22 to 31 % lower.
+
+### Oblique U-turns
+
+Along a slanted border the pass ends of two passes `m` rows apart are staggered by `s` (0.43 m for 0.75 m at 30° from
+the normal of the passes). The rolling U was only tried with both passes shortened alike (`TurnOptimizer.shapedBoth`):
+its arcs then cut into the corner by the longer end, out of the pass-end surface, or, shortened enough, leave the
+shortened parts unswept ("shortened passes not swept by the manoeuvre"). In Zamboni
+(`TurnContext.obliqueUnsweptM` = `OBLIQUE_UNSWEPT_M`, 0.3 m; 0 in the other modes, which are unchanged), when no equal
+trim fits, `TurnOptimizer.oblique` shortens the longer pass by `2 r s / lateral` more than the other: the centres of
+the two arcs then lie on a line parallel to the border, so does the tangent of the Dubins U, and the U stays within
+the pass ends with the smallest common trim the planner accepts (same `drivable` check: pass-end surface and chassis
+envelope). The arc by the longer end cannot reach its acute corner: the part of that pass farther than half a cut
+from the manoeuvre is left unswept, accepted up to 0.3 m per pass (geometry at 0.75 m: 0.04 m at 10°, 0.09 m at 20°,
+0.25 m at 30°, about 0.02, 0.06 and 0.11 m² per U at 20, 30 and 45°), recorded in `TurnPlan.unsweptM` and costed
+`UNSWEPT_PENALTY_PER_M` = 20 per metre in the score, so that the order search keeps the pivots where they are cheaper;
+both passes keep at least `OBLIQUE_MIN_PASS_M` = 1.5 m (short passes, as across a 2 m corridor, keep the pivots and
+the bumper repairs that cross them stay local, `EdgeObjectBypassTest`). When the Zamboni route with them is not valid
+(Aire de jeux at a manual 10°: no safe link to the remaining blocks), `CoverageEngine.planPattern` computes it once more
+without them (`PlanningConfig.zamboniObliqueTurns` false) and keeps it if valid (`ZamboniDeadEndTest`).
+The penalty was set on the reference map: at 10 per metre the orientation of Piscine moved to 59°, where the order of
+its blocks broke the mowed part into pieces (contiguous share 0.58); at 20 it stays at 75° (1.00).
+
+Reference map, same test and settings (`ZamboniReferenceTest`, 2026-10-30), Zamboni with the oblique U-turns:
+
+| Zone | Angle | Pivoted in place | Wear | Pass duration | No pivot (regular cells) | Coverage | Mission |
+|---|---|---|---|---|---|---|---|
+| Jardin d'Eden | 60° | 890 → 350° | 1696 → 1449 | 778 → 745 s | 11 of 14 → 15 of 15 | 99.94 % | 1143 s |
+| Aire de jeux | 151° | 4631 → 3551° | 5518 → 5319 | 1847 → 1832 s | 12 of 27 → 24 of 33 | 99.87 % | 2711 s |
+| Piscine | 75° | 13185 → 7045° | 13938 → 11181 | 4568 → 4527 s | 10 of 72 → 56 of 84 | 99.88 % | 5245 s |
+| Figuier | 75° | 4146 → 3816° | 5278 → 5240 | 1147 → 1105 s | 15 of 31 → 19 of 33 | 99.84 % | 2039 s |
+| Enfer | 140° | 2871° | 2871 | 604 s | no regular cell | 99.96 % | 1706 s |
+| Fosse | 135° | 7622 → 6339° | 7997 → 7816 | 3316 → 3347 s | 5 of 28 → 20 of 36 | 99.96 % | 4750 s |
+| Potager | 150° | 1440° | 2906 → 2980 | 901 → 838 s | 20 of 22 → 21 of 23 | 99.83 % | 1407 s |
+| Map | | ×0.81 → ×0.59 of Zigzag | ×0.94 → ×0.86 | ×1.024 of Zigzag | 73 of 194 → 155 of 224 (69 %) | within 0.15 point of Zigzag | −3.9 to +0.7 % of Zigzag |
+
+Every plan valid, no geometric violation; contiguous share 0.92 on the map (0.89 before, Zigzag 0.83); computation ×1.49
+of Zigzag. Tracking bench (`ZamboniExecutionTest`, Potager and Jardin d'Eden at 30 and 50 %): largest deviation 0.064 to
+0.111 m, no blockage, no pivot in the middle of a pass. A 16 × 11 m rectangle with passes at 30°: 5 of 63 → 33 of 63
+U-turns without pivot (`CoveragePlannerTest`); the remaining pivots lie on the long sides, staggered by 0.43 m per row.
+A user's lawn with a long slanted side: 25 of 68 → 52 of 71 on its main zone (pivoted 7,803° → 3,559°, coverage
+99.99 → 99.85 %, mission −1.0 %), 35 of 55 → 38 of 47 on another (coverage 99.94 → 99.92 %).
 
 First targets of the design note and what was measured instead:
 

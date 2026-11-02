@@ -10,15 +10,15 @@ import fr.luba.poc.obstacles.LocalObstacle
 import fr.luba.poc.obstacles.RobotEnvelope
 import fr.luba.poc.protocol.CollisionLatch
 import fr.luba.poc.protocol.OffMapLatch
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 import org.locationtech.jts.geom.Coordinate
 import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.prep.PreparedGeometryFactory
 import org.locationtech.jts.operation.distance.DistanceOp
 import org.locationtech.jts.operation.union.UnaryUnionOp
-import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
 
 /** What a contact during a route was, for the response ([EdgeContact.classify]). */
 enum class EdgeContactKind(val code: String) {

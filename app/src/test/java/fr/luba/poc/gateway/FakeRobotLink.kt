@@ -8,8 +8,8 @@ import fr.luba.poc.proto.MctrlSysProto.SysDevErrCode
 import fr.luba.poc.proto.MctrlSysProto.report_info_data
 import fr.luba.poc.proto.MctrlSysProto.rpt_connect_status
 import fr.luba.poc.proto.MctrlSysProto.rpt_dev_location
-import fr.luba.poc.proto.MctrlSysProto.rpt_rtk
 import fr.luba.poc.proto.MctrlSysProto.rpt_dev_status
+import fr.luba.poc.proto.MctrlSysProto.rpt_rtk
 import fr.luba.poc.proto.MctrlSysProto.rpt_work
 import fr.luba.poc.protocol.Blufi
 import java.util.Random
