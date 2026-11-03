@@ -2,6 +2,7 @@ package fr.luba.poc.auth
 
 import fr.luba.poc.i18n.tr
 import fr.luba.poc.map.StationPresence
+import fr.luba.poc.protocol.ModelSupport
 import fr.luba.poc.proto.DevNetProto.DrvUpgradeReport
 import org.json.JSONObject
 
@@ -246,6 +247,16 @@ object FirmwareUpdatePolicy {
         check.upgrading -> tr("An update is already in progress", "Une mise à jour est déjà en cours")
         !check.upgradeable || check.latest.isNullOrBlank() -> tr("No update available", "Aucune mise à jour disponible")
         details.sysStatus in BUSY -> tr("Robot busy (${RobotStates.label(details.sysStatus, details.chargeState)}): wait for the task to finish", "Robot occupé (${RobotStates.label(details.sysStatus, details.chargeState)}) : attendre la fin de la tâche")
+        else -> null
+    }
+
+    /**
+     * Reason why no update is offered at all, null when it may be: updates turned off by the user ([offersEnabled]), or a
+     * read-only model ([ModelSupport]) whose firmware is updated from the Mammotion app only.
+     */
+    fun offerRefusal(offersEnabled: Boolean, robotName: String?): String? = when {
+        !offersEnabled -> tr("Not offered: firmware updates are turned off", "Non proposée : mises à jour du firmware désactivées")
+        robotName != null && ModelSupport.refusal(robotName) != null -> tr("Not offered: read-only model, update its firmware from the Mammotion app", "Non proposée : modèle en lecture seule, mettre à jour son firmware depuis l’app Mammotion")
         else -> null
     }
 }

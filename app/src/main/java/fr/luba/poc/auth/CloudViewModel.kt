@@ -46,7 +46,9 @@ data class CloudUi(val accountSaved:Boolean=false,val accountEmail:String="",val
     val details:RobotDetails=RobotDetails(),val workRecords:List<WorkRecord> = emptyList(),val firmwareCheck:FirmwareCheck?=null,val accountReadAt:Long?=null,val accountReadErrors:List<String> = emptyList(),
     val camera:CameraCloudUi=CameraCloudUi(),
     /** Native return to base requested through the account (without BLE) and firmware update started from the app. */
-    val nativeReturn:CloudReturnUi=CloudReturnUi(),val firmwareUpdate:FirmwareUpdateUi=FirmwareUpdateUi())
+    val nativeReturn:CloudReturnUi=CloudReturnUi(),val firmwareUpdate:FirmwareUpdateUi=FirmwareUpdateUi(),
+    /** Firmware updates offered (setting kept across sessions): off, the available version is shown without a start. */
+    val firmwareOffers:Boolean=true)
 /** Failure message meant for the user (displayed as is). */
 class CloudActionException(message:String):Exception(message)
 /**
@@ -66,12 +68,19 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
     private val cache=MapCache(app)
     private val preferences=app.getSharedPreferences("mammotion_map_selection",Context.MODE_PRIVATE)
     private val restoredSession=!localOnly() && api.connected()
-    private val mutable=MutableStateFlow(CloudUi(accountSaved=restoredAccount!=null,accountEmail=restoredAccount?.email.orEmpty(),lastKnown=if(localOnly()) null else preferences.getString("robot",null)?.let(positionStore::read),connected=restoredSession,map=if(restoredSession) preferences.getString("robot",null)?.let{cache.read(it)} ?: RobotMap() else RobotMap(),status=when { localOnly() -> AccountMode.message; restoredSession -> tr("Secure session kept · refresh the robots", "Session sécurisée conservée · actualiser les robots"); else -> tr("Account not connected", "Compte non connecté") }))
+    // Kept apart from the account preferences, cleared at sign-out: the choice holds for every session.
+    private val firmwarePreferences=app.getSharedPreferences("firmware_offers",Context.MODE_PRIVATE)
+    private fun firmwareOffers()=firmwarePreferences.getBoolean(FIRMWARE_OFFER_KEY,true)
+    private val mutable=MutableStateFlow(CloudUi(firmwareOffers=firmwareOffers(),accountSaved=restoredAccount!=null,accountEmail=restoredAccount?.email.orEmpty(),lastKnown=if(localOnly()) null else preferences.getString("robot",null)?.let(positionStore::read),connected=restoredSession,map=if(restoredSession) preferences.getString("robot",null)?.let{cache.read(it)} ?: RobotMap() else RobotMap(),status=when { localOnly() -> AccountMode.message; restoredSession -> tr("Secure session kept · refresh the robots", "Session sécurisée conservée · actualiser les robots"); else -> tr("Account not connected", "Compte non connecté") }))
     val state=mutable.asStateFlow()
     private val handler=Handler(Looper.getMainLooper())
     private val log=EventLog(app, "cloud") { message -> handler.post { mutable.value=mutable.value.copy(status=message) } }
     private var job:Job?=null
-    init { aliyun.onStep={ step -> event("aliyun_step",tr("Aliyun cloud request ${step.endpoint}", "Requête cloud Aliyun ${step.endpoint}"),step.fields) } }
+    init {
+        aliyun.onStep={ step -> event("aliyun_step",tr("Aliyun cloud request ${step.endpoint}", "Requête cloud Aliyun ${step.endpoint}"),step.fields) }
+        // 429 of the Aliyun gateway: the command waits for the end of the pause, said in the status.
+        aliyun.onRateLimited={ pauseMs -> status(AliyunRateLimitedException(pauseMs).message.orEmpty()); event("aliyun_rate_limited",tr("Aliyun cloud: too many requests", "Cloud Aliyun : trop de requêtes"),mapOf("pauseMs" to pauseMs)) }
+    }
     private fun status(s:String){handler.post { if(log.healthy) log.append("cloud_status",s) }; mutable.value=mutable.value.copy(status=s,events=(mutable.value.events+s).takeLast(100))}
     private fun work(action:suspend ()->Unit) {
         if(localOnly()) { status(AccountMode.message); return }
@@ -79,7 +88,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         // A tracking (return, update) already holds the account MQTT connection and relays the state.
         if(following())return
         job=viewModelScope.launch {mutable.value=mutable.value.copy(busy=true)
-            try {withContext(Dispatchers.IO){action()}} catch(e:CancellationException){throw e} catch(e:Exception){status(tr("Cloud failure: ", "Échec cloud : ")+when(e){is MqttRefusedException -> "MQTT code ${e.reasonCode}"; is UnknownHostException,is ConnectException,is SocketTimeoutException,is NoRouteToHostException -> tr("network unavailable (${e.javaClass.simpleName})", "réseau indisponible (${e.javaClass.simpleName})"); else -> e.message?.takeIf { it.startsWith("Mammotion") || it.startsWith("Aliyun") || it in listOf(tr("No session", "Session absente"),tr("Sign in to your account", "Connectez votre compte"),tr("HTTPS Mammotion domain required", "Domaine Mammotion HTTPS requis"),tr("Mammotion TLS broker required", "Broker TLS Mammotion requis"),tr("MQTT disconnected", "MQTT déconnecté"),tr("Cloud queue full", "File cloud saturée"),tr("Sign in to your Mammotion account (Me tab)", "Connectez votre compte Mammotion (onglet Moi)")) } ?: e.javaClass.simpleName})}
+            try {withContext(Dispatchers.IO){action()}} catch(e:CancellationException){throw e} catch(e:Exception){status(tr("Cloud failure: ", "Échec cloud : ")+when(e){is AliyunRateLimitedException -> e.message; is MqttRefusedException -> "MQTT code ${e.reasonCode}"; is UnknownHostException,is ConnectException,is SocketTimeoutException,is NoRouteToHostException -> tr("network unavailable (${e.javaClass.simpleName})", "réseau indisponible (${e.javaClass.simpleName})"); else -> e.message?.takeIf { it.startsWith("Mammotion") || it.startsWith("Aliyun") || it in listOf(tr("No session", "Session absente"),tr("Sign in to your account", "Connectez votre compte"),tr("HTTPS Mammotion domain required", "Domaine Mammotion HTTPS requis"),tr("Mammotion TLS broker required", "Broker TLS Mammotion requis"),tr("MQTT disconnected", "MQTT déconnecté"),tr("Cloud queue full", "File cloud saturée"),tr("Sign in to your Mammotion account (Me tab)", "Connectez votre compte Mammotion (onglet Moi)")) } ?: e.javaClass.simpleName})}
             finally {mutable.value=mutable.value.copy(busy=false,connected=api.connected())}
         }
     }
@@ -204,7 +213,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
             CloudOwnedDevices.fields(owned,missing))
         return missing
     }
-    fun logout(){job?.cancel(); api.logout(); aliyun.clear(); preferences.edit { clear() }; val saved=accountStore.read(); mutable.value=CloudUi(accountSaved=saved!=null,accountEmail=saved?.email.orEmpty()); status(tr("Session deleted", "Session supprimée"))}
+    fun logout(){job?.cancel(); api.logout(); aliyun.clear(); preferences.edit { clear() }; val saved=accountStore.read(); mutable.value=CloudUi(firmwareOffers=firmwareOffers(),accountSaved=saved!=null,accountEmail=saved?.email.orEmpty()); status(tr("Session deleted", "Session supprimée"))}
     /**
      * Entering local mode: camera stopped and session deleted (the saved credentials are kept for a later return to
      * the account). Refused while a native return or a firmware update is followed: false.
@@ -241,7 +250,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         mutable.value=mutable.value.copy(accountReadErrors=errors,accountReadAt=Clock.now())
         read(robot,false)
     }
-    private fun failure(e:Throwable)=when(e){is CloudResponseException -> "code ${e.code}"+(if(e.endpoint.isEmpty()) "" else " (${e.endpoint})"); is MqttRefusedException -> "MQTT code ${e.reasonCode}"; is CloudActionException -> e.message.orEmpty(); else -> e.message?.takeIf { it.startsWith("Mammotion") || it.startsWith("Aliyun") || it.startsWith("MQTT") || it.startsWith("Broker") } ?: e.javaClass.simpleName}
+    private fun failure(e:Throwable)=when(e){is CloudResponseException -> "code ${e.code}"+(if(e.endpoint.isEmpty()) "" else " (${e.endpoint})"); is MqttRefusedException -> "MQTT code ${e.reasonCode}"; is CloudActionException,is AliyunRateLimitedException -> e.message.orEmpty(); else -> e.message?.takeIf { it.startsWith("Mammotion") || it.startsWith("Aliyun") || it.startsWith("MQTT") || it.startsWith("Broker") } ?: e.javaClass.simpleName}
     private suspend fun read(robot:CloudRobot,readMap:Boolean) {
         preferences.edit { putString("robot",robot.id) }
         val sameRobot=mutable.value.selected?.id==robot.id
@@ -254,17 +263,17 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
             val commands=commandsFor(robot); val transfer=MapTransfer(3, cache.read(robot.id)?.station, requestTimeoutMs=10_000, frameTimeoutMs=8_000, maxAttempts=3)
             var completedAt: Long? = null
             if(readMap) mutable.value=mutable.value.copy(map=RobotMap(source=tr("Cloud read of ${robot.name}…", "Lecture cloud de ${robot.name}…")))
-            fun send(bytes:ByteArray){invoke(robot,bytes,navReceiver=commands.navReceiver)}
+            suspend fun send(bytes:ByteArray){invoke(robot,bytes,navReceiver=commands.navReceiver)}
             send(commands.sync(syncType=3)); send(commands.reports(false,account=true)); if(readMap)send(commands.mapHashes())
             requestedAt=Clock.now()
             fun notices() { transfer.notices().forEach { n -> handler.post { if(log.healthy) log.append(n.kind,n.detail,n.fields) } } }
             withTimeout(if(readMap) CLOUD_MAP_TIMEOUT_MS else 15000L) {
-                var nextKeep=Clock.now()+5000
+                val keepAliveMs=keepAliveMs(robot); var nextKeep=Clock.now()+keepAliveMs
                 while(true) {
                     // Map reading: 1 s steps so that an element that stops answering is asked again (MapTransfer.tick).
                     val event=withTimeoutOrNull(if(readMap) 1000L else 5000L){link.events.receive()}
                     if(readMap && completedAt==null) {
-                        transfer.tick(commands).forEach(::send); notices()
+                        transfer.tick(commands).forEach { send(it) }; notices()
                         if(transfer.finished && !transfer.snapshot().complete) {
                             val map=transfer.snapshot().copy(source="Cloud ${robot.name} · ${transfer.snapshot().source}")
                             mutable.value=mutable.value.copy(map=map)
@@ -275,7 +284,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
                     }
                     if(event==null){
                         if(completedAt?.let { Clock.now()-it >= 10000 } == true) break
-                        if(Clock.now()>=nextKeep){send(commands.sync(syncType=3)); send(commands.reports(true,account=true)); nextKeep=Clock.now()+5000}
+                        if(Clock.now()>=nextKeep){send(commands.sync(syncType=3)); send(commands.reports(true,account=true)); nextKeep=Clock.now()+keepAliveMs}
                         continue
                     }
                     val bytes=(event as? CloudEvent.Proto)?.bytes ?: continue
@@ -292,7 +301,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
                         }
                         continue
                     }
-                    val replies=transfer.accept(message,commands); replies.forEach(::send); notices()
+                    val replies=transfer.accept(message,commands); replies.forEach { send(it) }; notices()
                     if(replies.isEmpty() && completedAt==null) continue
                     val map=transfer.snapshot().copy(source="Cloud ${robot.name} · ${transfer.snapshot().source}")
                     mutable.value=mutable.value.copy(map=map)
@@ -300,17 +309,21 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
                     if(map.complete){cache.save(robot.id,map); preferences.edit { putString("robot",robot.id) }; status(if(map.station?.entryHeadingDegrees != null) tr("Cloud map and base received", "Carte et base cloud reçues") else tr("Map received · base axis waiting for the robot to charge", "Carte reçue · axe de base en attente du robot en recharge")); if(completedAt==null) completedAt=Clock.now(); if(map.station?.entryHeadingDegrees != null || completedAt?.let { Clock.now()-it >= 10000 } == true) break}
                 }
             }
-        } catch(e:TimeoutCancellationException) {status(if(readMap) tr("Cloud map incomplete: ${CLOUD_MAP_TIMEOUT_MS / 1000} s timeout, planning disabled", "Carte cloud incomplète : timeout ${CLOUD_MAP_TIMEOUT_MS / 1000} s, calcul désactivé") else when {
+        } catch(e:TimeoutCancellationException) {val paused=if(robot.cloud==CloudKind.ALIYUN) (aliyun.pauseMs()+999)/1000 else 0
+            status(if(paused>0) tr("Aliyun cloud: too many requests, read again in $paused s", "Cloud Aliyun : trop de requêtes, relire dans $paused s") else if(readMap) tr("Cloud map incomplete: ${CLOUD_MAP_TIMEOUT_MS / 1000} s timeout, planning disabled", "Carte cloud incomplète : timeout ${CLOUD_MAP_TIMEOUT_MS / 1000} s, calcul désactivé") else when {
             deviceSince(absorber.telemetry.value,requestedAt) -> tr("API battery received · position not received within 15 s, last position kept", "Batterie API reçue · position non reçue en 15 s, dernière position conservée")
             positionSince(absorber.telemetry.value,requestedAt) -> tr("API position received · battery not received within 15 s", "Position API reçue · batterie non reçue en 15 s")
             else -> tr("API position not received within 15 s · last position kept", "Position API non reçue en 15 s · dernière position conservée")
         })}
         finally {link.close()}
     }
+    /** Keep-alive of a reading: every 15 s on the Aliyun cloud, whose gateway limits the pace ([AliyunRateLimit]). */
+    private fun keepAliveMs(robot:CloudRobot)=if(robot.cloud==CloudKind.ALIYUN) 15_000L else 5_000L
     private fun positionSince(t:Telemetry,at:Long)=(t.lastPositionAt ?: 0)>=at && t.x?.isFinite()==true && t.y?.isFinite()==true
     private fun deviceSince(t:Telemetry,at:Long)=(t.lastDeviceAt ?: 0)>=at
     private companion object {
         const val CAMERA_LIST_TIMEOUT_MS=25_000L
+        const val FIRMWARE_OFFER_KEY="offer"
         /** Bound of a cloud map reading (each element has its own retries, MapTransfer). */
         const val CLOUD_MAP_TIMEOUT_MS=240_000L
         /** The cloud waits for the robot's answer (50504 if it does not answer): a bit more than the HTTP read timeout. */
@@ -322,7 +335,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         override fun close(){events.close(); disconnect()}
     }
     /** Protobuf command to [robot] through its cloud, behind the same [CloudReadOnly] barrier. */
-    private fun invoke(robot:CloudRobot,bytes:ByteArray,nativeReturn:Boolean=false,navReceiver:MsgDevice=MsgDevice.DEV_NAVIGATION) {
+    private suspend fun invoke(robot:CloudRobot,bytes:ByteArray,nativeReturn:Boolean=false,navReceiver:MsgDevice=MsgDevice.DEV_NAVIGATION) {
         if(robot.cloud==CloudKind.ALIYUN) aliyun.invoke(bytes,robot.id,nativeReturn,navReceiver) else api.invoke(bytes,robot.name,robot.id,nativeReturn,navReceiver)
     }
     private fun connectMqtt(robot:CloudRobot,properties:Boolean=false):MqttLink = mqttConnector?.invoke(robot,properties)
@@ -431,7 +444,7 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
     }
     private suspend fun followReturn(robot:CloudRobot) {
         val commands=commandsFor(robot)
-        fun send(bytes:ByteArray,native:Boolean=false){invoke(robot,bytes,native,commands.navReceiver)}
+        suspend fun send(bytes:ByteArray,native:Boolean=false){invoke(robot,bytes,native,commands.navReceiver)}
         val absorber=Absorber(robot)
         var reconnects=0
         while(true) {
@@ -505,8 +518,8 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
         if(localOnly()) { setFirmware(FirmwareUpdateUi(status=tr("Update not started: ${AccountMode.message}", "Mise à jour non lancée : ${AccountMode.message}"))); return }
         val robot=mutable.value.selected ?: return
         val check=mutable.value.firmwareCheck
-        // Read-only mode: the firmware of a model that is not validated is updated from the Mammotion app only.
-        ModelSupport.refusal(robot.name)?.let { setFirmware(FirmwareUpdateUi(status=tr("Update not started: $it", "Mise à jour non lancée : $it"))); return }
+        // Updates turned off by the user, or a model that is not validated (updated from the Mammotion app only).
+        FirmwareUpdatePolicy.offerRefusal(firmwareOffers(),robot.name)?.let { setFirmware(FirmwareUpdateUi(status=tr("Update not started: $it", "Mise à jour non lancée : $it"))); return }
         FirmwareUpdatePolicy.refusal(check,mutable.value.details)?.let { setFirmware(FirmwareUpdateUi(status=tr("Update not started: $it", "Mise à jour non lancée : $it"))); return }
         // FirmwareUpdatePolicy.refusal() has accepted the check, so it carries a latest version; checked again here.
         val target=check?.latest ?: return setFirmware(FirmwareUpdateUi(status=tr("Update not started: no version offered", "Mise à jour non lancée : aucune version proposée")))
@@ -527,6 +540,12 @@ class CloudViewModel internal constructor(app:Application,private val api:Mammot
                 event("firmware_update_error",tr("Firmware update: ${failure(e)}", "Mise à jour firmware : ${failure(e)}"),mapOf("sent" to sent))
             } finally { mutable.value=mutable.value.copy(connected=api.connected()) }
         }
+    }
+    /** Offers firmware updates or not, for every robot and session (DumbyLuba#3: a firmware that needs the RTK base updated too). */
+    fun setFirmwareOffers(offer:Boolean) {
+        firmwarePreferences.edit { putBoolean(FIRMWARE_OFFER_KEY,offer) }
+        mutable.value=mutable.value.copy(firmwareOffers=offer)
+        event("firmware_offers",if(offer) tr("Firmware updates offered", "Mises à jour du firmware proposées") else tr("Firmware updates no longer offered", "Mises à jour du firmware plus proposées"),mapOf("offer" to offer))
     }
     /** Follows an update already in progress (started from the Mammotion app or before an app restart). */
     fun followFirmwareUpdate() {

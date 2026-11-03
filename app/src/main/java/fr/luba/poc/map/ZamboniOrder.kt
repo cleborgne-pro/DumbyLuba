@@ -1,6 +1,24 @@
 package fr.luba.poc.map
 
+import fr.luba.poc.i18n.tr
 import kotlin.math.min
+
+/**
+ * Blocks of a zone driven in the Zamboni order ([CoverageMode.ZAMBONI]): uneven borders and no-go zones cut the sweep of a
+ * zone into blocks (cells); a block of fewer than [minPasses] passes keeps the zigzag order. Smaller blocks let the
+ * Zamboni order follow the uneven borders, each block still kept only where it costs no more than its zigzag order.
+ * Persisted by name.
+ */
+enum class ZamboniBlocks(private val en: String, private val fr: String) {
+    LARGE("Large", "Grands"), MEDIUM("Medium too", "Moyens aussi"), ALL("All", "Tous");
+    /** Display label in the interface language. */
+    val label: String get() = tr(en, fr)
+    /** Fewest passes of a block ordered in Zamboni, for rolling moves of at least [m] ranks ([TurnOrder.step]). */
+    fun minPasses(m: Int): Int = when (this) { LARGE -> 2 * m + 2; MEDIUM -> m + 3; ALL -> m + 1 }
+}
+
+/** Zamboni settings of one plan: oblique U-turns along slanted borders ([TurnOptimizer.OBLIQUE_UNSWEPT_M]), blocks ordered. */
+data class ZamboniOptions(val obliqueTurns: Boolean = true, val blocks: ZamboniBlocks = ZamboniBlocks.LARGE)
 
 /**
  * Zamboni order of the passes of one regular cell ([CoverageMode.ZAMBONI]): the passes, ranks `0 .. n-1` across the
@@ -39,17 +57,18 @@ object ZamboniOrder {
 
     /**
      * Passes of one cell in front-advancing order, directions alternating; null when the cell is not a regular ladder
-     * ([TurnOrder.ladder]), has fewer than 2 m + 2 passes, needs a window larger than [MAX_WINDOW] (spacing too small for
+     * ([TurnOrder.ladder]), has fewer passes than [blocks] allows ([ZamboniBlocks.minPasses]: 2 m + 2 by default), needs a window larger than [MAX_WINDOW] (spacing too small for
      * the rolling moves to fit in it), or no complete sequence exists. [transition]: cost of the U-turn from the pass
      * ([aFrom] → [aEnd]) to the pass ([bStart] → [bTo]), null when it cannot be driven or is not verified; such a move is
      * then a break costing [breakCost] (infinite: never). [checkpoint] is called at every layer (cancellation).
      */
     fun <T> order(group: List<T>, spacing: Double, radius: Double, path: (T) -> List<Point>, with: (T, List<Point>) -> T,
                   transition: (aFrom: Point, aEnd: Point, bStart: Point, bTo: Point) -> Double?,
-                  breakCost: Double = Double.POSITIVE_INFINITY, checkpoint: () -> Unit = {}): List<T>? {
+                  breakCost: Double = Double.POSITIVE_INFINITY, checkpoint: () -> Unit = {},
+                  blocks: ZamboniBlocks = ZamboniBlocks.LARGE): List<T>? {
         val base = TurnOrder.ladder(group.map(path), spacing) ?: return null
         val start = System.nanoTime()
-        val found = search(base, spacing, radius, transition, breakCost, checkpoint)
+        val found = search(base, spacing, radius, transition, breakCost, checkpoint, blocks)
         observer?.invoke(base.size, System.nanoTime() - start)
         if (found == null) return null
         return found.ranks.mapIndexed { t, q ->
@@ -60,11 +79,11 @@ object ZamboniOrder {
     /** Cheapest complete order of the ladder [base] (every pass turned the way of the first one), both first directions tried. */
     internal fun search(base: List<List<Point>>, spacing: Double, radius: Double,
                         transition: (Point, Point, Point, Point) -> Double?, breakCost: Double = Double.POSITIVE_INFINITY,
-                        checkpoint: () -> Unit = {}): Ranks? {
+                        checkpoint: () -> Unit = {}, blocks: ZamboniBlocks = ZamboniBlocks.LARGE): Ranks? {
         val n = base.size
         val m = TurnOrder.step(spacing, radius)
         val w = window(spacing, radius)
-        if (m < 2 || w < m + STEPS_ABOVE_M || n < 2 * m + 2) return null
+        if (m < 2 || w < m + STEPS_ABOVE_M || n < blocks.minPasses(m)) return null
         val moves = IntArray(STEPS_ABOVE_M + 1) { m + it }.let { up -> up + up.map { -it } + intArrayOf(1, -1) }
         // Cost of one move by (from rank, its direction, to rank): its U-turn, else a break; NaN: neither.
         val broken = if (breakCost.isFinite()) breakCost else Double.NaN

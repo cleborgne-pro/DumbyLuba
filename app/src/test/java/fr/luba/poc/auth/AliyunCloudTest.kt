@@ -15,6 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -33,10 +34,16 @@ class AliyunCloudTest {
     private val store = FakeMammotionServer.store(context, "aliyun_session")
     private val steps = CopyOnWriteArrayList<AliyunCloud.Step>()
 
+    private val pauses = CopyOnWriteArrayList<Long>()
+
     private fun aliyun(savedCode: String? = "AUTH-SAVED"): AliyunCloud {
         store.save(AliyunFakeCloud.session(savedCode).toString())
-        return AliyunCloud(MammotionCloud(store, server.open), { "seed-DEMO" }, server.open).also { it.onStep = { s -> steps += s } }
+        // Short spacing and pauses: the rules are those of AliyunRateLimitTest, here only their use.
+        val rateLimit = AliyunRateLimit(spacingMs = 1, firstBackoffMs = 20, maxBackoffMs = 40)
+        return AliyunCloud(MammotionCloud(store, server.open), { "seed-DEMO" }, server.open, rateLimit)
+            .also { it.onStep = { s -> steps += s }; it.onRateLimited = { ms -> pauses += ms } }
     }
+    private fun invokes() = server.paths().count { it == "/thing/service/invoke" }
     private fun body(path: String, index: Int = 0) = JSONObject(server.requests.filter { it.path == path }[index].body)
     private fun form(r: FakeMammotionServer.Request) = r.body.split('&').associate { it.substringBefore('=') to URLDecoder.decode(it.substringAfter('='), "UTF-8") }
 
@@ -109,17 +116,37 @@ class AliyunCloudTest {
 
     @Test fun `commands keep the read-only barrier and a refused token signs in again once`() {
         val cloud = aliyun()
-        try { cloud.invoke(Commands().returnToDock(), "iot-DEMO-1"); fail("native return sent without the explicit choice") } catch (_: IllegalArgumentException) { }
+        try { runBlocking { cloud.invoke(Commands().returnToDock(), "iot-DEMO-1") }; fail("native return sent without the explicit choice") } catch (_: IllegalArgumentException) { }
         assertFalse(server.paths().contains("/thing/service/invoke"))
         server.json("/thing/service/invoke", """{"code":460,"message":"iotToken expired"}""", """{"code":200,"data":{}}""")
         server.json("/account/createSessionByAuthCode", AliyunFakeCloud.sessionReply("IOT-TOKEN-1"), AliyunFakeCloud.sessionReply("IOT-TOKEN-2"))
         val sync = Commands().sync(syncType = 3)
-        cloud.invoke(sync, "iot-DEMO-1")
+        runBlocking { cloud.invoke(sync, "iot-DEMO-1") }
         val invokes = server.requests.filter { it.path == "/thing/service/invoke" }.map { JSONObject(it.body) }
         assertEquals(listOf("IOT-TOKEN-1", "IOT-TOKEN-2"), invokes.map { it.getJSONObject("request").getString("iotToken") })
         val params = invokes.last().getJSONObject("params")
         assertEquals("device_protobuf_sync_service", params.getString("identifier")); assertEquals("iot-DEMO-1", params.getString("iotId"))
         assertTrue(Base64.getDecoder().decode(params.getJSONObject("args").getString("content")).contentEquals(sync))
+    }
+
+    @Test fun `a 429 of the gateway pauses the command, then sends it again`() {
+        val cloud = aliyun()
+        server.on("/thing/service/invoke", { _ -> FakeMammotionServer.Reply(429, ByteArray(0)) },
+            { _ -> FakeMammotionServer.Reply(200, """{"code":200,"data":{}}""".toByteArray()) })
+        runBlocking { cloud.invoke(Commands().sync(syncType = 3), "iot-DEMO-1") }
+        assertEquals(2, invokes())
+        assertEquals(listOf(20L), pauses)
+        assertEquals(listOf(429, 200), steps.filter { it.endpoint == "/thing/service/invoke" }.map { it.httpCode })
+    }
+
+    @Test fun `a gateway that keeps answering 429 gives up after two retries`() {
+        val cloud = aliyun()
+        server.status("/thing/service/invoke", 429)
+        try { runBlocking { cloud.invoke(Commands().sync(syncType = 3), "iot-DEMO-1") }; fail("command sent despite the 429") }
+        catch (e: AliyunRateLimitedException) { assertTrue(e.message, e.message.orEmpty().startsWith("Cloud Aliyun : trop de requêtes")) }
+        assertEquals(1 + AliyunCloud.RATE_LIMIT_RETRIES, invokes())
+        assertEquals(listOf(20L, 40L), pauses)
+        assertTrue("pause armed after the last 429", cloud.pauseMs() > 0)
     }
 
     @Test fun `an IoT token close to expiry is refreshed without a new sign-in`() {

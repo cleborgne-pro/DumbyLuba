@@ -75,7 +75,7 @@ Groups of the account page, filled by the read (exact titles):
 - **Maintenance**: **Distance traveled** (km), **Working time** (h), **Battery cycles**, **Blades** (hours used and
   the alert threshold set in the Mammotion app, with a wear bar, red once reached).
 - **Software**: **Firmware**, update state ("up to date", **Update available**, or "in progress"), release notes,
-  RTK base version and module versions (12 at most).
+  RTK base version and module versions (12 at most), and the **Offer firmware updates** switch (see below).
 - **Latest mowings**: the 10 most recent account work reports (date, type such as "Single task", "Schedule",
   "On-demand mowing", "Resume", result, area, progress, duration). They are the Mammotion app's mowings, separate
   from the app's own [mowing history](mowing-history.md).
@@ -107,6 +107,12 @@ Only two actions, each behind an explicit confirmation:
   **Stop the Mammotion return** appears while the return is requested or running and is always accepted; if the
   cloud refuses it, the message points to the Mammotion app or the robot's STOP button. See also
   [charging station through the account](station-and-moves.md#charging-station-through-the-account-without-bluetooth).
+- **No firmware update offered**: **Offer firmware updates** off (Software, on by default, kept for every robot and
+  after sign-out), the available version stays shown in grey with "Not offered: firmware updates are turned off",
+  without **Update to X**, and no update can be started; following an update started elsewhere stays possible. Meant
+  for a firmware that must not be installed, for instance one that needs the RTK base updated too (DumbyLuba#3). A
+  read-only model is never offered one either: "Not offered: read-only model, update its firmware from the Mammotion
+  app".
 - **Firmware update**: Me → Mammotion account → **Software** → **Update to X**. The **Update the robot?** dialog
   shows the installed and new versions and the release notes; **Update** is enabled only after checking "The robot
   is stopped (ideally on its base), the battery is sufficient, and I will not use it during the update". Refused
@@ -175,7 +181,11 @@ device page of the Mammotion cloud is empty, and keeps the Aliyun session in mem
    RTK stations left out and logged anonymously). Pending shares are not accepted, nothing is bound or unbound.
 3. **Reading** (map, position, battery, details, native return): the same protobuf commands go through Aliyun's
    `thing/service/invoke`, behind the same `CloudReadOnly` barrier and navigation receiver (main controller on a
-   LUBA 1); an IoT token refused (460, 29003) signs in again once. The robot's answers arrive on the Aliyun MQTT
+   LUBA 1); an IoT token refused (460, 29003) signs in again once. Its API gateway answers HTTP 429 to the pace the
+   Mammotion cloud accepts (DumbyLuba#3), so the commands are sent one every 2 s at most and the reading keep-alive
+   every 15 s instead of 5 s; after a 429 nothing is sent for 60 s, doubled at each 429 in a row up to 240 s, as
+   PyMammotion, the status says "Aliyun cloud: too many requests, next try in N s" and the command is sent again (twice
+   at most). A reading that ends during the pause says "Aliyun cloud: too many requests, read again in N s". The robot's answers arrive on the Aliyun MQTT
    broker (`{productKey}.iot-as-mqtt.{region}.aliyuncs.com:8883`, TLS trusting only the Aliyun IoT and GlobalSign roots
    bundled by PyMammotion): the app connects with its identity, subscribes to its `app/down` topics and binds the
    account with the IoT token, then keeps the `device_protobuf_msg_event` events of the selected robot (older than
@@ -186,7 +196,8 @@ device page of the Mammotion cloud is empty, and keeps the Aliyun session in mem
    next attempt), "Aliyun HTTPS domain required" for an endpoint outside Aliyun.
 
 Diagnostics: `aliyun_step` (one line per request: path, domain, HTTP status, API code), `aliyun_devices` (number of
-devices and robots, product key prefixes, or the error) and `aliyun_bind` (bind code); never a token, a code, an
+devices and robots, product key prefixes, or the error), `aliyun_bind` (bind code) and `aliyun_rate_limited` (pause
+after a 429); never a token, a code, an
 identifier, a name or a serial number. The history, firmware and camera reads keep the Mammotion application API.
 Not verified yet on a real LUBA 1: the whole chain is checked against a simulated cloud only.
 

@@ -40,6 +40,7 @@ Passages without a known width never enlarge the physical domain. Their axis rem
 | `optimizeZoneOrder` | false | Allows permuting blocks of whole zones; the user order remains the default |
 | `orientation` | `AUTOMATIC` | Direction of the passes of Zigzag, Checkerboard and Zamboni: `AUTOMATIC` (cheapest per zone), `EACH_SESSION` (away from `PlanningRequest.orientationMemory`) or `MANUAL`; ignored by Optimized, Spiral and the surveys |
 | `manualAngleDeg` | 0 | Angle of `MANUAL`, degrees 0..179 (refused outside), counter-clockwise from the map's x axis; folded modulo 90 in Checkerboard |
+| `zamboniBlocks` | `LARGE` | Zamboni only: fewest passes of a cell ordered in Zamboni (`ZamboniBlocks.minPasses`): `LARGE` 2 m + 2, `MEDIUM` m + 3, `ALL` m + 1 (m = `TurnOrder.step`); a cell is still kept in its order only at no more runs and cost than its zigzag order |
 | `spiralDirection` | `FROM_EDGE` | Spiral only: `FROM_EDGE` (chains as built, inwards) or `FROM_CENTRE` (every chain driven outwards after its core, a zone without a safe order from the centre planned from the edge) |
 
 The domain beyond an admissible slope is forbidden. The cutting target is unchanged: the unreachable part appears in the residual. Missing terrain data is reported. The motion model is **forward, stop, short pivot**, plus the rolling U-turns of the Turn Optimizer (arcs of `TurnOptimizer.FOLLOW_RADIUS_M` = 0.35 m, 4° per vertex, checked like the passes) between passes at least 0.7 m apart, used by *Lawn friendly* (`turnStyle = LAWN`) and Zamboni; no coverage reversing is invented.

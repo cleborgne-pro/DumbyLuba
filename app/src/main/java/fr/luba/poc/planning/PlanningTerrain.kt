@@ -126,7 +126,9 @@ internal class PlanningTerrain(val request: PlanningRequest) {
                     .buffer(-(inset + rounding), 16).buffer(rounding, 16)
                     .difference(union(holes.map { polygon(it).buffer(noGoInset, 16) } +
                         request.obstacles.map { disc(it.center,it.radiusM/cos(Math.PI/64)) }))
-                zonesTarget.intersection(centers.buffer(config.cutWidthM / 2, 16))
+                // Narrow passages mowed by their own passes ([NarrowPassages]): part of the target as well.
+                val necks = NarrowPassages.target(zones.flatMap { NarrowPassages.necks(it.points, holes, obstacleDiscs, robot, config.outerOffsetM, config.spacingM) }, config.cutWidthM)
+                zonesTarget.intersection(centers.buffer(config.cutWidthM / 2, 16).let { c -> necks?.let(c::union) ?: c })
             }
         }
         // The target stays fixed, even if a slope makes part of it unreachable: mandatory residue.

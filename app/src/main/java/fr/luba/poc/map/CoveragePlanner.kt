@@ -89,6 +89,51 @@ object CoveragePlanner {
         if (geometry.numGeometries == 1 && geometry.getGeometryN(0) === geometry) listOf(geometry)
         else (0 until geometry.numGeometries).flatMap { parts(geometry.getGeometryN(it)) }
 
+    /**
+     * Recorded boundary: check of a rolling U that follows the border into the band of its loops
+     * ([TurnOptimizer.TurnContext.alongBorder]), the chassis at the set margin of the loops from the recorded zone and
+     * no-go zones, not from the physical area, which takes [RecordedBoundary.PHYSICAL_TOLERANCE_M] around them (a thin
+     * no-go zone even vanishes from it). The band is built at the first check: only the Zamboni oblique U-turns ask.
+     */
+    private fun alongBorder(physicalFree: JtsGeometry, area: JtsGeometry, holes: List<List<Point>>, outerOffsetM: Double,
+                            robot: RobotEnvelope): (List<Point>) -> Boolean {
+        val band by lazy {
+            holes.fold(physicalFree.intersection(area)) { band, hole -> band.difference(polygon(hole)) }.buffer(-outerOffsetM, 16)
+                .takeIf { !it.isEmpty }?.let { TrajectoryEnvelope(it, robot) }
+        }
+        return { path -> band?.let { it.pathCollision(path) == null } == true }
+    }
+
+    /**
+     * U-turn [plan] from the pass ending at [aFrom] into [run], checked as a whole: on the surface of the passes ([safe]),
+     * only its passes when it follows the border (the manoeuvre is checked in the band by the Turn Optimizer), and
+     * inside the chassis [envelope].
+     */
+    private fun joinsSafely(plan: TurnPlan, aFrom: Point, run: List<Point>, safe: (Point, Point) -> Boolean, envelope: TrajectoryEnvelope): Boolean {
+        val joined = listOf(aFrom) + plan.points + run.drop(1)
+        val onSurface = if (!plan.alongBorder) listOf(joined) else listOf(listOf(aFrom, plan.points.first()), listOf(plan.points.last()) + run.drop(1))
+        return onSurface.all { path -> path.zipWithNext().all { (a,b) -> a.distance(b) < 1e-9 || safe(a,b) } } && envelope.pathCollision(joined) == null
+    }
+
+    /**
+     * Every border inside the chassis [envelope], closing pivot included; on a recorded boundary ([recordedArea]) also
+     * inside the zone, out of the no-go zones and clear of the local obstacles.
+     */
+    private fun requireDrivableBorders(borders: List<List<Point>>, envelope: TrajectoryEnvelope, recordedArea: JtsGeometry?,
+                                       holes: List<List<Point>>, obstacles: List<ObstacleDisc>) {
+        if (recordedArea != null) borders.forEach { run ->
+            run.zipWithNext().forEach { (a,b) ->
+                val segment = factory.createLineString(arrayOf(Coordinate(a.x,a.y),Coordinate(b.x,b.y)))
+                require(recordedArea.covers(segment) && holes.none { polygon(it).intersects(segment) }) { tr("Border outside the allowed recorded passage", "Bordure hors du passage enregistré autorisé") }
+                require(obstacles.none { disc -> Geometry.distance(Point(disc.x,disc.y),a,b) < disc.radiusM }) { tr("Local obstacle on the border", "Obstacle local sur la bordure") }
+            }
+        }
+        borders.forEach { run ->
+            val firstHeading = Math.toDegrees(atan2(run[1].y-run[0].y, run[1].x-run[0].x))
+            envelope.requirePath(run, finalHeading = firstHeading)
+        }
+    }
+
     /** Historical outer loop offset (test reference); the interface offers more. */
     const val RECORDED_OUTER_OFFSET_M = 0.08
     const val MAX_OUTER_OFFSET_M = 1.0
@@ -118,8 +163,8 @@ object CoveragePlanner {
              checkpoint: () -> Unit = {},
              /** Spiral mode: chains driven from the edge inwards (as built) or from the centre outwards. */
              spiralDirection: SpiralDirection = SpiralDirection.FROM_EDGE,
-             /** Zamboni: oblique U-turns along the slanted borders ([TurnOptimizer.OBLIQUE_UNSWEPT_M]). */
-             obliqueTurns: Boolean = true): Preview {
+             /** Zamboni: oblique U-turns along the slanted borders, blocks ordered ([ZamboniOptions]). */
+             zamboniOptions: ZamboniOptions = ZamboniOptions()): Preview {
         val tour = mode == CoverageMode.TOUR
         val withBorders = mode.isSurvey || includeBorders
         val outerPasses = if (mode.isSurvey) 1 else borderPasses
@@ -258,23 +303,8 @@ object CoveragePlanner {
         }
         if (recordedBoundary) {
             // Loop start/end on a point where the entry and exit can pivot without collision.
-            fun anchor(path: List<Point>): List<Point> {
-                val vertices = path.dropLast(1)
-                val index = vertices.indexOfFirst { p -> envelope.turnCollision(p,0.0,180.0) == null && envelope.turnCollision(p,180.0,360.0) == null }
-                if (index >= 0) {
-                    val rotated = vertices.drop(index) + vertices.take(index)
-                    return rotated + rotated.first()
-                }
-                // A loop may be drivable without allowing a full turn while stopped.
-                // Tangent entry in the middle of the longest segment; the engine will check the real link.
-                val edge = vertices.indices.maxByOrNull { i -> vertices[i].distance(vertices[(i+1)%vertices.size]) }
-                    ?: error(tr("Empty border", "Bordure vide"))
-                val a = vertices[edge]; val b = vertices[(edge+1)%vertices.size]
-                val entry = Point((a.x+b.x)/2, (a.y+b.y)/2)
-                return listOf(entry) + vertices.drop(edge+1) + vertices.take(edge+1) + entry
-            }
-            outerRings.indices.forEach { outerRings[it] = anchor(outerRings[it]) }
-            noGoRings.indices.forEach { noGoRings[it] = anchor(noGoRings[it]) }
+            outerRings.indices.forEach { outerRings[it] = LoopAnchor.anchor(outerRings[it], envelope) }
+            noGoRings.indices.forEach { noGoRings[it] = LoopAnchor.anchor(noGoRings[it], envelope) }
         }
         val borders = outerRings + noGoRings
         val outer = outerRings.size; val inner = noGoRings.size
@@ -351,8 +381,9 @@ object CoveragePlanner {
         val turnContext = TurnOptimizer.TurnContext(spacing, speedMps.coerceIn(0.05, 1.0),
             drivable = { path -> valid(path) && envelope.pathCollision(path) == null },
             roomy = { path -> roomyEnvelope.pathCollision(path) == null }, robot = robot, cutWidthM = max(spacing, cutWidthM),
-            // Zamboni: oblique U-turns along the slanted borders ([TurnOptimizer.OBLIQUE_UNSWEPT_M]).
-            obliqueUnsweptM = if (mode == CoverageMode.ZAMBONI && obliqueTurns) TurnOptimizer.OBLIQUE_UNSWEPT_M else 0.0)
+            // Zamboni: oblique U-turns along the slanted borders ([TurnOptimizer.OBLIQUE_UNSWEPT_M]), following them in the band.
+            obliqueUnsweptM = if (mode == CoverageMode.ZAMBONI && zamboniOptions.obliqueTurns) TurnOptimizer.OBLIQUE_UNSWEPT_M else 0.0,
+            alongBorder = if (recordedBoundary) alongBorder(physicalFree, area, holes, outerOffsetM, robot) else null)
         // Zamboni: the Lawn friendly objective (duration plus wear) whatever the toggle says, without the one-in-two order.
         val zamboni = mode == CoverageMode.ZAMBONI
         val centreSpiral = mode == CoverageMode.SPIRAL && spiralDirection == SpiralDirection.FROM_CENTRE
@@ -361,27 +392,14 @@ object CoveragePlanner {
          * pass it leads to (safe surface, chassis envelope); null when none fits. */
         fun verifiedTurn(aFrom: Point, aEnd: Point, run: List<Point>): TurnPlan? =
             TurnOptimizer.candidates(aFrom, aEnd, run[0], run[1], turnContext)
-                .filter { it.possible }.sortedBy { it.score(style) }.firstOrNull { plan ->
-                    val joinedPath = listOf(aFrom) + plan.points + run.drop(1)
-                    joinedPath.zipWithNext().all { (a,b) -> a.distance(b) < 1e-9 || safe(a,b) } && envelope.pathCollision(joinedPath) == null
-                }
+                .filter { it.possible }.sortedBy { it.score(style) }.firstOrNull { plan -> joinsSafely(plan, aFrom, run, ::safe, envelope) }
         // Zamboni: the same U-turn is asked by the zigzag ranking, the order search and the final join, from orientations
         // evaluated in parallel (concurrent table; a double computation gives the same result).
         val turns = ConcurrentHashMap<Triple<Point, Point, List<Point>>, Optional<TurnPlan>>()
         fun sharedTurn(aFrom: Point, aEnd: Point, run: List<Point>): TurnPlan? =
             turns.getOrPut(Triple(aFrom, aEnd, run)) { Optional.ofNullable(verifiedTurn(aFrom, aEnd, run)) }.orElse(null)
         require((if (recordedBoundary) emptyList() else borders).all(::valid)) { tr("Unsafe border: increase the margin", "Bordure non sûre : augmenter la marge") }
-        if (recordedBoundary) borders.forEach { run ->
-            run.zipWithNext().forEach { (a,b) ->
-                val segment = factory.createLineString(arrayOf(Coordinate(a.x,a.y),Coordinate(b.x,b.y)))
-                require(area.covers(segment) && holes.none { polygon(it).intersects(segment) }) { tr("Border outside the allowed recorded passage", "Bordure hors du passage enregistré autorisé") }
-                require(obstacles.none { disc -> Geometry.distance(Point(disc.x,disc.y),a,b) < disc.radiusM }) { tr("Local obstacle on the border", "Obstacle local sur la bordure") }
-            }
-        }
-        borders.forEach { run ->
-            val firstHeading = Math.toDegrees(atan2(run[1].y-run[0].y, run[1].x-run[0].x))
-            envelope.requirePath(run, finalHeading = firstHeading)
-        }
+        requireDrivableBorders(borders, envelope, if (recordedBoundary) area else null, holes, obstacles)
         if (tour) {
             require(borders.isNotEmpty() && skippedBorderLoops == 0) { tr("Incomplete boundary: no safe loop for this zone", "Contour incomplet : aucun tour sûr pour cette zone") }
             return Preview(emptyList(), borders.sumOf { run -> run.zipWithNext().sumOf { (a,b) -> a.distance(b) } },
@@ -524,7 +542,7 @@ object CoveragePlanner {
             val mirrored = zamboniOrders[cellLines.reversed().map { it.path.reversed() }]
             if (mirrored != null) return mirrored.orElse(null)?.let { order -> order.reversed().map { cellLines[0].copy(path = it.reversed()) } }
             val order = ZamboniOrder.order(cellLines, spacing, TurnOptimizer.FOLLOW_RADIUS_M, { it.path }, { l, p -> l.copy(path = p) },
-                { aFrom, aEnd, bStart, bTo -> sharedTurn(aFrom, aEnd, listOf(bStart, bTo))?.score(style) }, BREAK_COST, checkpoint)
+                { aFrom, aEnd, bStart, bTo -> sharedTurn(aFrom, aEnd, listOf(bStart, bTo))?.score(style) }, BREAK_COST, checkpoint, zamboniOptions.blocks)
             zamboniOrders[cellLines.map { it.path }] = Optional.ofNullable(order?.map { it.path })
             return order
         }
@@ -645,49 +663,8 @@ object CoveragePlanner {
             return try { built to route(lines, 0, applied = CoverageMode.SPIRAL, verified = built.chains.toHashSet()) }
                 catch (e: IllegalArgumentException) { null }
         }
-        fun List<Point>.distinctConsecutive() = filterIndexed { i,p -> i == 0 || p.distance(this[i-1]) > 1e-8 }
-        fun nearBase(preview: Preview): Preview {
-            // Production finishes whole blocks: an entry in the middle of a zigzag must not leave its first half for a later
-            // return.
-            if (continuous) return preview
-            // Spiral from the centre: its chains are entered at their centre end only, after their core; the planned order is
-            // kept rather than entered in the middle of a chain.
-            if (preview.outwardRuns.isNotEmpty()) return preview
-            val base = basePoint ?: return preview
-            data class Entry(val run: Int, val segment: Int, val point: Point, val distance: Double)
-            val entries = (preview.runs+preview.borders).flatMapIndexed { index, run ->
-                run.zipWithNext().mapIndexed { segment, (a,b) ->
-                    val dx=b.x-a.x; val dy=b.y-a.y
-                    val t=if (dx*dx+dy*dy < 1e-12) 0.0 else
-                        (((base.x-a.x)*dx+(base.y-a.y)*dy)/(dx*dx+dy*dy)).coerceIn(0.0,1.0)
-                    val p=Point(a.x+t*dx,a.y+t*dy)
-                    Entry(index,segment,p,p.distance(base))
-                }
-            }.sortedBy { it.distance }
-            for (entry in entries) {
-                if (entry.run >= preview.runs.size) {
-                    val index = entry.run-preview.runs.size
-                    val loop = preview.borders[index]
-                    val rotated = (listOf(entry.point)+loop.drop(entry.segment+1)+loop.drop(1).take(entry.segment)+entry.point).distinctConsecutive()
-                    val heading = Math.toDegrees(atan2(rotated[1].y-rotated[0].y,rotated[1].x-rotated[0].x))
-                    if (envelope.pathCollision(rotated,finalHeading=heading) != null) continue
-                    return preview.copy(borders=listOf(rotated)+preview.borders.filterIndexed { i,_ -> i != index },startWithBorders=true,
-                        borderKinds=listOf(preview.borderKinds[index])+preview.borderKinds.filterIndexed { i,_ -> i != index })
-                }
-                val run = preview.runs[entry.run]
-                val tail = (listOf(entry.point)+run.drop(entry.segment+1)).distinctConsecutive()
-                val head = (run.take(entry.segment+1)+entry.point).distinctConsecutive()
-                val first = if (tail.size >= 2) tail else run.reversed()
-                if (envelope.pathCollision(first) != null) continue
-                val remainder = if (tail.size >= 2 && head.size >= 2) listOf(head) else emptyList()
-                val cell=preview.runCellIds.getOrNull(entry.run)
-                val same=preview.runs.indices.filter { it!=entry.run && cell!=null && preview.runCellIds.getOrNull(it)==cell }
-                val other=preview.runs.indices.filter { it!=entry.run && it !in same }
-                return preview.copy(runs=listOf(first)+same.map { preview.runs[it] }+remainder+other.map { preview.runs[it] },
-                    runCellIds=if(cell==null) emptyList() else listOf(cell)+same.map { cell }+remainder.map { cell }+other.map { preview.runCellIds[it] })
-            }
-            return preview
-        }
+        // Production finishes whole blocks: an entry in the middle of a zigzag must not leave its first half for a later return.
+        fun nearBase(preview: Preview): Preview = if (continuous) preview else BaseEntry.nearBase(preview, basePoint, envelope)
         // Length + section penalty heuristic; not a guaranteed mathematical optimum.
         // Optimized mode without an evaluator: U-turns count, otherwise only length decides.
         // Lawn friendly: the wear of the U-turns weighs on the orientation too (longer passes, rolling U-turns).
@@ -798,6 +775,6 @@ object CoveragePlanner {
             } catch (_: IllegalArgumentException) { // no reoriented band fits: the zigzag is kept
             } catch (_: org.locationtech.jts.geom.TopologyException) { /* invalid geometry while reorienting: the zigzag is kept */ }
         }
-        return nearBase(plan)
+        return nearBase(if (!recordedBoundary || mode.isSurvey) plan else NarrowPassages.appendTo(plan, zone, holes, obstacles, robot, outerOffsetM, spacing, envelope))
     }
 }

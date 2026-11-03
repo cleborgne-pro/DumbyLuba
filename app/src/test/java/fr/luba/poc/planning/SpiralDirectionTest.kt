@@ -73,6 +73,15 @@ class SpiralDirectionTest {
                 assertTrue("$name: core before the chain ($core, chain at $index)", core.all { it < index })
                 if (name == "rectangle") assertTrue("$name: core mowed in zigzag", core.isNotEmpty())
             }
+            // The outer border loop after every chain from the centre (the zone starts at its centre and ends on its edge),
+            // first from the edge: the two routes start differently.
+            fun outerLoop(p: List<List<Point>>) = p.indices.filter { p[it].size > 3 && p[it].first().distance(p[it].last()) < 1e-6 }
+                .maxBy { p[it].zipWithNext().sumOf { (a, b) -> a.distance(b) } }
+            val edgePaths = edge.preview!!.cuttingPaths
+            assertTrue("$name: outer loop after the chains", chains.all { paths.indexOf(it.reversed()) < outerLoop(paths) })
+            assertEquals("$name: outer loop first from the edge", 0, outerLoop(edgePaths))
+            assertTrue("$name: starts inside from the centre", clearance(paths.first().first(), points, holes) >
+                clearance(edgePaths.first().first(), points, holes) + spacing)
             // Every part from its centre out: the chains inside a split (continuing a chain inwards) before that chain.
             val parents = centreDecision.result!!.parents
             if (name == "no-go zone") assertTrue("$name: split", parents.any { it != null })

@@ -116,6 +116,8 @@ internal class MowingTaskForm(saved: MowingTaskSettings) {
     var manualAngle by mutableIntStateOf(saved.manualAngleDeg)
     /** Spiral mode: from the edge or from the centre ([SpiralDirection]). */
     var spiralDirection by mutableStateOf(saved.spiralDirection)
+    /** Zamboni mode: blocks ordered in Zamboni ([ZamboniBlocks]). */
+    var zamboniBlocks by mutableStateOf(saved.zamboniBlocks)
 
     // Not saved across a configuration change (as before).
     var margin by mutableFloatStateOf(0.6f)
@@ -130,7 +132,7 @@ internal class MowingTaskForm(saved: MowingTaskSettings) {
         spacingM = spacing, borderPasses = borderPasses, noGoPasses = noGoPasses, bordersFirst = bordersFirst, nearbyNoGo = nearbyNoGo,
         chargeLow = chargeLow, chargeHigh = chargeHigh, heightPasses = heightPasses, firstPassHeightMm = firstPassHeight,
         returnReserve = returnReserve, turnStyle = turnStyle, orientation = orientation, manualAngleDeg = manualAngle,
-        spiralDirection = spiralDirection)
+        spiralDirection = spiralDirection, zamboniBlocks = zamboniBlocks)
 
     companion object {
         fun saver(saved: MowingTaskSettings): Saver<MowingTaskForm, List<Any>> = Saver(
@@ -138,7 +140,7 @@ internal class MowingTaskForm(saved: MowingTaskSettings) {
                 listOf(it.initialProgress, it.initialBattery, it.autonomy, it.chargeTime, it.chargeLow, it.chargeHigh, it.spacing,
                     it.mowingHeight, it.heightPasses, it.firstPassHeight, it.mowingSpeed, it.mowingStep, it.signalGridSpacing,
                     it.borderPasses, it.noGoPasses, it.bordersFirst, it.nearbyNoGo, it.returnReserve, it.turnStyle.name,
-                    it.orientation.name, it.manualAngle, it.spiralDirection.name)
+                    it.orientation.name, it.manualAngle, it.spiralDirection.name, it.zamboniBlocks.name)
             },
             restore = { s ->
                 MowingTaskForm(saved).apply {
@@ -151,6 +153,7 @@ internal class MowingTaskForm(saved: MowingTaskSettings) {
                     (s.getOrNull(19) as? String)?.let { name -> runCatching { OrientationMode.valueOf(name) }.getOrNull() }?.let { orientation = it }
                     (s.getOrNull(20) as? Int)?.let { manualAngle = foldAngle(it) }
                     (s.getOrNull(21) as? String)?.let { name -> runCatching { SpiralDirection.valueOf(name) }.getOrNull() }?.let { spiralDirection = it }
+                    (s.getOrNull(22) as? String)?.let { name -> runCatching { ZamboniBlocks.valueOf(name) }.getOrNull() }?.let { zamboniBlocks = it }
                 }
             },
         )

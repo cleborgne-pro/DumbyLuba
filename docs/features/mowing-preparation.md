@@ -79,7 +79,8 @@ labels stay whole on a folded Fold.
 With **Optimized**, a note recalls: "Zigzag fitted to the shape: each part takes the direction needing the fewest
 U-turns." ([details](../ROUTE_OPTIMIZATIONS.md#optimized-mode-orientation-chosen-per-part-of-a-zone)). With
 **Zamboni**: "Experimental. Passes taken a few rows apart with rolling U-turns, while the mowed part advances as one
-block: a stop leaves no isolated stripe. Relies on 0.35 m turns not yet validated on the robot." With **Spiral**:
+block: a stop leaves no isolated stripe. Relies on 0.35 m turns not yet validated on the robot.", followed by the
+**Zamboni blocks** choice ([below](#zamboni-blocks)). With **Spiral**:
 "Experimental. Passes parallel to the boundary, joined into an inward spiral without U-turns; the centre and the tight
 corners are finished in zigzag. A zone where the spiral would mow less is mowed in zigzag (shown in the preview). Relies
 on 0.35 m turns not yet validated on the robot."
@@ -87,7 +88,7 @@ on 0.35 m turns not yet validated on the robot."
 **Spiral direction** (Spiral only, between the tiles and the Spiral note): **From the edge** (default, the behaviour
 before the setting) or **From the centre**. From the centre, the note reads "Experimental. Passes parallel to the
 boundary, joined into a spiral driven from the centre out to the boundary without U-turns; the centre is mowed in zigzag
-first, the tight corners in zigzag too. …". The choice is kept with the other settings (`spiral_direction`; an unknown
+first, the tight corners in zigzag too, the border laps last. …". The choice is kept with the other settings (`spiral_direction`; an unknown
 value reads back as From the edge) and while another mode is chosen. See [spiral direction](#spiral-direction).
 
 **Direction of the passes** (group under *Route mode*): **Automatic** (default, "Each zone takes its quickest
@@ -127,6 +128,7 @@ boundary is driven") or **Grid** (merged boundary and crossed grid), **Grid spac
 | *Advanced settings* · Perimeter loops | 0 to 4 | 1 |
 | *Advanced settings* · Loops around no-go zones | 0 to 4 | 1 |
 | *Advanced settings* · Perimeter first | on / off ("Mow the borders before the inside of the zones.") | on |
+| Zamboni blocks (Zamboni only) | Large / Medium too / All: smallest block of the zone ordered in Zamboni ([details](#zamboni-blocks)) | Large |
 | *Advanced settings* · Lawn friendly | on: "Rolling U-turns where they fit, one pass in two (longer)"; off: "Pivots in place at the pass ends"; Zamboni: on and disabled, "Always on in Zamboni: the order weighs duration and lawn wear."; Spiral: off and disabled, "Not used by Spiral: no U-turns between its rings." (the saved choice is kept for the other modes) | off |
 | *Advanced settings* · No-go zones on the way | on: "Their loop is done when the route passes nearby, then mowing resumes."; off: "All the no-go zone loops are grouped before the perimeter." | on |
 | *Advanced settings* · Battery: return / resume | 10 to 100 %, return ≤ 80 %, gap ≥ 5 points | 20 % / 90 % |
@@ -243,7 +245,9 @@ Jardin d'Eden, Aire de jeux and Piscine; test `ZigzagBehindLoopTest`).
    the boundary joined into spirals, zigzag in the pockets, compared with the zigzag of the zone
    ([Spiral](#spiral-experimental)).
    **U-turns** ([Turn Optimizer](#u-turns-turn-optimizer)): between two passes of a cell, the manoeuvre that fits and
-   costs least for the chosen style is kept.
+   costs least for the chosen style is kept. **Narrow passages** (recorded boundaries): a neck of the zone too narrow
+   for the robot to pivot in but wide enough to drive straight through (its transits already did) gets its own passes
+   along it, every mode ([narrow passages](#narrow-passages)).
 4. **Continuous order**: the cell started is finished before the next; a neighboring block is then reached through
    a safe link ([continuous mowing](../path-planning/ENGINE.md#continuous-mowing)). A **virtual bar** advances across
    the zone: the robot mows everything left on one side before moving on, instead of leaving a stripe in the middle
@@ -378,7 +382,7 @@ until its last sweep. The order is the cheapest one for duration plus lawn wear 
 found exactly cell by cell; a U-turn that does not fit is replaced by a link, as in Zigzag. Smaller cells, spacings
 under 7 cm and cells where the order would cost more than the zigzag keep the zigzag. The direction of the passes
 applies (Automatic, Each session, Manual). The runs of a cell are mowed in their order, from one end or the other;
-when that order leaves no safe link to the rest of the zone (Aire de jeux at a manual 0°, 115° or 155°), the zone is
+when that order leaves no safe link to the rest of the zone (Aire de jeux at a manual 155°), the zone is
 ordered as in Zigzag instead of refusing the route, and the preview says so.
 
 **Oblique U-turns.** Along a slanted or curved border the pass ends are staggered. A rolling U-turn with both passes
@@ -394,6 +398,17 @@ coverage 99.99 → 99.85 %, mission −1.0 %), 35 of 55 → 38 of 47 on another 
 rectangle with passes at 30°: 5 of 63 → 33 of 63; the reference map: 38 → 69 % of the U-turns of the regular cells
 without pivot, pivots ×0.81 → ×0.59 of Zigzag, coverage within 0.15 point of Zigzag.
 
+**U-turns along the border.** A rolling U-turn used to stay inside the area of the passes, half a cut inside the
+border lap, so along a slanted border it often did not fit and the robot pivoted. The band between the border lap and
+the passes is free, and the lap itself drives there: with the oblique U-turns, a U-turn may now follow the border into
+that band, its chassis at the outer margin from the recorded boundary and from the no-go zones, as the border lap.
+Where this order would leave a zone without a safe link between its blocks, the route is computed without the oblique
+U-turns. Measured at 25 cm: a side slanted 40°, 15 → 27 of 27 U-turns without pivot; the reference map with Zamboni
+blocks All, 178 of 300 → 216 of 312 U-turns without pivot, degrees pivoted −17 %, same mission duration and coverage;
+with the default blocks, 69 → 76 % of the U-turns of the regular cells without pivot, pivots ×0.59 → ×0.53 of Zigzag.
+Acute corners slanted more than about 40° still pivot: a 0.35 m arc cannot reach into them. Details:
+[ENGINE.md](../path-planning/ENGINE.md#u-turns-along-the-border).
+
 Measured on the reference map (25 cm, recorded boundaries, `ZamboniReferenceTest`): degrees pivoted in place on the
 passes ×0.81 of Zigzag, wear ×0.94, pass duration ×1.037 (×1.035 of Lawn friendly), mission −10.4 to +2.9 %, same
 coverage within 0.11 point, computation ×1.24; 38 % of the U-turns of the regular cells roll (before the oblique
@@ -402,6 +417,31 @@ slanted borders; square to the border every U-turn rolls (a 16 × 11 m rectangle
 bench (Potager, Jardin d'Eden): largest deviation 0.20 m, no pivot in the middle of a pass. Details:
 [Zamboni order](../path-planning/ENGINE.md#zamboni-order). Experimental until the 0.35 m radius is validated on the
 robot: if the robot pivots on each arc, the gain disappears.
+
+### Zamboni blocks
+
+Uneven borders and no-go zones cut the sweep of a zone into blocks (cells), and a block too small for the Zamboni order
+kept the zigzag: on the reference map every block of 8 passes or more was ordered, but Enfer (bumpy borders, ten no-go
+zones) had none, and half the passes of Fosse were in smaller blocks. **Zamboni blocks** (Zamboni only, under its note,
+kept with the other settings as `zamboni_blocks` and while another mode is chosen; an unknown value reads back as
+Large) chooses the smallest block ordered:
+
+| Choice | Fewest passes of a block (25 cm / 35 cm) | Effect |
+|---|---|---|
+| **Large** (default, the behaviour before the setting) | 2 m + 2: 8 (2.00 m) / 6 | Zamboni on the big blocks only |
+| **Medium too** | m + 3: 6 (1.50 m) / 5 | also the blocks beside a bump or a no-go zone |
+| **All** | m + 1: 4 (1.00 m) / 3 | every block with room for one rolling U-turn |
+
+(m: rows between two passes driven in a row, 3 at 25 cm.) The note under the choice gives the value at the current
+spacing: "Uneven borders and no-go zones cut the zone into blocks: blocks of at least 8 passes (2.00 m) are mowed in
+Zamboni, smaller ones in zigzag. Smaller blocks follow the uneven borders, with more short runs." Each block is still
+kept in its Zamboni order only where it costs no more (U-turns, runs) than its zigzag order, so a smaller choice never
+mows less; it may move the direction chosen for the zone and lengthen the mission. Measured on the reference map
+(25 cm, recorded boundaries, Large / Medium too / All): blocks in Zamboni order Enfer 0 / 4 / 7, Fosse 5 / 10 / 15,
+Piscine 6 / 7 / 11, Figuier 4 / 5 / 7, Potager 2 / 3 / 3; mission Enfer 1706 / 1791 / 1776 s, Piscine 5245 / 5292 /
+5069 s, Figuier 2039 / 2039 / 2014 s, Fosse 4750 / 4777 / 4761 s, Potager 1407 / 1415 / 1415 s; coverage within 0.06
+point. A synthetic zone whose thin no-go zone splits the rows beside it into blocks of six passes: 0 → 4 blocks in
+Zamboni order with All (`ZamboniBlocksTest`).
 
 ## Spiral (experimental)
 
@@ -439,8 +479,10 @@ the 0.35 m radius is validated on the robot; best on compact, regular zones.
   boundary. The zigzag of the centre a spiral starts from is mowed first, then the spiral is entered at its centre end
   only; where the rings split, the spirals of the inner parts are driven before the one around them, so each part is
   mowed from its centre out. The spiral built nearest to the base is driven last and ends at the boundary near it.
-  Sharp corners and thin lobes keep their own zigzag, ordered as from the edge. Same coverage as from the edge; more
-  transit to reach the centres.
+  Sharp corners and thin lobes keep their own zigzag, ordered as from the edge. The border loops come after the
+  spirals, which grow out to them, even with *Borders first*: the zone starts at its centre and ends on its edge (before
+  2026-11-02 the outer loop came first as from the edge, so both directions started and looked the same in the
+  preview). Same coverage as from the edge; more transit to reach the centres.
 - Every spiral driven backwards is checked again (safe surface, chassis envelope with the pivots at its vertices) before
   use; one refused backwards keeps its inward direction. When the order from the centre finds no safe link to the
   remaining blocks on a zone, that zone is planned from the edge and the preview says so ("Spiral from the centre not
@@ -450,7 +492,7 @@ the 0.35 m radius is validated on the robot; best on compact, regular zones.
   inside it still to mow (the order is saved with the route).
 - Measured on the reference map (25 cm, recorded boundaries, `SpiralDirectionTest`, from the edge / from the centre):
   from the centre on 5 of the 6 spiral zones (Aire de jeux: from the edge, no safe order from the centre), coverage
-  unchanged (within 0.01 point), mission −0.0 to +4.8 %, transit 84 → 93 m (Jardin d'Eden) to 104 → 156 m (Piscine).
+  unchanged (within 0.01 point), mission −0.0 to +4.7 %, transit 84 → 92 m (Jardin d'Eden) to 104 → 158 m (Piscine).
 
 ## Start chosen or saved per zone
 
@@ -502,10 +544,29 @@ Priority order for a preview's start point:
   known base with its docking axis and no other activity; the full list of start conditions is in
   [real mowing](real-mowing.md#start-conditions).
 
+## Narrow passages
+
+The coverage area and the border laps keep the robot where it can pivot whole: their outline is rounded at the pivot
+radius (43 cm), so a passage between two parts of a zone narrower than about 1.5 m was left out entirely. The robot
+only crossed it with its blades stopped, leaving an unmowed strip (Potager on the reference map: its two passages to
+the upper parts, 1.47 m² that the coverage did not even count). Each such neck now gets passes along it: rows on the
+line between its two mouths, crossing it whole in one straight line with the chassis inside the zone and the outer lap
+margin, at most one spacing apart (a 1 m passage: three rows), each one extended at both ends into the wide parts up
+to the first point where the robot can pivot whole, then checked like every pass (chassis envelope, cut inside the
+zone). They follow the passage whatever the direction of the passes (Manual included). The rows count in the target
+of the coverage, so the preview's coverage includes the passage. A sharp corner
+(one mouth only) gets none: it cannot be left without reversing. A passage bent so that no straight line crosses it
+gets none either (it stays crossed by the transits only). Measured on the reference map (25 cm, recorded boundaries):
+only Potager has necks; unmowed area of the zone 1.85 → 0.65 m², coverage 99.83 to 100 % of the larger target, every
+mode valid without violation, mission +3 to +6 % (Zigzag 1401 → 1441 s, Zamboni 1407 → 1488 s, Spiral 1531 → 1586 s);
+the other zones are unchanged. Tests: `NarrowPassagesTest`, `NarrowPassageReferenceTest`.
+
 ## Limitations
 
 - Free areas come from the map: the width of a passage defined by a simple axis is an assumption, not a field
   measurement. Obstacle height is not checked.
+- Sharp corners stay unmowed beyond the rounding of the border lap (43 cm pivot radius): the robot cannot enter them
+  and leave without reversing. A narrow passage bent so that no straight line crosses it is not mowed.
 - The nearest start minimizes the link among a finite set of candidates; it does not guarantee the shortest total
   duration.
 - Task settings are stored on the phone (Fold), not on the robot or in the account: another phone keeps its own.

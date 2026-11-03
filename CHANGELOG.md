@@ -1627,3 +1627,65 @@ height) is no longer sent again. Not tried on the robot. See [autonomous gateway
 disconnection and reconnection messages point to the gateway's antenna and its place on the robot rather than to the
 distance to the access point (2026-11-02: −70 dBm on the ESP32 against −56 dBm on the robot). See
 [gateway](docs/features/gateway.md). Tests: `GatewayHealthStoreTest`.
+
+Version 1.19.0 (189): **Zamboni U-turns along slanted borders and the older Aliyun cloud at its own pace**. Zamboni
+blocks setting, narrow passages mowed, spiral from the centre starting at the centre, firmware updates that can be
+turned off, and Aliyun commands paced to avoid HTTP 429.
+
+**Older Aliyun cloud at its own pace**: on a LUBA 1 (DumbyLuba#3, 2026-11-02) the map reading stopped at once on
+"Mammotion HTTP/API 429 (/thing/service/invoke)": the Aliyun API gateway refuses the pace the Mammotion cloud accepts
+(three commands at once, then one a second and a keep-alive of two every 5 s). Aliyun commands are now sent one every
+2 s at most, the keep-alive every 15 s, and a 429 pauses them 60 s (doubled at each 429 in a row, up to 240 s, as
+PyMammotion) before the command is sent again, twice at most, the status saying "Aliyun cloud: too many requests, next
+try in N s" instead of failing. Checked against a simulated cloud only. See
+[Mammotion account](docs/features/mammotion-account.md#older-aliyun-cloud). Tests: `AliyunRateLimitTest`,
+`AliyunCloudTest`.
+
+**Firmware updates can be turned off**: **Offer firmware updates** (Me → Mammotion account → Software, on by default,
+kept for every robot and after sign-out) shows the available version without the **Update to X** button and refuses
+any start, for a firmware that must not be installed, such as one that needs a roof-mounted RTK base updated too
+(DumbyLuba#3). A read-only model no longer shows an **Update to X** button that the start refused anyway: "Not
+offered: read-only model, update its firmware from the Mammotion app". See
+[Mammotion account](docs/features/mammotion-account.md). Tests: `CloudRobotActionsTest`, `CloudViewModelTest`.
+
+**Spiral from the centre now starts at the centre**: from the edge and from the centre gave the same route in the
+preview: the same rings driven the other way, and with *Borders first* the outer border lap came first in both, so the
+route started at the same place on the boundary. From the centre the border laps now come after the spirals, which grow
+out to them: the zone starts with the zigzag of its centre and ends on its edge. Aire de jeux still falls back to the
+edge (no safe order from the centre, warned in the preview) and Figuier is mowed in zigzag in both directions. See
+[spiral direction](docs/features/mowing-preparation.md#spiral-direction). Tests: `SpiralDirectionTest`,
+`SpiralCentreResumeTest`.
+
+**Zamboni along uneven borders: Zamboni blocks setting**: uneven borders and no-go zones cut a zone into blocks, and
+the blocks under 8 passes (2 m at 25 cm) kept the zigzag, so a zone with bumpy borders got little or no Zamboni (Enfer
+on the reference map: none). The new **Zamboni blocks** choice in Task settings (Zamboni only) sets the smallest block
+ordered: Large (default, unchanged), Medium too (6 passes at 25 cm) or All (4 passes); a block is still kept in its
+Zamboni order only where it costs no more than its zigzag. Reference map: blocks in Zamboni order Enfer 0 / 4 / 7, Fosse
+5 / 10 / 15, Piscine 6 / 7 / 11; mission −3.3 to +5.0 %. See [Zamboni blocks](docs/features/mowing-preparation.md#zamboni-blocks).
+Tests: `ZamboniBlocksTest`, `MowingTaskSettingsTest`.
+
+**Narrow passages mowed**: Potager was under-mowed: its two passages to the upper parts were never mowed, only crossed
+with the blades stopped. The coverage area and the border laps are rounded at the 43 cm pivot radius, so a passage
+under about 1.5 m between two parts of a zone was left out, and not even counted as missing. Each such neck of a zone
+on a recorded boundary now gets passes along it (rows crossing it in one straight line, chassis inside the zone with
+the lap margin, one spacing apart at most), extended into the wide parts up to where the robot can pivot, in every
+mowing mode, and the passage counts in the coverage. Reference map: only Potager changes, unmowed area 1.85 → 0.65 m²,
+mission +3 to +6 %. Sharp corners and bent passages stay unmowed. See [narrow passages](docs/features/mowing-preparation.md#narrow-passages).
+Tests: `NarrowPassagesTest`, `NarrowPassageReferenceTest`.
+
+**Zamboni U-turns follow slanted borders**: along a border that is not square to the passes, Zamboni (especially with
+Zamboni blocks All) kept pivoting, because a rolling U-turn had to stay inside the area of the passes, half a cut inside
+the border lap, and did not fit there without leaving the corner unmowed. A rolling U-turn may now follow the border
+into the band of the border lap, its chassis at the outer margin from the recorded boundary and the no-go zones, as the
+lap itself. Where this would leave a zone without a safe link between its blocks, the route is computed without the
+oblique U-turns. Measured at 25 cm: a side slanted 40°, 15 → 27 of 27 U-turns without pivot; reference map with Zamboni
+blocks All, 178 of 300 → 216 of 312 U-turns without pivot, degrees pivoted −17 %, same mission duration and coverage;
+default blocks, pivots ×0.59 → ×0.53 of Zigzag. Piscine now takes 59° instead of 75° (mission +1.4 %, mowed part less
+continuous after a stop). Acute corners slanted more than about 40° still pivot. See
+[U-turns along the border](docs/features/mowing-preparation.md#zamboni-experimental). Tests: `ZamboniSlantedBorderTest`,
+`ZamboniDeadEndTest`.
+
+**Lighter publication checks**: a `tools/check.sh` run that passes the planner sweeps records the sources they ran on
+(`tools/planner-sweeps.sh`, version number left out), so the publication no longer runs them a second time on the same
+sources; the publication runs its tests on 2 processes instead of 4 and reuses the gateway firmware files of the
+previous release when the firmware did not change.

@@ -24,7 +24,8 @@ import java.util.Locale
  */
 @Composable
 fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = Clock.now(),
-                      onStartFirmwareUpdate: () -> Unit = {}, onFollowFirmwareUpdate: () -> Unit = {}, onStopFirmwareFollow: () -> Unit = {}) {
+                      onStartFirmwareUpdate: () -> Unit = {}, onFollowFirmwareUpdate: () -> Unit = {}, onStopFirmwareFollow: () -> Unit = {},
+                      onFirmwareOffersChange: (Boolean) -> Unit = {}) {
     val d = state.details
     val colors = MammotionColors
     Column(verticalArrangement = Arrangement.spacedBy(Dimens.Md)) {
@@ -80,8 +81,8 @@ fun AccountRobotPanel(state: CloudUi, onRefresh: () -> Unit, now: Long = Clock.n
             val f = state.firmwareCheck
             KeyValueRow("Firmware", f?.current ?: d.firmware ?: "—")
             // Update: confirmed start and live progress (FirmwareUpdateUi.kt).
-            FirmwareUpdateRows(state, onStartFirmwareUpdate, onFollowFirmwareUpdate, onStopFirmwareFollow, now)
-            f?.releaseNote?.takeIf { f.upgradeable }?.let { Text(it.take(400), style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary) }
+            FirmwareUpdateRows(state, onStartFirmwareUpdate, onFollowFirmwareUpdate, onStopFirmwareFollow, now, onFirmwareOffersChange)
+            f?.releaseNote?.takeIf { f.upgradeable && state.firmwareOffers }?.let { Text(it.take(400), style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary) }
             d.base?.let { KeyValueRow(tr("RTK base", "Base RTK"), "version ${it.version}") }
             d.modules.take(12).forEach { KeyValueRow(it.identify.ifBlank { "module ${it.type}" }, it.version) }
         }

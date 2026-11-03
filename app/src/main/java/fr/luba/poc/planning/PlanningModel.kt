@@ -43,7 +43,11 @@ data class PlanningConfig(val spacingM: Double = 0.25, val marginM: Double = 0.6
     val spiralDirection: SpiralDirection = SpiralDirection.FROM_EDGE,
     /** Zamboni: oblique U-turns along the slanted borders ([fr.luba.poc.map.TurnOptimizer.OBLIQUE_UNSWEPT_M]); off only for
      * the fallback of [CoverageEngine.planPattern]. */
-    val zamboniObliqueTurns: Boolean = true) {
+    val zamboniObliqueTurns: Boolean = true,
+    /** Zamboni: blocks ordered, smaller ones along uneven borders and no-go zones ([fr.luba.poc.map.ZamboniBlocks]). */
+    val zamboniBlocks: ZamboniBlocks = ZamboniBlocks.LARGE) {
+    /** Zamboni settings handed to [CoveragePlanner.plan]. */
+    val zamboniOptions: ZamboniOptions get() = ZamboniOptions(zamboniObliqueTurns, zamboniBlocks)
     init {
         require(listOf(spacingM,marginM,cutWidthM,speedMps,turnDegreesPerSecond).all { it.isFinite() && it > 0 })
         require(spacingM >= 0.05 && marginM >= 0.3 && cutWidthM <= 2)

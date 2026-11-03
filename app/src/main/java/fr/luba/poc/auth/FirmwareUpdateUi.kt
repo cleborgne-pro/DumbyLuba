@@ -15,10 +15,12 @@ import fr.luba.poc.ui.theme.MammotionColors
 
 /**
  * Firmware update through the account: offered version, start confirmed by the user and live progress
- * (percentage, stage, final state). "Stop following" does not interrupt the update.
+ * (percentage, stage, final state). "Stop following" does not interrupt the update. No start button when updates are
+ * turned off ([onOffersChange]) or the model is read-only ([FirmwareUpdatePolicy.offerRefusal]): the version stays shown.
  */
 @Composable
-fun FirmwareUpdateRows(state: CloudUi, onStart: () -> Unit, onFollow: () -> Unit, onStopFollow: () -> Unit, now: Long = Clock.now()) {
+fun FirmwareUpdateRows(state: CloudUi, onStart: () -> Unit, onFollow: () -> Unit, onStopFollow: () -> Unit, now: Long = Clock.now(),
+                       onOffersChange: (Boolean) -> Unit = {}) {
     val colors = MammotionColors
     val f = state.firmwareCheck
     val u = state.firmwareUpdate
@@ -47,6 +49,7 @@ fun FirmwareUpdateRows(state: CloudUi, onStart: () -> Unit, onFollow: () -> Unit
     }
     if (!u.active) {
         val refusal = FirmwareUpdatePolicy.refusal(f, state.details)
+        val notOffered = FirmwareUpdatePolicy.offerRefusal(state.firmwareOffers, state.selected?.name)
         when {
             f == null -> {}
             f.upgrading -> {
@@ -54,10 +57,11 @@ fun FirmwareUpdateRows(state: CloudUi, onStart: () -> Unit, onFollow: () -> Unit
                 SecondaryPillButton(tr("Follow progress", "Suivre l’avancement"), onFollow, Modifier.fillMaxWidth(), enabled = !state.busy)
             }
             f.upgradeable && f.latest != null -> {
-                if (u.phase != FirmwarePhase.DONE) KeyValueRow(tr("Update available", "Mise à jour disponible"), f.latest, valueColor = colors.Green)
-                PrimaryPillButton(tr("Update to ${f.latest}", "Mettre à jour vers ${f.latest}"), { supervised = false; confirm = true }, Modifier.fillMaxWidth(),
+                if (u.phase != FirmwarePhase.DONE) KeyValueRow(tr("Update available", "Mise à jour disponible"), f.latest,
+                    valueColor = if (notOffered == null) colors.Green else colors.TextSecondary)
+                if (notOffered == null) PrimaryPillButton(tr("Update to ${f.latest}", "Mettre à jour vers ${f.latest}"), { supervised = false; confirm = true }, Modifier.fillMaxWidth(),
                     enabled = refusal == null && !state.busy && !state.nativeReturn.active, icon = Icons.Rounded.SystemUpdate)
-                if (refusal != null) Text(refusal, style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
+                (notOffered ?: refusal)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary) }
             }
             else -> KeyValueRow(tr("Update", "Mise à jour"), tr("up to date", "à jour"))
         }
@@ -66,9 +70,11 @@ fun FirmwareUpdateRows(state: CloudUi, onStart: () -> Unit, onFollow: () -> Unit
         }
         if (u.phase == FirmwarePhase.IDLE && u.status.isNotBlank())
             Text(u.status, style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary)
+        if (f != null) ToggleRow(tr("Offer firmware updates", "Proposer les mises à jour du firmware"), state.firmwareOffers, onOffersChange,
+            subtitle = tr("Off: the available version stays shown, never offered (all robots)", "Désactivé : la version disponible reste affichée, jamais proposée (tous les robots)"))
     }
 
-    if (confirm && f?.latest != null) LubaDialog(onDismissRequest = { confirm = false }, title = tr("Update the robot?", "Mettre à jour le robot ?"), content = {
+    if (confirm && f?.latest != null && FirmwareUpdatePolicy.offerRefusal(state.firmwareOffers, state.selected?.name) == null) LubaDialog(onDismissRequest = { confirm = false }, title = tr("Update the robot?", "Mettre à jour le robot ?"), content = {
         KeyValueRow(tr("Installed version", "Version installée"), f.current ?: state.details.firmware ?: "—")
         KeyValueRow(tr("New version", "Nouvelle version"), f.latest, valueColor = colors.Green)
         f.releaseNote?.let { Text(it.take(600), style = MaterialTheme.typography.bodySmall, color = colors.TextSecondary) }

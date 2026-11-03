@@ -242,7 +242,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
         // Height passes: route prepared with all the passes, recomputed when they change.
         passHeights.takeIf { !form.mode.isSurvey },form.orientation,form.manualAngle,
         // Spiral direction: only the Spiral mode recomputes when it changes.
-        form.spiralDirection.takeIf { form.mode == CoverageMode.SPIRAL },
+        form.spiralDirection.takeIf { form.mode == CoverageMode.SPIRAL }, form.zamboniBlocks.takeIf { form.mode == CoverageMode.ZAMBONI },
         // Change every session: a mowing that ends updates the directions to move away from.
         state.zoneOrientations.takeIf { form.orientation == OrientationMode.EACH_SESSION && form.mode.usesOrientation })
     val currentPlanningInputs by rememberUpdatedState(planningInputs)
@@ -420,7 +420,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             .put("speedMps", form.mowingSpeed.toDouble()).put("mode", form.mode.name)
             .put("borderPasses", form.borderPasses).put("noGoPasses", form.noGoPasses)
             .put("borders", form.borders).put("bordersFirst", form.bordersFirst).put("nearbyNoGo", form.nearbyNoGo).put("turnStyle", form.turnStyle.name)
-            .put("orientation", form.orientation.name).put("manualAngleDeg", form.manualAngle).put("spiralDirection", form.spiralDirection.name)
+            .put("orientation", form.orientation.name).put("manualAngleDeg", form.manualAngle).put("spiralDirection", form.spiralDirection.name).put("zamboniBlocks", form.zamboniBlocks.name)
             .put("demo", mapView.demo).put("baseX", mapBase?.point?.x).put("baseY", mapBase?.point?.y)
             .put("baseHeading", mapBase?.entryHeadingDegrees).put("startSource", startRequest.source.name).toString()
         Log.i("PathPreparationTiming", JSONObject(prep.preparationTimingInputs).put("event", "BEGIN").toString())
@@ -454,7 +454,7 @@ private fun MapScreenContent(state: RobotUi, simulation: SimulationSession, args
             // the configuration says so too (the zigzag of the Spiral pockets and fallback zones takes the fast U-turns).
             turnStyle=if(planMode.isSurvey || planMode==CoverageMode.SPIRAL) TurnStyle.FAST else if(planMode==CoverageMode.ZAMBONI) TurnStyle.LAWN else form.turnStyle,
             orientation=if(planMode.usesOrientation) form.orientation else OrientationMode.AUTOMATIC,manualAngleDeg=foldAngle(form.manualAngle),
-            spiralDirection=if(planMode==CoverageMode.SPIRAL) form.spiralDirection else SpiralDirection.FROM_EDGE)
+            spiralDirection=if(planMode==CoverageMode.SPIRAL) form.spiralDirection else SpiralDirection.FROM_EDGE,zamboniBlocks=if(planMode==CoverageMode.ZAMBONI) form.zamboniBlocks else ZamboniBlocks.LARGE)
         prep.begin(calculationInputs) { scope.launch {
             try {
                 val result = withContext(Dispatchers.Default) {

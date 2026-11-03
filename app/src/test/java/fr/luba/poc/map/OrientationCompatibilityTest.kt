@@ -40,8 +40,8 @@ class OrientationCompatibilityTest {
         val saved = MowingTaskSettings(orientation = OrientationMode.MANUAL, manualAngleDeg = 35)
         val saver = MowingTaskForm.saver(saved)
         val current = with(saver) { androidx.compose.runtime.saveable.SaverScope { true }.save(MowingTaskForm(saved)) }!!
-        // 21 entries with the direction of the passes, 22 with the spiral direction.
-        assertEquals(22, current.size)
+        // 21 entries with the direction of the passes, 22 with the spiral direction, 23 with the Zamboni blocks.
+        assertEquals(23, current.size)
         // Older state (19 entries): the stored settings stay.
         val older = saver.restore(current.take(19))!!
         assertEquals(OrientationMode.MANUAL, older.orientation)
@@ -66,5 +66,17 @@ class OrientationCompatibilityTest {
         val restored = saver.restore(current.take(21) + listOf(SpiralDirection.FROM_EDGE.name))!!
         assertEquals(SpiralDirection.FROM_EDGE, restored.spiralDirection)
         assertEquals(SpiralDirection.FROM_EDGE, restored.settings().spiralDirection)
+    }
+
+    @Test fun savedFormStateFromBeforeTheZamboniBlocksKeepsTheStoredOnes() {
+        val saved = MowingTaskSettings(mode = CoverageMode.ZAMBONI, zamboniBlocks = ZamboniBlocks.MEDIUM)
+        val saver = MowingTaskForm.saver(saved)
+        val current = with(saver) { androidx.compose.runtime.saveable.SaverScope { true }.save(MowingTaskForm(saved)) }!!
+        // Older state (22 entries) or unknown name: the stored blocks stay.
+        assertEquals(ZamboniBlocks.MEDIUM, saver.restore(current.take(22))!!.zamboniBlocks)
+        assertEquals(ZamboniBlocks.MEDIUM, saver.restore(current.take(22) + listOf("TINY"))!!.zamboniBlocks)
+        val restored = saver.restore(current.take(22) + listOf(ZamboniBlocks.ALL.name))!!
+        assertEquals(ZamboniBlocks.ALL, restored.zamboniBlocks)
+        assertEquals(ZamboniBlocks.ALL, restored.settings().zamboniBlocks)
     }
 }

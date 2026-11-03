@@ -34,8 +34,13 @@ class OrientationAcceptanceTest {
                 orientation = orientation, manualAngleDeg = angle),
             navigation = PlanningNavigation(emptyList(), base), orientationMemory = memory)
 
-    /** Directions (0..179) of the straight passes longer than 0.5 m. */
-    private fun passDirections(preview: Preview) = preview.passes.filter { it.size >= 2 && it.first().distance(it.last()) > 0.5 }
+    /** Rows of the narrow passages ([NarrowPassages]): their passes follow the passage, not the direction of the zone. */
+    private val neckRows = zones.flatMap { zone -> NarrowPassages.necks(zone.points, shapes.filter { it.excludes }.map { it.points },
+        emptyList(), fr.luba.poc.obstacles.RobotEnvelope.LUBA2, PlanningConfig().outerOffsetM, 0.25).flatMap { it.rows } }
+    private fun onNeckRow(path: List<Point>) = neckRows.any { r -> path.all { Geometry.distance(it, r.at(-100.0), r.at(100.0)) < 1e-6 } }
+
+    /** Directions (0..179) of the straight passes longer than 0.5 m, the narrow passage passes left out. */
+    private fun passDirections(preview: Preview) = preview.passes.filter { it.size >= 2 && it.first().distance(it.last()) > 0.5 && !onNeckRow(it) }
         .map { foldAngle(Math.round(heading(it.first(), it.last())).toInt()) }.toSet()
 
     @Test fun manualAngleHoldsOnEveryZoneOfAMultiZoneTask() {

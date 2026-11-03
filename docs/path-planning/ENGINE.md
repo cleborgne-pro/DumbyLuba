@@ -156,6 +156,29 @@ of one whole direction before the other.
 Tests: `LocalMowingOrderTest`, `SweepBarOrderTest`, `ZoneStartTest`, and `ReferenceMapPlannerTest` on every
 zone of the reference map (modes, spacings, margins and border passages).
 
+## Narrow passages
+
+On a recorded boundary the coverage area (`CoveragePlanner.plan`) and the target (`PlanningTerrain.target`) follow the
+outline opened by the pivot radius (`RecordedBoundary.ringRoundingM`, 43 cm): a neck narrower than about
+2 × (0.34 + 0.43) m between two parts of a zone is in neither, mowed by no pass and not counted as missing. Its transits
+crossed it (Potager, reference map: 1.47 m² in two passages to the upper parts). `map/NarrowPassages.kt` finds them
+from the zone alone, with the same function for the plan and the target: the *corridor* is the zone shrunk by half a
+width plus the outer lap margin, minus the no-go zones grown by the same and the obstacle discs; a neck is a part of the
+corridor outside the corridor opened by the pivot radius, of at least 0.02 m², that touches the opened part in two
+places (its mouths). Rows run along the line between the centres of the two largest mouths; candidates every 2 cm
+across the neck are kept where one straight stretch of the corridor reaches both mouths, and the widest run of them
+gives rows at its two sides and at most one spacing apart between. `NarrowPassages.target` (rows inside the neck, half
+a cut each side) is added to the target; `NarrowPassages.passes` extends each row at both ends, by 2 cm steps up to
+2 m, to the first point where the whole pivot is free (`TrajectoryEnvelope.turnCollision` both ways) and keeps it if
+`pathCollision` is null. `CoveragePlanner.plan` appends them to the plan it returns (`NarrowPassages.appendTo`: runs,
+`passes`, metres, one cell per neck with ids from 10⁹; all mowing modes, not the surveys), after the orientation search,
+which they do not change; they are not inside the coverage area, so they are never joined by a U-turn and each pass is
+its own run, linked by the transits. Reference map, 25 cm: only Potager has necks (2, three rows each);
+unmowed area 1.85 → 0.65 m², every mode valid, mission +2.9 % (Zigzag) to +5.8 % (Zamboni); the other zones, their
+targets and plans are unchanged. The necks depend on the outer lap margin (corridor and opening both move with it):
+at 40 cm Piscine has one too; a pass along the side of a neck keeps the loop distance from the boundary, never less
+(`ZigzagBehindLoopTest`).
+
 ## Zamboni order
 
 `CoverageMode.ZAMBONI` (experimental) keeps the zigzag passes of each zone and changes their order inside the regular
@@ -190,8 +213,8 @@ the next one has no safe link). When this order reaches a dead end (no safe link
 of the zone at all) and the plan is not validated, `AutomaticPlanner.plan` computes the plan once more with that zone
 ordered without chains (`chained = false`, the order of the Zigzag mode on the same runs) and keeps it only if it is
 validated: plans validated with chains are unchanged. Such a zone has `Preview.zoneReorderedCells` −1 and the warning
-"Zamboni on X: no safe link in the Zamboni order, zigzag order" (Aire de jeux at a manual 0°, 115° or 155°,
-`ZamboniDeadEndTest`). Other modes are unchanged (same `planHash` on the seven zones in Zigzag fast and Lawn
+"Zamboni on X: no safe link in the Zamboni order, zigzag order" (Aire de jeux at a manual 155°; 0° and 115° until
+the U-turns were costed at the tracking speed and followed the border, `ZamboniDeadEndTest`). Other modes are unchanged (same `planHash` on the seven zones in Zigzag fast and Lawn
 friendly, Checkerboard and Optimized at 25 and 35 cm, and on the seven zones in one Zigzag task).
 
 Reference map, 25 cm, recorded boundaries, production entry point (`ZamboniReferenceTest`, 2026-10-27). Zigzag with
@@ -217,6 +240,15 @@ of Zigzag in the same JVM. Mowed share still in one piece after a stop at 25, 50
 Tracking bench (`ZamboniExecutionTest`, Potager and Jardin d'Eden at 30 and 50 %): largest deviation 0.197 to 0.204 m
 (Lawn friendly 0.198 to 0.208 m), no blockage, no pivot in the middle of a pass.
 
+**Smaller blocks** (`PlanningConfig.zamboniBlocks`, task setting *Zamboni blocks*). The fewest passes of an ordered cell
+is `ZamboniBlocks.minPasses(m)`: 2 m + 2 by default (`LARGE`, unchanged), m + 3 (`MEDIUM`) or m + 1 (`ALL`, one
+rolling move fits). On the reference map (25 cm) every cell of 8 passes or more was already ordered and kept; the cells
+left in zigzag were the small ones that uneven borders and no-go zones cut (Enfer: 51 passes, all in cells under 8;
+Fosse 70 of 141; Aire de jeux 49 of 126). Cells ordered Large / Medium / All: Enfer 0 / 4 / 7, Fosse 5 / 10 / 15,
+Piscine 6 / 7 / 11, Figuier 4 / 5 / 7, Potager 2 / 3 / 3, Jardin d'Eden 1 / 1 / 3; mission −3.3 to +5.0 % of Large
+(the automatic orientation may move), coverage within 0.06 point. Raising the oblique tolerance
+(`OBLIQUE_UNSWEPT_M` 0.3 → 0.5 to 1.0 m) changed neither the cells ordered nor the U-turns of the map: not offered.
+
 ### Oblique U-turns
 
 Along a slanted border the pass ends of two passes `m` rows apart are staggered by `s` (0.43 m for 0.75 m at 30° from
@@ -232,11 +264,44 @@ from the manoeuvre is left unswept, accepted up to 0.3 m per pass (geometry at 0
 0.25 m at 30°, about 0.02, 0.06 and 0.11 m² per U at 20, 30 and 45°), recorded in `TurnPlan.unsweptM` and costed
 `UNSWEPT_PENALTY_PER_M` = 20 per metre in the score, so that the order search keeps the pivots where they are cheaper;
 both passes keep at least `OBLIQUE_MIN_PASS_M` = 1.5 m (short passes, as across a 2 m corridor, keep the pivots and
-the bumper repairs that cross them stay local, `EdgeObjectBypassTest`). When the Zamboni route with them is not valid
-(Aire de jeux at a manual 10°: no safe link to the remaining blocks), `CoverageEngine.planPattern` computes it once more
-without them (`PlanningConfig.zamboniObliqueTurns` false) and keeps it if valid (`ZamboniDeadEndTest`).
+the bumper repairs that cross them stay local, `EdgeObjectBypassTest`). When the Zamboni route with them is not valid,
+or orders a zone like Zigzag because its Zamboni order has no safe link to the remaining blocks (Aire de jeux at a
+manual 10°), `CoverageEngine.planPattern` computes it once more without them (`PlanningConfig.zamboniObliqueTurns`
+false, which also drops the [U-turns along the border](#u-turns-along-the-border)) and keeps it if valid with fewer
+such zones (`ZamboniDeadEndTest`: 10°, 7 blocks in Zamboni order instead of none).
 The penalty was set on the reference map: at 10 per metre the orientation of Piscine moved to 59°, where the order of
 its blocks broke the mowed part into pieces (contiguous share 0.58); at 20 it stays at 75° (1.00).
+
+### U-turns along the border
+
+A rolling U-turn had to stay inside the area of the passes, whose edge is half a cut inside the track of the border
+loop (0.51 m from the recorded boundary with the default 5 cm margin), so its arcs only fitted with the passes
+shortened, and along a slanted border the acute corner was then left unswept: refused ("shortened passes not swept by
+the manoeuvre"), pivots. Yet the band between the border loop and the passes is free, and the loop itself is driven
+there. With the oblique U-turns (Zamboni, recorded boundary), `TurnOptimizer.evaluate` accepts a rolling U refused by
+`TurnContext.drivable` when `TurnContext.alongBorder` accepts the whole stretch: the chassis envelope inside the
+recorded zone minus the no-go zones, shrunk by the set margin of the loops (`CoveragePlanner.alongBorder`, built at
+the first check). The band is measured from the recorded boundaries, not from the physical area, which takes
+`RecordedBoundary.PHYSICAL_TOLERANCE_M` (0.15 m) around them and in which a thin no-go zone even vanishes. The plan is
+marked `TurnPlan.alongBorder`; the join (`CoveragePlanner.joinsSafely`) then checks only its passes on the surface of
+the passes, the whole path in the chassis envelope as before. The robot can thus follow the border during the U-turn,
+as the loop does, with the same margin; a margin of 5 or 10 cm more than the loop was measured too and gives back
+little or nothing (Zamboni blocks All, reference map: 196 of 306 and 178 of 300 U-turns without pivot, against 216 of
+312 at the loop margin).
+
+Measured (25 cm, recorded boundaries): a 14 × 8 m trapezoid whose side is slanted 40° from the normal of the passes,
+15 → 27 of 27 U-turns without pivot (2,160° → 0° pivoted, `ZamboniSlantedBorderTest`); reference map with Zamboni
+blocks All, 178 of 300 → 216 of 312 U-turns without pivot in the ordered blocks, pivoted 25,967° → 21,674°, mission
+19,088 → 19,095 s, coverage 99.87 to 99.96 % (same or higher on every zone); with the default blocks
+(`ZamboniReferenceTest`) pivots ×0.59 → ×0.53 of Zigzag, wear ×0.86 → ×0.82, 155 of 224 → 172 of 227 U-turns without
+pivot in the regular cells (76 %), mission −2.3 to +1.7 % per zone, contiguous share of the map 0.92 (unchanged).
+Piscine moves from 75° to 59°, cheaper for the ranking (wear), where the order of its blocks leaves the mowed part in
+pieces after a stop (contiguous share 1.00 → 0.58) and the mission is 1.4 % longer; the ranking estimates the links,
+and the evaluated mission would keep 75° (5,154 s against 5,319 s): its floor in `ZamboniReferenceTest` is 0.55
+(0.65 elsewhere).
+What still pivots: acute corners slanted more than about 40° (stagger over 0.6 m between passes three rows apart),
+where an arc of 0.35 m cannot reach the corner even with the chassis at the loop margin, and passes shorter than
+`OBLIQUE_MIN_PASS_M`.
 
 Reference map, same test and settings (`ZamboniReferenceTest`, 2026-10-30), Zamboni with the oblique U-turns:
 
@@ -327,7 +392,9 @@ never joined to a pocket pass), a chain, its cores and all the chains inside it 
 `Preview.outwardRuns` maps each reversed chain run to the runs that must come first (its cores and the chains continuing
 it inwards). `LocalMowingOrder.schedule` enters such a run only at its first point (`Task.oneWay`) and only once those
 runs are mowed (`ready`, applied to the open blocks, the active cell and the bar fallback); without `outwardRuns` the
-order is unchanged. `Preview.zoneReorderedCells` holds the number of chains driven outwards per zone. A greedy order can
+order is unchanged. With `outwardRuns`, `AutomaticPlanner` schedules the zone with `bordersFirst` false whatever the
+setting: the border loops come after the chains that grow out to them, so the zone starts at its centre (before
+2026-11-02 the outer loop came first, so both directions started on the same loop). `Preview.zoneReorderedCells` holds the number of chains driven outwards per zone. A greedy order can
 still end a block where no safe link leaves (Aire de jeux: the exit of a no-go loop lead); `AutomaticPlanner` then plans
 that zone again from the edge (`ZonePlan.fromEdge`, `zoneReorderedCells` −1, warning "Spiral from the centre not
 possible on <zone>: spiral from the edge used"). `nearBase` (research `Geometry.plan` path) keeps the planned order when
@@ -341,17 +408,18 @@ reordering of the merged paths that does not follow them (`CutPasses.expand`, th
 remainder that breaks one the current order keeps (`brokenRules`); a plan whose constraints do not match its edges is
 not reordered.
 
-Reference map, 25 cm, recorded boundaries (`SpiralDirectionTest`, 2026-10-27), from the edge / from the centre:
+Reference map, 25 cm, recorded boundaries (`SpiralDirectionTest`, 2026-11-02, border loops after the chains), from
+the edge / from the centre:
 
 | Zone | From the centre | Coverage | Mission | Transit |
 |---|---|---|---|---|
-| Jardin d'Eden | 1 of 1 chain outwards | 99.98 / 99.98 % | 1220 / 1247 s (+2.2 %) | 84 / 93 m |
+| Jardin d'Eden | 1 of 1 chain outwards | 99.98 / 99.98 % | 1220 / 1240 s (+1.6 %) | 84 / 92 m |
 | Aire de jeux | from the edge (no safe order from the centre, warned) | 99.92 / 99.92 % | 3320 / 3320 s | 68 / 68 m |
-| Piscine | 11 of 11 | 99.96 / 99.96 % | 5745 / 5922 s (+3.1 %) | 104 / 156 m |
+| Piscine | 11 of 11 | 99.96 / 99.96 % | 5745 / 5928 s (+3.2 %) | 104 / 158 m |
 | Figuier | zigzag (as from the edge) | 99.97 / 99.97 % | 2122 / 2122 s | 143 / 143 m |
-| Enfer | 8 of 8 | 99.87 / 99.86 % | 2010 / 2107 s (+4.8 %) | 113 / 138 m |
-| Fosse | 12 of 12 | 99.91 / 99.92 % | 5573 / 5571 s (−0.0 %) | 204 / 202 m |
-| Potager | 4 of 4 | 99.94 / 99.94 % | 1531 / 1542 s (+0.7 %) | 120 / 124 m |
+| Enfer | 8 of 8 | 99.87 / 99.86 % | 2010 / 2106 s (+4.7 %) | 113 / 138 m |
+| Fosse | 12 of 12 | 99.91 / 99.92 % | 5573 / 5572 s (−0.0 %) | 204 / 203 m |
+| Potager | 4 of 4 | 99.94 / 99.94 % | 1531 / 1566 s (+2.3 %) | 120 / 132 m |
 
 Every plan valid, no geometric violation; synthetic rectangle 12 × 8 m and 14 × 10 m with a 3 × 2 m no-go zone (one root
 chain, two chains inside its split): same chains and coverage, cores and inner chains first.
@@ -377,47 +445,6 @@ Every plan valid, no geometric violation, same `planHash` twice; the Figuier fal
 U-turns against 50, pivots 9000° → 1035°. Tracking bench (`SpiralExecutionTest`, Potager and Jardin d'Eden at 30 and
 50 %): largest deviation 0.186 to 0.196 m (Zigzag 0.176 to 0.184 m), no blockage, no pivot in a stripe; missions
 +3.0 / +12.0 % (Jardin d'Eden) and +7.3 / +15.4 % (Potager) against Zigzag, pivoting time 22 to 31 % lower.
-
-### Oblique U-turns
-
-Along a slanted border the pass ends of two passes `m` rows apart are staggered by `s` (0.43 m for 0.75 m at 30° from
-the normal of the passes). The rolling U was only tried with both passes shortened alike (`TurnOptimizer.shapedBoth`):
-its arcs then cut into the corner by the longer end, out of the pass-end surface, or, shortened enough, leave the
-shortened parts unswept ("shortened passes not swept by the manoeuvre"). In Zamboni
-(`TurnContext.obliqueUnsweptM` = `OBLIQUE_UNSWEPT_M`, 0.3 m; 0 in the other modes, which are unchanged), when no equal
-trim fits, `TurnOptimizer.oblique` shortens the longer pass by `2 r s / lateral` more than the other: the centres of
-the two arcs then lie on a line parallel to the border, so does the tangent of the Dubins U, and the U stays within
-the pass ends with the smallest common trim the planner accepts (same `drivable` check: pass-end surface and chassis
-envelope). The arc by the longer end cannot reach its acute corner: the part of that pass farther than half a cut
-from the manoeuvre is left unswept, accepted up to 0.3 m per pass (geometry at 0.75 m: 0.04 m at 10°, 0.09 m at 20°,
-0.25 m at 30°, about 0.02, 0.06 and 0.11 m² per U at 20, 30 and 45°), recorded in `TurnPlan.unsweptM` and costed
-`UNSWEPT_PENALTY_PER_M` = 20 per metre in the score, so that the order search keeps the pivots where they are cheaper;
-both passes keep at least `OBLIQUE_MIN_PASS_M` = 1.5 m (short passes, as across a 2 m corridor, keep the pivots and
-the bumper repairs that cross them stay local, `EdgeObjectBypassTest`). When the Zamboni route with them is not valid
-(Aire de jeux at a manual 10°: no safe link to the remaining blocks), `CoverageEngine.planPattern` computes it once more
-without them (`PlanningConfig.zamboniObliqueTurns` false) and keeps it if valid (`ZamboniDeadEndTest`).
-The penalty was set on the reference map: at 10 per metre the orientation of Piscine moved to 59°, where the order of
-its blocks broke the mowed part into pieces (contiguous share 0.58); at 20 it stays at 75° (1.00).
-
-Reference map, same test and settings (`ZamboniReferenceTest`, 2026-10-30), Zamboni with the oblique U-turns:
-
-| Zone | Angle | Pivoted in place | Wear | Pass duration | No pivot (regular cells) | Coverage | Mission |
-|---|---|---|---|---|---|---|---|
-| Jardin d'Eden | 60° | 890 → 350° | 1696 → 1449 | 778 → 745 s | 11 of 14 → 15 of 15 | 99.94 % | 1143 s |
-| Aire de jeux | 151° | 4631 → 3551° | 5518 → 5319 | 1847 → 1832 s | 12 of 27 → 24 of 33 | 99.87 % | 2711 s |
-| Piscine | 75° | 13185 → 7045° | 13938 → 11181 | 4568 → 4527 s | 10 of 72 → 56 of 84 | 99.88 % | 5245 s |
-| Figuier | 75° | 4146 → 3816° | 5278 → 5240 | 1147 → 1105 s | 15 of 31 → 19 of 33 | 99.84 % | 2039 s |
-| Enfer | 140° | 2871° | 2871 | 604 s | no regular cell | 99.96 % | 1706 s |
-| Fosse | 135° | 7622 → 6339° | 7997 → 7816 | 3316 → 3347 s | 5 of 28 → 20 of 36 | 99.96 % | 4750 s |
-| Potager | 150° | 1440° | 2906 → 2980 | 901 → 838 s | 20 of 22 → 21 of 23 | 99.83 % | 1407 s |
-| Map | | ×0.81 → ×0.59 of Zigzag | ×0.94 → ×0.86 | ×1.024 of Zigzag | 73 of 194 → 155 of 224 (69 %) | within 0.15 point of Zigzag | −3.9 to +0.7 % of Zigzag |
-
-Every plan valid, no geometric violation; contiguous share 0.92 on the map (0.89 before, Zigzag 0.83); computation ×1.49
-of Zigzag. Tracking bench (`ZamboniExecutionTest`, Potager and Jardin d'Eden at 30 and 50 %): largest deviation 0.064 to
-0.111 m, no blockage, no pivot in the middle of a pass. A 16 × 11 m rectangle with passes at 30°: 5 of 63 → 33 of 63
-U-turns without pivot (`CoveragePlannerTest`); the remaining pivots lie on the long sides, staggered by 0.43 m per row.
-A user's lawn with a long slanted side: 25 of 68 → 52 of 71 on its main zone (pivoted 7,803° → 3,559°, coverage
-99.99 → 99.85 %, mission −1.0 %), 35 of 55 → 38 of 47 on another (coverage 99.94 → 99.92 %).
 
 First targets of the design note and what was measured instead:
 

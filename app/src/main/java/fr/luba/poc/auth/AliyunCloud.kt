@@ -18,6 +18,7 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
+import kotlinx.coroutines.delay
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -31,11 +32,13 @@ import org.json.JSONObject
  * [identitySeed]: stable per installation, it derives the app identity registered by `/app/aepauth/handle` (PyMammotion
  * `generate_hardware_string`), so that the same phone keeps the same Aliyun app device. [open]: replaced only by the JVM
  * tests (local server). [onStep]: one call per request of the chain, for the diagnostics (never a token or an identifier).
+ * [onRateLimited]: pause in ms imposed by a 429 of the gateway, before the command is sent again ([AliyunRateLimit]).
  */
 class AliyunCloud internal constructor(
     private val mammotion: MammotionCloud,
     private val identitySeed: () -> String,
     private val open: (URL) -> HttpURLConnection,
+    private val rateLimit: AliyunRateLimit = AliyunRateLimit(),
 ) {
     constructor(mammotion: MammotionCloud, context: Context) : this(mammotion, { installSeed(context) }, { it.openConnection() as HttpsURLConnection })
 
@@ -52,6 +55,7 @@ class AliyunCloud internal constructor(
                        val iotToken: String, val iotTokenExpiresAt: Long, val refreshToken: String, val refreshTokenExpiresAt: Long)
 
     @Volatile var onStep: (Step) -> Unit = {}
+    @Volatile var onRateLimited: (Long) -> Unit = {}
     @Volatile private var session: Session? = null
 
     private val seed by lazy { identitySeed() }
@@ -66,6 +70,9 @@ class AliyunCloud internal constructor(
     }
 
     fun clear() { session = null }
+
+    /** Remaining pause after a 429 of the gateway, 0 when commands may be sent. */
+    fun pauseMs(): Long = rateLimit.pauseMs(Clock.now())
 
     /** Valid session: the current one, renewed when its IoT token expires within the hour, otherwise a new sign-in. */
     @Synchronized fun session(): Session {
@@ -130,19 +137,39 @@ class AliyunCloud internal constructor(
 
     /**
      * Protobuf command through `/thing/service/invoke` (`device_protobuf_sync_service`), same [CloudReadOnly] barrier as
-     * [MammotionCloud.invoke]. An IoT token refused (460, 29003) renews the session once.
+     * [MammotionCloud.invoke]. An IoT token refused (460, 29003) renews the session once. Commands are spaced and a 429
+     * pauses them ([AliyunRateLimit]): the command waits for the end of the pause and is sent again, [RATE_LIMIT_RETRIES]
+     * times at most, then [AliyunRateLimitedException]. Suspended, so a reading that ends cancels the wait.
      */
-    fun invoke(payload: ByteArray, iotId: String, nativeReturn: Boolean = false,
-               navReceiver: LubaMsgProto.MsgDevice = LubaMsgProto.MsgDevice.DEV_NAVIGATION) {
+    suspend fun invoke(payload: ByteArray, iotId: String, nativeReturn: Boolean = false,
+                       navReceiver: LubaMsgProto.MsgDevice = LubaMsgProto.MsgDevice.DEV_NAVIGATION) {
         CloudReadOnly.requireAllowed(payload, nativeReturn, navReceiver)
         val params = JSONObject().put("args", JSONObject().put("content", Base64.getEncoder().encodeToString(payload)))
             .put("identifier", "device_protobuf_sync_service").put("iotId", iotId)
-        val s = session()
-        try { gateway(s.apiGateway, "/thing/service/invoke", "1.0.5", params, s.iotToken) } catch (e: CloudResponseException) {
-            if (e.http || e.code !in TOKEN_REFUSED) throw e
-            synchronized(this) { session = null }
-            val renewed = session()
-            gateway(renewed.apiGateway, "/thing/service/invoke", "1.0.5", params, renewed.iotToken)
+        var retries = 0
+        while (true) {
+            delay(rateLimit.reserve(Clock.now()))
+            try { return invokeOnce(params).also { rateLimit.accepted() } } catch (e: AliyunRateLimitedException) {
+                if (++retries > RATE_LIMIT_RETRIES) throw e
+                onRateLimited(e.retryInMs)
+            }
+        }
+    }
+
+    /** One attempt, nothing sent during a pause; a 429 (HTTP status or API code) arms the next pause. */
+    private fun invokeOnce(params: JSONObject) {
+        rateLimit.pauseMs(Clock.now()).takeIf { it > 0 }?.let { throw AliyunRateLimitedException(it) }
+        try {
+            val s = session()
+            try { gateway(s.apiGateway, "/thing/service/invoke", "1.0.5", params, s.iotToken) } catch (e: CloudResponseException) {
+                if (e.http || e.code !in TOKEN_REFUSED) throw e
+                synchronized(this) { session = null }
+                val renewed = session()
+                gateway(renewed.apiGateway, "/thing/service/invoke", "1.0.5", params, renewed.iotToken)
+            }
+        } catch (e: CloudResponseException) {
+            if (e.code != AliyunRateLimit.TOO_MANY_REQUESTS || e.endpoint != "/thing/service/invoke") throw e
+            throw AliyunRateLimitedException(rateLimit.limited(Clock.now()))
         }
     }
 
@@ -244,6 +271,8 @@ class AliyunCloud internal constructor(
         private const val OPEN_ACCOUNT_DOMAIN = "sdk.openaccount.aliyun.com"
         /** IoT token refused: 460 (expired), 29003 (identityId blank). */
         private val TOKEN_REFUSED = setOf(460, 29003)
+        /** Sends again after a 429: 2, so 60 + 120 s of pause at most before giving up. */
+        const val RATE_LIMIT_RETRIES = 2
         /** The IoT token is renewed when it expires within the hour (PyMammotion). */
         private const val TOKEN_MARGIN_MS = 3_600_000L
         private const val MAX_REPLY_BYTES = 4 * 1024 * 1024

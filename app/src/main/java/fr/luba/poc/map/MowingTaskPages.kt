@@ -104,18 +104,7 @@ internal fun MowingTaskPages(
                         Spacer(Modifier.weight(1f))
                     }
                 }
-                if (form.mode == CoverageMode.OPTIMIZED)
-                    InfoNote(tr("Zigzag fitted to the shape: each part takes the direction needing the fewest U-turns.", "Zigzag adapté à la forme : chaque partie prend la direction qui demande le moins de demi-tours."))
-                if (form.mode == CoverageMode.ZAMBONI)
-                    InfoNote(zamboniNote())
-                if (form.mode == CoverageMode.SPIRAL) {
-                    // Direction of the spiral, kept while another mode is chosen.
-                    Column(verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
-                        Text(tr("Spiral direction", "Sens de la spirale"), style = MaterialTheme.typography.bodyLarge)
-                        Segmented(SpiralDirection.entries.map { it to it.label }, form.spiralDirection, { form.spiralDirection = it })
-                    }
-                    InfoNote(spiralNote(form.spiralDirection))
-                }
+                RouteModeOptions(form)
                 if (form.mode.isSurvey) {
                     Segmented(listOf(CoverageMode.TOUR to tr("Full loop", "Grand tour"), CoverageMode.SURVEY_GRID to tr("Grid", "Quadrillage")), form.mode, { form.mode = it })
                     InfoNote(if (form.mode == CoverageMode.TOUR) tr("Blades stopped. Adjacent zones merged: only the shared outer boundary is driven.", "Lames arrêtées. Zones adjacentes fusionnées : seul le contour extérieur commun est parcouru.")
@@ -345,11 +334,44 @@ internal fun zamboniNote(): String = tr(
     "Experimental. Passes taken a few rows apart with rolling U-turns, while the mowed part advances as one block: a stop leaves no isolated stripe. Relies on 0.35 m turns not yet validated on the robot.",
     "Expérimental. Passes prises à quelques rangs d'écart avec des demi-tours en roulant, la partie tondue avançant d'un seul bloc : un arrêt ne laisse pas de bande isolée. Repose sur des virages de 0,35 m pas encore validés sur le robot.")
 
+/** Options and note of the chosen mowing mode: Optimized note, Zamboni blocks, Spiral direction (kept while another mode
+ * is chosen). */
+@Composable
+private fun RouteModeOptions(form: MowingTaskForm) {
+    if (form.mode == CoverageMode.OPTIMIZED)
+        InfoNote(tr("Zigzag fitted to the shape: each part takes the direction needing the fewest U-turns.", "Zigzag adapté à la forme : chaque partie prend la direction qui demande le moins de demi-tours."))
+    if (form.mode == CoverageMode.ZAMBONI) {
+        InfoNote(zamboniNote())
+        // Blocks ordered in Zamboni, kept while another mode is chosen.
+        Column(verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+            Text(tr("Zamboni blocks", "Blocs en Zamboni"), style = MaterialTheme.typography.bodyLarge)
+            Segmented(ZamboniBlocks.entries.map { it to it.label }, form.zamboniBlocks, { form.zamboniBlocks = it })
+        }
+        InfoNote(zamboniBlocksNote(form.zamboniBlocks, form.spacing.toDouble()))
+    }
+    if (form.mode == CoverageMode.SPIRAL) {
+        // Direction of the spiral, kept while another mode is chosen.
+        Column(verticalArrangement = Arrangement.spacedBy(Dimens.Sm)) {
+            Text(tr("Spiral direction", "Sens de la spirale"), style = MaterialTheme.typography.bodyLarge)
+            Segmented(SpiralDirection.entries.map { it to it.label }, form.spiralDirection, { form.spiralDirection = it })
+        }
+        InfoNote(spiralNote(form.spiralDirection))
+    }
+}
+
+/** Note of the Zamboni blocks setting: the fewest passes (and width) of a block ordered in Zamboni at this [spacing]. */
+internal fun zamboniBlocksNote(blocks: ZamboniBlocks, spacing: Double): String {
+    val passes = blocks.minPasses(TurnOrder.step(spacing.coerceAtLeast(0.05), TurnOptimizer.FOLLOW_RADIUS_M))
+    val width = Format.num(passes * spacing, 2)
+    return tr("Uneven borders and no-go zones cut the zone into blocks: blocks of at least $passes passes ($width m) are mowed in Zamboni, smaller ones in zigzag. Smaller blocks follow the uneven borders, with more short runs.",
+        "Les bordures irrégulières et les zones interdites découpent la zone en blocs : les blocs d'au moins $passes passes ($width m) sont tondus en Zamboni, les plus petits en zigzag. Des blocs plus petits suivent les bordures irrégulières, avec plus de courtes séries.")
+}
+
 /** Note of the Spiral mode in its [direction]: what it does, its zigzag parts and fallback, and that its turns are not
  * validated on the robot yet. */
 internal fun spiralNote(direction: SpiralDirection = SpiralDirection.FROM_EDGE): String = if (direction == SpiralDirection.FROM_CENTRE) tr(
-    "Experimental. Passes parallel to the boundary, joined into a spiral driven from the centre out to the boundary without U-turns; the centre is mowed in zigzag first, the tight corners in zigzag too. A zone where the spiral would mow less is mowed in zigzag (shown in the preview). Relies on 0.35 m turns not yet validated on the robot.",
-    "Expérimental. Passes parallèles au contour, reliées en spirale parcourue du centre vers le contour sans demi-tour ; le centre est d'abord tondu en zigzag, les coins serrés aussi. Une zone où la spirale tondrait moins est tondue en zigzag (signalé dans l'aperçu). Repose sur des virages de 0,35 m pas encore validés sur le robot.")
+    "Experimental. Passes parallel to the boundary, joined into a spiral driven from the centre out to the boundary without U-turns; the centre is mowed in zigzag first, the tight corners in zigzag too, the border laps last. A zone where the spiral would mow less is mowed in zigzag (shown in the preview). Relies on 0.35 m turns not yet validated on the robot.",
+    "Expérimental. Passes parallèles au contour, reliées en spirale parcourue du centre vers le contour sans demi-tour ; le centre est d'abord tondu en zigzag, les coins serrés aussi, les tours de bordure en dernier. Une zone où la spirale tondrait moins est tondue en zigzag (signalé dans l'aperçu). Repose sur des virages de 0,35 m pas encore validés sur le robot.")
 else tr(
     "Experimental. Passes parallel to the boundary, joined into an inward spiral without U-turns; the centre and the tight corners are finished in zigzag. A zone where the spiral would mow less is mowed in zigzag (shown in the preview). Relies on 0.35 m turns not yet validated on the robot.",
     "Expérimental. Passes parallèles au contour, reliées en spirale vers l'intérieur sans demi-tour ; le centre et les coins serrés sont finis en zigzag. Une zone où la spirale tondrait moins est tondue en zigzag (signalé dans l'aperçu). Repose sur des virages de 0,35 m pas encore validés sur le robot.")

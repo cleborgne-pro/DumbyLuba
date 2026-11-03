@@ -11,6 +11,9 @@ internal object AutomaticPlanner {
     /** Accepted extra cost (route score of the zone) to mow a whole side before moving on rather than following the
      * nearest link. */
     const val BAR_TOLERANCE = 0.02
+    /** Spiral from the centre ([Preview.outwardRuns]): the border loops after the chains, which grow out to them, so that
+     * the zone starts at its centre and ends on its edge. */
+    private fun bordersFirst(c: PlanningConfig, geometry: Preview) = c.bordersFirst && geometry.outwardRuns.isEmpty()
     internal fun sameCoveragePaths(a: List<List<Point>>,b: List<List<Point>>): Boolean {
         fun signatures(paths: List<List<Point>>) = paths.map { setOf(it,it.reversed()) }.toSet()
         return signatures(a)==signatures(b)
@@ -82,7 +85,7 @@ internal object AutomaticPlanner {
                 // Several bars often give the same order: mission cost evaluated once per order.
                 val costs=HashMap<List<List<Point>>,Double>()
                 fun schedule(all: Boolean,bar: LocalMowingOrder.SweepBar?,first: Int?): Pair<Preview,Double>? = try {
-                    val p=LocalMowingOrder.schedule(geometry,entry,c.bordersFirst,c.nearbyNoGo,
+                    val p=LocalMowingOrder.schedule(geometry,entry,bordersFirst(c,geometry),c.nearbyNoGo,
                         { before,after -> evaluator.linkCost(before ?: previous,after) },
                         { t.envelope.pathCollision(it)==null },checkpoint,
                         entryDistance={ evaluator.linkDistance(previous,it) },
@@ -156,7 +159,7 @@ internal object AutomaticPlanner {
                                     return evaluator.pathCost(listOf(before?.last() ?: entry,after?.first() ?: request.finish),
                                         incoming,outgoing,false)
                                 }
-                                val ordered=LocalMowingOrder.schedule(preview,entry,c.bordersFirst,c.nearbyNoGo,
+                                val ordered=LocalMowingOrder.schedule(preview,entry,bordersFirst(c,preview),c.nearbyNoGo,
                                     { before,after -> proxyLink(before,after) },{ true },checkpoint,rotateLoops=false)
                                 val paths=ordered.cuttingPaths
                                 paths.sumOf { evaluator.pathCost(it) }+paths.indices.sumOf { i ->
@@ -170,7 +173,7 @@ internal object AutomaticPlanner {
                         val geometry=try { CoveragePlanner.plan(zone.points,t.holes,c.spacingM,c.marginM,mode,c.borders,
                             c.borderPasses,c.noGoPasses,t.obstacleDiscs,request.robot,
                             c.boundary==BoundaryMeaning.RECORDED_TRACE,entry,
-                            sweepOptions=if(mode.isSurvey) null else SweepOptions(angles),continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,obliqueTurns=c.zamboniObliqueTurns,
+                            sweepOptions=if(mode.isSurvey) null else SweepOptions(angles),continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,zamboniOptions=c.zamboniOptions,
                             orientationRule=rule,observeAutomatic=if(rule==null) null else { p -> automatic=p },
                             observeCandidate=if(mode.isSurvey) null else { preview ->
                                 // Historical reference chosen in the order of the orientations.
@@ -194,7 +197,7 @@ internal object AutomaticPlanner {
                                 CoveragePlanner.plan(zone.points,t.holes,c.spacingM,c.marginM,mode,c.borders,
                                     c.borderPasses,c.noGoPasses,t.obstacleDiscs,request.robot,
                                     c.boundary==BoundaryMeaning.RECORDED_TRACE,entry,sweepOptions=SweepOptions(listOf(r.angle)),
-                                    continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,obliqueTurns=c.zamboniObliqueTurns)
+                                    continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,zamboniOptions=c.zamboniOptions)
                                     .takeUnless { sameCoveragePaths(it.runs,r.runs) }
                             } catch(e: IllegalArgumentException) { null }
                             catch(e: org.locationtech.jts.geom.TopologyException) { null }
@@ -206,7 +209,7 @@ internal object AutomaticPlanner {
                             CoveragePlanner.plan(zone.points,t.holes,c.spacingM,c.marginM,mode,c.borders,
                                 c.borderPasses,c.noGoPasses,t.obstacleDiscs,request.robot,
                                 c.boundary==BoundaryMeaning.RECORDED_TRACE,entry,sweepOptions=SweepOptions(listOf(auto.angle),rule.phase),
-                                continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,obliqueTurns=c.zamboniObliqueTurns,
+                                continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,zamboniOptions=c.zamboniOptions,
                                 candidateCost=rank,checkpoint=checkpoint)
                         }
                         // Spiral from the centre: the same zone planned from the edge, used if no order from the centre has safe
@@ -215,7 +218,7 @@ internal object AutomaticPlanner {
                             CoveragePlanner.plan(zone.points,t.holes,c.spacingM,c.marginM,mode,c.borders,
                                 c.borderPasses,c.noGoPasses,t.obstacleDiscs,request.robot,
                                 c.boundary==BoundaryMeaning.RECORDED_TRACE,entry,sweepOptions=SweepOptions(angles),
-                                continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,obliqueTurns=c.zamboniObliqueTurns,
+                                continuous=true,outerOffsetM=c.outerOffsetM,turnStyle=c.turnStyle,speedMps=c.speedMps,cutWidthM=c.cutWidthM,zamboniOptions=c.zamboniOptions,
                                 candidateCost=rank,checkpoint=checkpoint,spiralDirection=SpiralDirection.FROM_EDGE)
                                 .let { p -> p.copy(zoneReorderedCells=listOf(if(p.zoneModes==listOf(CoverageMode.SPIRAL)) -1 else 0)) }
                         }

@@ -9,7 +9,7 @@ import kotlin.math.roundToInt
 /**
  * Last settings of the mowing task (Map → Mow → Task settings), restored on the next opening and after an app restart:
  * cutting height, passes of decreasing height ([CutPasses]), task speed, route mode, pass spacing, perimeter and
- * no-go zone loops, border order, U-turns, direction of the passes, direction of the spiral, recharge thresholds. The outer loop offset has its own saved setting
+ * no-go zone loops, border order, U-turns, direction of the passes, direction of the spiral, Zamboni blocks, recharge thresholds. The outer loop offset has its own saved setting
  * ([OuterOffsetSetting]), and so does the travel speed (`RobotBle`).
  * Values read back are clamped to the slider ranges: an old or corrupted file cannot impose anything else.
  */
@@ -37,6 +37,8 @@ data class MowingTaskSettings(
     val manualAngleDeg: Int = 0,
     /** Spiral mode: from the edge inwards or from the centre outwards ([SpiralDirection]); kept while another mode is chosen. */
     val spiralDirection: SpiralDirection = SpiralDirection.FROM_EDGE,
+    /** Zamboni mode: blocks ordered in Zamboni ([ZamboniBlocks]); kept while another mode is chosen. */
+    val zamboniBlocks: ZamboniBlocks = ZamboniBlocks.LARGE,
 ) {
     /** Pass heights, from the first to the last ([heightMm]), within the cutting heights of the robot. */
     fun passHeights(range: CutHeightRange = CutHeightRange.STANDARD): List<Int> =
@@ -107,6 +109,7 @@ class MowingTaskStore(context: Context) {
             orientation = runCatching { OrientationMode.valueOf(prefs.getString("orientation_mode", d.orientation.name) ?: d.orientation.name) }.getOrDefault(d.orientation),
             manualAngleDeg = prefs.getInt("manual_angle_deg", d.manualAngleDeg),
             spiralDirection = runCatching { SpiralDirection.valueOf(prefs.getString("spiral_direction", d.spiralDirection.name) ?: d.spiralDirection.name) }.getOrDefault(d.spiralDirection),
+            zamboniBlocks = runCatching { ZamboniBlocks.valueOf(prefs.getString("zamboni_blocks", d.zamboniBlocks.name) ?: d.zamboniBlocks.name) }.getOrDefault(d.zamboniBlocks),
         ).sanitized()
     }
 
@@ -130,6 +133,7 @@ class MowingTaskStore(context: Context) {
             putString("orientation_mode", s.orientation.name)
             putInt("manual_angle_deg", s.manualAngleDeg)
             putString("spiral_direction", s.spiralDirection.name)
+            putString("zamboni_blocks", s.zamboniBlocks.name)
         }
     }
 }

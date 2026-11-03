@@ -73,7 +73,8 @@ fun AccountScreen(model: CloudViewModel, state: CloudUi, onOpenMap: () -> Unit =
             // Full account read on opening (state, maintenance, history, firmware).
             LaunchedEffect(Unit) { model.refreshAccount() }
             if (state.selected != null) AccountRobotPanel(state, model::refreshAccount, onStartFirmwareUpdate = model::startFirmwareUpdate,
-                onFollowFirmwareUpdate = model::followFirmwareUpdate, onStopFirmwareFollow = model::stopFirmwareFollow)
+                onFollowFirmwareUpdate = model::followFirmwareUpdate, onStopFirmwareFollow = model::stopFirmwareFollow,
+                onFirmwareOffersChange = model::setFirmwareOffers)
             SettingsGroup(title = "Session") {
                 SecondaryPillButton(tr("Sign out", "Déconnexion"), model::logout, Modifier.fillMaxWidth(), enabled = !state.busy, icon = Icons.AutoMirrored.Rounded.Logout)
                 if (state.accountSaved) ForgetAction(state.busy) { model.forgetAccount(); email = ""; password = "" }

@@ -127,7 +127,11 @@ class ZamboniReferenceTest {
             // the mean of the map (measured 0.89 against 0.83 for the zigzag).
             val mean = listOf(zs[1], zs[2], zs[3]).average()
             means += mean to listOf(gs[1], gs[2], gs[3]).average()
-            if (mean < 0.65) failures += "$name: mean contiguous share %.2f at 25/50/75 %%".format(mean)
+            // Piscine: since the U-turns follow the border (2026-11-03), the ranking of the orientations takes 59° instead of
+            // 75°, where the order of its blocks leaves the mowed part in pieces (0.58); the ranking estimates the links,
+            // the evaluated mission would keep 75° (5154 s against 5319 s). Accepted by the user, floor 0.55 there.
+            val floor = if (name == "Piscine") 0.55 else 0.65
+            if (mean < floor) failures += "$name: mean contiguous share %.2f at 25/50/75 %%".format(mean)
             totals = doubleArrayOf(totals[0] + zigzag.pivots, totals[1] + zamboni.pivots, totals[2] + zigzag.wear, totals[3] + zamboni.wear,
                 totals[4] + zigzag.duration, totals[5] + zamboni.duration, totals[6] + lawn.duration, totals[7] + zigzag.seconds, totals[8] + zamboni.seconds)
             // Per zone: pass duration (pivots and wear are judged on the whole map, below). Against Lawn friendly the target was

@@ -44,7 +44,10 @@ data class TurnPlan(val kind: TurnKind, val points: List<Point>, val trimA: Doub
                     val tight: Boolean = false, val refusal: String? = null,
                     /** Oblique U ([TurnOptimizer.TurnContext.obliqueUnsweptM]): metres of shortened pass the manoeuvre does
                      * not sweep, in the acute corner of a slanted border. */
-                    val unsweptM: Double = 0.0) {
+                    val unsweptM: Double = 0.0,
+                    /** Rolling U that runs into the band of the border loops, out of the area of the passes
+                     * ([TurnOptimizer.TurnContext.alongBorder]). */
+                    val alongBorder: Boolean = false) {
     val possible: Boolean get() = refusal == null
     fun score(style: TurnStyle): Double = when (style) {
         TurnStyle.FAST -> durationS + 0.02 * wear + if (tight) TIGHT_PENALTY else 0.0
@@ -108,7 +111,11 @@ object TurnOptimizer {
                       val cutWidthM: Double = spacingM,
                       /** Oblique U along a slanted border: pass end each pass may leave unswept (0: none, every shortened
                        * part swept). */
-                      val obliqueUnsweptM: Double = 0.0)
+                      val obliqueUnsweptM: Double = 0.0,
+                      /** With the oblique U-turns ([obliqueUnsweptM] > 0, Zamboni): a rolling U refused by [drivable] may
+                       * still follow the border, into the band of the border loops, when this accepts the whole stretch
+                       * (chassis at the margin of the loops); null: never. */
+                      val alongBorder: ((List<Point>) -> Boolean)? = null)
 
     private data class Frame(val end: Point, val dir: Point, val left: Point, val side: Double, val lateral: Double, val along: Double)
 
@@ -323,10 +330,13 @@ object TurnOptimizer {
                          bStart: Point, dirB: Point, leads: Pair<Double, Double>, context: TurnContext): TurnPlan {
         val stretch = listOf(at(aEnd, dirA, -leads.first)) + points + listOf(at(bStart, dirB, leads.second))
         val path = stretch.fold(mutableListOf<Point>()) { acc, p -> if (acc.isEmpty() || acc.last().distance(p) > 1e-6) acc.add(p); acc }
-        if (!context.drivable(path)) return TurnPlan(kind, points, trimA, trimB, refusal = tr("Outside the safe surface or the chassis envelope",
+        val inside = context.drivable(path)
+        val alongBorder = !inside && kind == TurnKind.U_ARC && context.obliqueUnsweptM > 0 && context.alongBorder?.invoke(path) == true
+        if (!inside && !alongBorder) return TurnPlan(kind, points, trimA, trimB, refusal = tr("Outside the safe surface or the chassis envelope",
             "Hors de la surface sûre ou de l'enveloppe du châssis"))
         val drive = drive(path, context.speedMps, context.robot)
-        return TurnPlan(kind, points, trimA, trimB, drive.durationS, drive.pivotDegrees, drive.wear, tight = !context.roomy(path))
+        return TurnPlan(kind, points, trimA, trimB, drive.durationS, drive.pivotDegrees, drive.wear, tight = !context.roomy(path),
+            alongBorder = alongBorder)
     }
 
     /** Time, degrees pivoted in place and wear index of driving [path] at [speedMps] with the tracking rules. */

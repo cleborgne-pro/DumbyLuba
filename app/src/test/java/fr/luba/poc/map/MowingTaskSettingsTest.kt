@@ -122,6 +122,27 @@ class MowingTaskSettingsTest {
         assertEquals("Spirale depuis le bord (expérimental)", spiralSummary(SpiralDirection.FROM_EDGE))
     }
 
+    @Test fun zamboniBlocksAreKeptByNameAndDefaultToLargeBlocks() {
+        val store = MowingTaskStore(context)
+        val prefs = context.getSharedPreferences("mowing_task", 0)
+        assertEquals(ZamboniBlocks.LARGE, MowingTaskSettings().zamboniBlocks)
+        val chosen = MowingTaskSettings(mode = CoverageMode.ZAMBONI, zamboniBlocks = ZamboniBlocks.ALL)
+        store.write(chosen)
+        assertEquals(chosen, MowingTaskStore(context).read())
+        assertEquals("ALL", prefs.getString("zamboni_blocks", null))
+        // Kept while another mode is chosen; an unknown name or a file written before the setting reads back as Large.
+        store.write(chosen.copy(mode = CoverageMode.LINES))
+        assertEquals(ZamboniBlocks.ALL, MowingTaskStore(context).read().zamboniBlocks)
+        prefs.edit().clear().putString("mode", CoverageMode.ZAMBONI.name).putString("zamboni_blocks", "TINY").commit()
+        assertEquals(ZamboniBlocks.LARGE, MowingTaskStore(context).read().zamboniBlocks)
+        prefs.edit().clear().putString("mode", CoverageMode.ZAMBONI.name).commit()
+        assertEquals(ZamboniBlocks.LARGE, MowingTaskStore(context).read().zamboniBlocks)
+        // Labels and note at 25 cm (unit tests run in French).
+        assertEquals(listOf("Grands", "Moyens aussi", "Tous"), ZamboniBlocks.entries.map { it.label })
+        assertTrue(zamboniBlocksNote(ZamboniBlocks.LARGE, 0.25), zamboniBlocksNote(ZamboniBlocks.LARGE, 0.25).contains("au moins 8 passes (2,00 m)"))
+        assertTrue(zamboniBlocksNote(ZamboniBlocks.ALL, 0.25).contains("au moins 4 passes (1,00 m)"))
+    }
+
     @Test fun returnReserveIsKeptAndBoundedByTheLowThreshold() {
         val store = MowingTaskStore(context)
         store.write(MowingTaskSettings(chargeLow = 25f, chargeHigh = 90f, returnReserve = 15f))

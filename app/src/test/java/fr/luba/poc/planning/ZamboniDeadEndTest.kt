@@ -30,8 +30,9 @@ class ZamboniDeadEndTest {
 
     @Test(timeout = 600_000) fun aDeadEndIsOrderedLikeZigzagAndWarned() {
         // 0° no longer leads to a dead end since the U-turns are costed at the speed the tracking drives them (turn
-        // tracking, step C): the Zamboni order is found there (8 cells, 81 m of transit against 104 m in Zigzag).
-        for (angle in listOf(115, 155)) {
+        // tracking, step C): the Zamboni order is found there (8 cells, 81 m of transit against 104 m in Zigzag); nor
+        // 115° since the U-turns follow the border (8 cells).
+        for (angle in listOf(155)) {
             val zigzag = RoutePlanning.calculate(request(angle), CoverageMode.LINES).selected
             assertTrue("zigzag $angle°: ${zigzag.diagnostics}", zigzag.valid)
             val zamboni = RoutePlanning.calculate(request(angle), CoverageMode.ZAMBONI)
@@ -48,7 +49,10 @@ class ZamboniDeadEndTest {
         }
     }
 
-    /** Manual 10°: the oblique U-turns leave no safe link to the remaining blocks, the route is computed without them. */
+    /**
+     * Manual 10°: with the oblique U-turns following the border, the Zamboni order of the zone has no safe link to the
+     * remaining blocks (zigzag order); without them it has one: the route is computed without them.
+     */
     @Test(timeout = 600_000) fun obliqueTurnsWithoutSafeRouteAreDropped() {
         val zamboni = RoutePlanning.calculate(request(10), CoverageMode.ZAMBONI).selected
         assertTrue("${zamboni.status} ${zamboni.diagnostics}", zamboni.valid)
@@ -57,5 +61,6 @@ class ZamboniDeadEndTest {
         val withoutOblique = RoutePlanning.calculate(request(10).let { it.copy(config = it.config.copy(zamboniObliqueTurns = false)) },
             CoverageMode.ZAMBONI).selected
         assertEquals(withoutOblique.planHash, zamboni.planHash)
+        assertTrue("${zamboni.preview!!.zoneReorderedCells}", zamboni.preview!!.zoneReorderedCells.single() > 0)
     }
 }

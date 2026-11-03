@@ -25,14 +25,23 @@ planner_changed() {
   [ -n "$build_lines" ] && grep -qvE '^[-+] *version(Name|Code) = ' <<< "$build_lines"
 }
 
+# Gradle run that includes the planner sweeps: once it passes, the sources are recorded (tools/planner-sweeps.sh) so
+# that the publication does not run the sweeps again on them; not recorded if the sources changed during the run.
+with_sweeps() {
+  local before
+  before="$(tools/planner-sweeps.sh fingerprint .)"
+  ./gradlew "$@"
+  if [ "$(tools/planner-sweeps.sh fingerprint .)" = "$before" ]; then tools/planner-sweeps.sh record "$before"; fi
+}
+
 case "${1:-quick}" in
   quick) ./gradlew :app:assembleFold :app:testFoldUnitTest ;;
-  planner) ./gradlew :app:testFoldPlannerSweeps ;;
-  full) ./gradlew :app:assembleFold :app:testFoldUnitTest :app:testFoldPlannerSweeps :app:lintFold ;;
+  planner) with_sweeps :app:testFoldPlannerSweeps ;;
+  full) with_sweeps :app:assembleFold :app:testFoldUnitTest :app:testFoldPlannerSweeps :app:lintFold ;;
   auto)
     if planner_changed; then
       echo ">> Build + tests + lint (planner touched: full suite)"
-      ./gradlew :app:assembleFold :app:testFoldUnitTest :app:testFoldPlannerSweeps :app:lintFold
+      with_sweeps :app:assembleFold :app:testFoldUnitTest :app:testFoldPlannerSweeps :app:lintFold
     else
       echo ">> Build + tests + lint (planner untouched: without the planner sweeps, DEPLOY_FULL_TESTS=1 to run them)"
       ./gradlew :app:assembleFold :app:testFoldUnitTest :app:lintFold

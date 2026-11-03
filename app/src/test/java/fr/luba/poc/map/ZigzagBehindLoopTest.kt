@@ -36,7 +36,15 @@ class ZigzagBehindLoopTest {
                 val inside = org.locationtech.jts.operation.union.UnaryUnionOp.union(polygons)
                 var worst = Double.POSITIVE_INFINITY
                 var worstPoint: Point? = null
-                preview.runs.flatten().forEach { p ->
+                // Narrow passage passes ([NarrowPassages]) run along a neck that no loop reaches: at the loop distance at most.
+                val necks = preview.runs.filterIndexed { i, _ -> (preview.runCellIds.getOrNull(i) ?: 0) >= NarrowPassages.NECK_CELL }
+                val sweep = preview.runs - necks.toSet()
+                necks.flatten().minOfOrNull { distanceToBoundary(it, zone.points) }?.let { neckMin ->
+                    val loopDistance = RecordedBoundary.centerInsetM(fr.luba.poc.obstacles.RobotEnvelope.LUBA2) + offset
+                    if (neckMin < loopDistance - 0.01) failures += "$name, margin ${(offset * 100).toInt()} cm: narrow passage pass " +
+                        "${"%.3f".format(neckMin)} m from the boundary, loop distance ${"%.3f".format(loopDistance)} m"
+                }
+                sweep.flatten().forEach { p ->
                     val point = factory.createPoint(Coordinate(p.x, p.y))
                     // Point behind a no-go zone (notch of the loop): outside the loop polygon, checked by the safe area.
                     if (!inside.covers(point)) return@forEach
@@ -47,7 +55,7 @@ class ZigzagBehindLoopTest {
                     "${"%.3f".format(worst)} m from the loop at $worstPoint"
                 // No pass beyond the loop, on the boundary side: closer to the boundary than the nearest loop.
                 val loopMin = loops.minOf { loop -> loop.minOf { q -> distanceToBoundary(q, zone.points) } }
-                val runMin = preview.runs.flatten().minOf { distanceToBoundary(it, zone.points) }
+                val runMin = sweep.flatten().minOf { distanceToBoundary(it, zone.points) }
                 if (runMin < loopMin + CoveragePlanner.ZIGZAG_LOOP_INSET_M - 0.01) failures += "$name, margin ${(offset * 100).toInt()} cm: pass " +
                     "${"%.3f".format(runMin)} m from the boundary, loop at ${"%.3f".format(loopMin)} m"
             }

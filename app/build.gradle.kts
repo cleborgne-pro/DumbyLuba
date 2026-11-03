@@ -30,8 +30,8 @@ android {
         applicationId = "fr.luba.poc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 188
-        versionName = "1.18.0"
+        versionCode = 189
+        versionName = "1.19.0"
         testInstrumentationRunner = "fr.luba.poc.planning.PlannerDeviceBenchmark"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -126,7 +126,7 @@ dependencies {
 // cannot change their result; tools/deploy.sh runs them, with the sweeps, as soon as it does.
 val plannerSweeps = listOf("**/ReferenceMapPlannerTest*", "**/ReferenceMapPlannerZamboniSpiralTest*", "**/ReferenceTransitTest*",
     "**/ReferenceSimulationTest*", "**/ZamboniQaTest*", "**/ZamboniQaSpacingTest*", "**/ZamboniManualAngleReproTest*", "**/ZamboniReferenceTest*", "**/ZamboniOrderPropertyTest*",
-    "**/OrientationAcceptanceTest*", "**/OrientationReferenceTest*", "**/SpiralReferenceTest*", "**/SpiralDirectionTest*",
+    "**/OrientationAcceptanceTest*", "**/OrientationReferenceTest*", "**/SpiralReferenceTest*", "**/SpiralDirectionTest*", "**/NarrowPassageReferenceTest*",
     "**/StartTransitTest*", "**/TurnStyleReferenceTest*", "**/OuterOffsetCoverageTest*",
     "**/FastPipelineTest*", "**/OptimizedModeTest*", "**/DockObstaclePreviewTest*", "**/ZamboniDeadEndTest*", "**/SpiralCentreResumeTest*",
     "**/ObstacleBypassTest*", "**/BorderMarginChassisTest*", "**/ReturnReserveTest*", "**/SmartResumeReferenceTest*", "**/BorderClearanceTest*",

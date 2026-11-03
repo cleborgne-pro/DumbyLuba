@@ -525,6 +525,19 @@ class CloudViewModelTest {
         assertTrue(vm.state.value.connected)
     }
 
+    @Test fun `firmware updates turned off never start, the choice is kept across restarts and sign-out`() {
+        val vm = readyForUpdate()
+        vm.setFirmwareOffers(false)
+        vm.startFirmwareUpdate()
+        assertEquals("Mise à jour non lancée : Non proposée : mises à jour du firmware désactivées", vm.state.value.firmwareUpdate.status)
+        assertTrue(server.requests.none { it.path == "/device-server/v1/ota/device/upgrade" })
+        assertFalse(model().state.value.firmwareOffers)
+        vm.logout()
+        assertFalse(vm.state.value.firmwareOffers)
+        vm.setFirmwareOffers(true)
+        assertTrue(model().state.value.firmwareOffers)
+    }
+
     @Test fun `local mode refused while a firmware update is followed`() {
         val vm = readyForUpdate()
         vm.startFirmwareUpdate()

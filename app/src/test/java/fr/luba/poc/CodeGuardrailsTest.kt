@@ -168,7 +168,7 @@ class CodeGuardrailsTest {
         /** Functions already longer ("file#name", longest of that name in the file): their length is a ceiling. */
         val LONG_FUNCTIONS = mapOf(
             "fr/luba/poc/ble/RouteOrchestrator.kt#startRoute" to 167,
-            "fr/luba/poc/map/CoveragePlanner.kt#plan" to 706,
+            "fr/luba/poc/map/CoveragePlanner.kt#plan" to 638,
             "fr/luba/poc/map/MapScreen.kt#MapScreenContent" to 543,
             "fr/luba/poc/map/MapCorrectionEditor.kt#MapCorrectionEditor" to 432,
             "fr/luba/poc/ble/NavigationRunner.kt#runMapNavTest" to 347,
@@ -185,7 +185,6 @@ class CodeGuardrailsTest {
             "fr/luba/poc/ble/RouteOrchestrator.kt" to 1920,
             "fr/luba/poc/simulation/Simulation.kt" to 879,
             "fr/luba/poc/ble/NavigationRunner.kt" to 917,
-            "fr/luba/poc/map/CoveragePlanner.kt" to 788,
         )
     }
 }

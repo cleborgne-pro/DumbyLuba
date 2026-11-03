@@ -25,11 +25,13 @@ object CoverageEngine {
         require(mode!=CoverageMode.LINES)
         if(mode==CoverageMode.OPTIMIZED) return planOptimized(input,checkpoint)
         val planned=AutomaticPlanner.plan(input,mode,checkpoint)
-        if(mode!=CoverageMode.ZAMBONI || !input.config.zamboniObliqueTurns || planned.selected.valid) return planned
-        // Zamboni whose oblique U-turns leave no valid route (Aire de jeux at a manual 10°: no safe link to the remaining
-        // blocks): the route without them, kept if valid.
+        fun deadEnds(result: PlanningResult)=result.selected.preview?.zoneReorderedCells?.count { it<0 } ?: 0
+        if(mode!=CoverageMode.ZAMBONI || !input.config.zamboniObliqueTurns || planned.selected.valid && deadEnds(planned)==0) return planned
+        // Zamboni whose oblique U-turns leave no valid route, or a zone without a safe link in the Zamboni order, mowed in
+        // the zigzag order (Aire de jeux at a manual 10°, the U-turns following the border): the route without them, kept
+        // if valid with fewer such zones.
         val plain=AutomaticPlanner.plan(input.copy(config=input.config.copy(zamboniObliqueTurns=false)),mode,checkpoint)
-        return if(plain.selected.valid) plain else planned
+        return if(plain.selected.valid && (!planned.selected.valid || deadEnds(plain)<deadEnds(planned))) plain else planned
     }
     /** Mixed orientations kept only if the complete evaluated mission (actual links,
      * U-turns, pivot duration measured on the robot) does at least as well as the simple

@@ -179,6 +179,13 @@ class CloudRobotActionsTest {
         assertNotNull(FirmwareUpdatePolicy.refusal(null, RobotDetails()))
     }
 
+    @Test fun `no update offered when turned off or on a read-only model`() {
+        assertNull(FirmwareUpdatePolicy.offerRefusal(true, "Luba-VSDEMO1"))
+        assertEquals("Non proposée : mises à jour du firmware désactivées", FirmwareUpdatePolicy.offerRefusal(false, "Luba-VSDEMO1"))
+        // LUBA 1 of DumbyLuba#3: read-only, updated from the Mammotion app only.
+        assertEquals("Non proposée : modèle en lecture seule, mettre à jour son firmware depuis l’app Mammotion", FirmwareUpdatePolicy.offerRefusal(true, "Luba-DEMO1"))
+    }
+
     @Test fun `cloud cause read from version check`() {
         val json = org.json.JSONObject("""{"code":0,"data":[{"deviceId":"iot1","currentVersion":"1.15.0","upgradeable":false,"isupgrading":false,"progress":0,"causeMsg":"Batterie trop faible"}]}""")
         assertEquals("Batterie trop faible", AccountJson.firmware(json, "iot1")?.cause)
